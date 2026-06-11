@@ -1,0 +1,33 @@
+{
+  "_comment": "SYNTHETIC findings export in DefectDojo style. Targets are the local OWASP Juice Shop lab container only. No real engagement data.",
+  "scan_type": "Manual pentest",
+  "findings": [
+    {
+      "title": "SQL injection in product search",
+      "severity": "Critical",
+      "description": "The q parameter of the product search endpoint is concatenated into a SQL query without sanitization, allowing UNION-based injection.",
+      "steps_to_reproduce": "1. Browse to http://localhost:3000/#/search\n2. Submit the payload qwert')) UNION SELECT id, email, password, '4', '5', '6', '7', '8', '9' FROM Users--\n3. Observe user records rendered in the product grid",
+      "endpoints": ["http://localhost:3000/rest/products/search"],
+      "cwe": 89,
+      "found_by": ["manual-pentest"],
+      "references": "https://owasp.org/Top10/A03_2021-Injection/"
+    },
+    {
+      "title": "Reflected XSS in search box",
+      "severity": "High",
+      "description": "Search input is reflected into the DOM without encoding, executing attacker-controlled markup.",
+      "steps_to_reproduce": "1. Browse to http://localhost:3000/#/search?q=<iframe src=\"javascript:alert('xss')\">\n2. Observe the alert dialog firing",
+      "endpoints": ["http://localhost:3000/#/search"],
+      "cwe": 79,
+      "tags": ["xss", "frontend"]
+    },
+    {
+      "title": "Verbose error page discloses stack traces",
+      "severity": "Low",
+      "description": "Requesting a malformed route returns a full Express stack trace, revealing framework internals and file paths.",
+      "endpoints": ["http://localhost:3000/rest/qwertz"],
+      "mitigation": "Return a generic error page in production mode.",
+      "nb_occurences": 1
+    }
+  ]
+}

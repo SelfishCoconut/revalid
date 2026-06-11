@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest run
 
 lint:
 	uv run ruff check src tests
@@ -21,6 +21,14 @@ test-system:
 	uv run pytest -m system --no-cov
 
 test: test-unit test-integration test-system
+
+# FR-02 walking-skeleton demo: ingest the synthetic sample, print what persisted
+demo-ingest:
+	uv run python scripts/demo/ingest_defectdojo.py
+
+# Local web app — localhost only (NFR-03)
+run:
+	uv run uvicorn --factory revalid.app:create_app --host 127.0.0.1 --port 8000
 
 # Mechanical signals consumed by the codebase-sanity agent (see docs/development-plan.md §5)
 sanity:
