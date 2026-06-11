@@ -2,6 +2,8 @@
 
 AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TFG) at ESII-UCLM by Álvaro Navarro. Full proposal: `docs/tfg_description`. Environment design: `docs/development-plan.md`.
 
+**Resuming work? Read `docs/roadmap.md` first** — it holds the current state, the milestone plan, and the next action. Keep it updated in the same PR whenever milestone state changes.
+
 ## Roles & authorship (Reglamento TFG 2026 §6 — non-negotiable)
 
 - Álvaro makes all design decisions and reviews/validates ALL AI output. Claude assists; it never decides scope or architecture unilaterally.
