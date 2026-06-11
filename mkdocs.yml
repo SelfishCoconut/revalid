@@ -52,5 +52,6 @@ nav:
   - API reference: reference/api.md
   - UML (generated): reference/uml.md
   - ADRs: adr/README.md
+  - Roadmap: roadmap.md
   - Development plan: development-plan.md
   - AI usage: ai-usage/AI_USAGE_LOG.md
