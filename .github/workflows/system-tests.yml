@@ -1,0 +1,33 @@
+name: System tests
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  system:
+    name: E2E against lab targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      # Lab compose file lands with the retest engine (see retest-lab skill);
+      # until then this job only proves the system-test wiring.
+      - name: Start lab targets
+        run: |
+          if [ -f lab/docker-compose.yml ]; then
+            docker compose -f lab/docker-compose.yml up -d --wait
+          else
+            echo "No lab defined yet — running system-marked tests without targets."
+          fi
+      - run: uv run pytest -m system --no-cov
+      - name: Tear down lab
+        if: always()
+        run: |
+          if [ -f lab/docker-compose.yml ]; then
+            docker compose -f lab/docker-compose.yml down -v
+          fi

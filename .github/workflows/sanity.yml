@@ -1,0 +1,36 @@
+name: Sanity metrics
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # weekly Monday 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  metrics:
+    name: Mechanical quality signals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Collect metrics report
+        run: |
+          {
+            echo "# Sanity metrics — $(date -u +%F)"
+            echo; echo "## Cyclomatic complexity (radon)"; echo '```'
+            uv run radon cc -s -a src || true
+            echo '```'
+            echo; echo "## Dead code candidates (vulture)"; echo '```'
+            uv run vulture src --min-confidence 80 || true
+            echo '```'
+            echo; echo "## Duplication (pylint)"; echo '```'
+            uv run pylint --disable=all --enable=duplicate-code src || true
+            echo '```'
+          } > sanity-report.md
+          cat sanity-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sanity-report
+          path: sanity-report.md

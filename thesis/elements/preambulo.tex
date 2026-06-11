@@ -1,0 +1,129 @@
+% -------------------------------
+% Plantilla del TFG en la ESIIAB-UCLM. Versión 0.1 (Preliminar)
+%
+% Luis de la Ossa
+%
+% Compilar con XeLaTeX
+% -------------------------------
+
+
+% -------------------------------
+% Segunda portada
+% -------------------------------
+\cleardoublepage
+\setcounter{page}{1} \null
+
+
+\begin{textblock*}{\textwidth}(3cm,2.4cm)
+\begin{flushright}
+\includegraphics[height=1.1cm]{figs/logouclm.jpg}
+\end{flushright}
+\end{textblock*}
+
+
+
+\begin{textblock*}{\textwidth}(3cm,2.5cm)  % Corrige la posición porque la imagen tiene margen
+\begin{flushleft}
+\includegraphics[height=1cm]{figs/logoesii.png}
+\end{flushleft}
+\end{textblock*}
+
+
+
+\begin{textblock*}{\textwidth}(3cm,7cm)
+\begin{center}\doublespacing
+{\fontsize{18pt}{4pt}\selectfont \bft{UNDERGRADUATE DISSERTATION}}
+
+\medskip
+{\fontsize{18pt}{4pt}\selectfont Bachelor's Degree in Computer Science and Engineering}
+
+\medskip
+{\fontsize{16pt}{4pt}\selectfont \espec}
+\end{center}
+\end{textblock*}
+
+
+\begin{textblock*}{\textwidth}(3cm,13cm)
+\begin{center}\doublespacing
+{\fontsize{22pt}{4pt}\selectfont \bft{\titulo}}
+\end{center}
+\end{textblock*}
+
+
+\begin{textblock*}{\textwidth}(3cm, 20cm)
+\begin{flushleft}\doublespacing
+{\fontsize{14pt}{4pt}\selectfont \bft{Author:} \autor}
+
+{\fontsize{14pt}{4pt}\selectfont \bft{Supervisor:} \director}
+
+{\fontsize{14pt}{4pt}\selectfont \bft{Co-supervisor:} \codirector}
+\end{flushleft}
+\end{textblock*}
+
+
+\begin{textblock*}{\textwidth}(3cm,25.25cm)
+\begin{flushright}
+{\fontsize{14pt}{4pt}\selectfont \fecha}
+\end{flushright}
+\end{textblock*}
+
+
+% -------------------------------
+% Dedicatoria
+% -------------------------------
+\cleardoublepage
+\thispagestyle{empty}
+
+\vspace*{9cm}
+\begin{flushright} \em
+Aquí va la dedicatoria que cada cual \\
+quiera escribir. El ancho se controla \\
+manualmente
+\end{flushright}
+
+
+% -------------------------------
+% Declaración de autoría
+% -------------------------------
+\cleardoublepage
+\thispagestyle{plain}
+\begin{center}
+\Large{\bft{Autorship Statement}}
+\end{center}
+\vskip1cm
+
+I, the undersigned, \quad \ldots \quad, with ID number \quad \ldots \quad, declare that I am the sole author of the Undergraduate Dissertation titled ``\quad \ldots \quad '', that this work does not break the current intellectual property law. and that all the non-original material contained in this work is properly attributed to their legitimate authors.
+
+\vspace*{2cm}
+\begin{center}
+Albacete, (date)
+
+\vskip3cm
+
+Signed by: \autor
+\end{center}
+
+
+% -------------------------------
+% Resumen
+% -------------------------------
+\cleardoublepage
+\thispagestyle{plain}
+\begin{center}
+\Large{\bft{Abstract}}
+\end{center}
+\vskip1cm
+
+\lipsum[1]
+
+% -------------------------------
+% Agradecimientos
+% -------------------------------
+\cleardoublepage
+\thispagestyle{plain}
+\begin{center}
+\Large{\bft{Acknowledgements}}
+\end{center}
+\vskip1cm
+
+\lipsum[1]

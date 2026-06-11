@@ -1,0 +1,52 @@
+# --- Sensitive data: NEVER commit, NEVER feed to AI tools (Reglamento TFG 2026 §6) ---
+data/private/
+*.env
+.env*
+*credentials*
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# --- Docs (generated) ---
+site/
+docs/reference/generated/
+
+# --- LaTeX build artifacts ---
+thesis/**/*.aux
+thesis/**/*.log
+thesis/**/*.out
+thesis/**/*.toc
+thesis/**/*.lof
+thesis/**/*.lot
+thesis/**/*.loa
+thesis/**/*.lol
+thesis/**/*.bbl
+thesis/**/*.blg
+thesis/**/*.fls
+thesis/**/*.fdb_latexmk
+thesis/**/*.xdv
+thesis/**/*.synctex.gz
+
+# --- University regulation PDFs and templates (kept local, linked in README) ---
+docs/normativa/
+docs/Plantillas TFG/
+docs/*.pdf
+
+# --- OS / editor noise ---
+.DS_Store
+__MACOSX/
+*.swp
+thesis/*.pdf

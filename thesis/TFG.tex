@@ -1,0 +1,94 @@
+% -------------------------------
+% Plantilla del TFG en la ESIIAB-UCLM. Versión 0.1
+%
+% Luis de la Ossa
+%
+% Compilar con XeLaTeX
+% -------------------------------
+\documentclass[12pt, a4paper]{book}
+
+% -------------------------------
+% Información y opciones del documento. Debe editarse.
+% -------------------------------
+\input{include/opciones}
+
+% -------------------------------
+% Configuración del documento, paquetes, etc.
+% -------------------------------
+\input{include/configuracion}
+
+% Documento
+\begin{document}
+
+% -------------------------------
+% Portada y título
+% -------------------------------
+% Fuente  de la portada
+% Carlito = metric-compatible substitute for Calibri (original template font),
+% available on Linux and CI via the ttf-carlito / fonts-crosextra-carlito package.
+% \setmainfont[Ligatures={NoRequired,NoCommon,NoContextual}]{Carlito}
+\input{elements/portada}
+
+% -------------------------------
+% Fuente del documento.
+% -------------------------------
+\setmainfont[Ligatures={NoRequired,NoCommon,NoContextual}]{Carlito}
+
+% -------------------------------
+% Preámbulo
+% -------------------------------
+\frontmatter
+\input{elements/preambulo}
+
+% -------------------------------
+% Índices y tablas
+% -------------------------------
+% Cambia a interlineado normal
+\singlespacing
+
+\tableofcontents	% Índice
+\listoffigures		% Índice de figuras
+\listoftables		% Índice de tablas
+\listofalgorithms   % Índice de algoritmos (comentar si no los hay)
+\listofcodes	    % Índice de códigos (comentar si no los hay)
+\cleardoublepage
+
+% Vuelve a interlineado de 1.5
+\onehalfspacing
+
+% -------------------------------
+% Documento
+% -------------------------------
+\mainmatter
+% Estilo de página
+\pagestyle{fancy}
+
+
+% Introducción
+\input{chapters/ch1}
+
+% Algunos elementos
+\input{chapters/ch2}
+
+% Utilidades para anotaciones
+\input{chapters/ch3}
+
+% -------------------------------
+% Apéndices
+% -------------------------------
+\appendix
+\chapter{Annex 1}
+\lipsum[1-2]
+
+\cleardoublepage
+\thispagestyle{empty}
+
+
+% -------------------------------
+% Bibliografía
+% -------------------------------
+\bibliographystyle{apalike}
+\bibliography{bib/ref}
+\addcontentsline{toc}{chapter}{Bibliography}
+
+\end{document}

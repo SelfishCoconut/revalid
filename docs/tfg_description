@@ -1,0 +1,43 @@
+Title: AI-Driven System for the Revalidation of Pentest Findings
+
+Description:
+
+El presente Trabajo Fin de Grado, titulado “Sistema Basado en Inteligencia Artificial para la Revalidación de Hallazgos de Pentesting”, tiene como objetivo el diseño y desarrollo de una herramienta inteligente orientada a optimizar el proceso de verificación posterior a una auditoría de seguridad.
+
+El sistema propuesto permite analizar automáticamente informes de pentesting, identificar los hallazgos detectados y extraer los pasos técnicos necesarios para su reproducción. A partir de esta información, la herramienta ejecuta de forma autónoma pruebas de retesteo sobre los sistemas evaluados, con el fin de comprobar si las medidas correctivas aplicadas por los equipos de desarrollo han sido efectivas o si las vulnerabilidades continúan presentes.
+
+Mediante el uso de técnicas de inteligencia artificial, el proyecto busca reducir la carga manual asociada al proceso de revalidación, mejorar la eficiencia operativa de las auditorías de seguridad y disminuir los tiempos de respuesta en el ciclo de gestión de vulnerabilidades.
+
+
+Objetivo general
+
+Automatizar el proceso de retesteo de vulnerabilidades mediante el uso de inteligencia artificial, con el fin de reducir el tiempo de respuesta y aumentar la eficiencia en auditorías de seguridad informática.
+
+
+Subobjetivos
+
+Analizar y estructurar informes de pentesting, identificando los elementos relevantes asociados a cada hallazgo, tales como descripción, impacto, vector de ataque y pasos de reproducción.
+
+Diseñar un modelo basado en inteligencia artificial capaz de interpretar y transformar los pasos de reproducción de vulnerabilidades en acciones técnicas ejecutables.
+
+Desarrollar un sistema automatizado de retesteo, que permita ejecutar pruebas de validación sobre los sistemas auditados para comprobar la efectividad de los parches aplicados.
+
+Evaluar la precisión y utilidad del sistema, comparando los resultados obtenidos con procesos de retesteo manual tradicionales en términos de tiempo, fiabilidad y reducción de esfuerzo operativo.
+
+Competencias:
+
+[IS5] Capacidad de identificar, evaluar y gestionar los riesgos potenciales asociados que pudieran presentarse.
+[IS6] Capacidad para diseñar soluciones apropiadas en uno o más dominios de aplicación utilizando métodos de la ingeniería del software que integren aspectos éticos, sociales, legales y económicos.
+
+
+Referencias bibliográficas
+
+MITRE Corporation.
+MITRE ATT&CK®: A Knowledge Base of Adversary Tactics and Techniques.
+MITRE, 2023.
+Describe técnicas reales de ataque utilizadas en auditorías de seguridad y resulta fundamental para la clasificación y revalidación de vulnerabilidades.
+
+Behl, A., Behl, K., & Ahmad, M.
+Cybersecurity and Cyberwar: What Everyone Needs to Know.
+Oxford University Press, 2017.
+Proporciona una base teórica sólida sobre procesos de auditoría, gestión de vulnerabilidades y validación de controles de seguridad.

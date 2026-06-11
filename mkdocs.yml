@@ -1,0 +1,56 @@
+site_name: revalid
+site_description: AI-Driven System for the Revalidation of Pentest Findings (TFG, ESII-UCLM)
+site_url: https://selfishcoconut.github.io/revalid/
+repo_url: https://github.com/SelfishCoconut/revalid
+docs_dir: docs
+exclude_docs: |
+  normativa/
+  tfg_description
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: teal
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - scheme: slate
+      primary: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+
+plugins:
+  - search
+  - mermaid2
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - C4 model: architecture/c4.md
+  - Requirements (SRS): requirements/srs.md
+  - API reference: reference/api.md
+  - UML (generated): reference/uml.md
+  - ADRs: adr/README.md
+  - Development plan: development-plan.md
+  - AI usage: ai-usage/AI_USAGE_LOG.md

@@ -1,0 +1,92 @@
+[project]
+name = "revalid"
+version = "0.1.0"
+description = "AI-Driven System for the Revalidation of Pentest Findings (TFG, ESII-UCLM)"
+readme = "README.md"
+license = "Beerware"
+license-files = ["LICENSE"]
+authors = [{ name = "Álvaro Navarro", email = "alvaronavaqui@proton.me" }]
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pre-commit>=4.0",
+    # sanity metrics (codebase-sanity agent / sanity.yml)
+    "radon>=6.0",
+    "xenon>=0.9",
+    "vulture>=2.13",
+    "pylint>=3.3",
+    "pydeps>=3.0",
+    # documentation (docs-as-code, §11 of the development plan)
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "mkdocs-mermaid2-plugin>=1.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.5,<1"]
+build-backend = "uv_build"
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "B",         # bugbear
+    "UP",        # pyupgrade
+    "S",         # bandit (security — this is a security tool)
+    "C90",       # mccabe complexity
+    "N",         # naming
+    "D",         # pydocstyle (docstrings feed the generated docs)
+    "RUF",
+]
+ignore = [
+    "D203", "D213",  # incompatible docstring-style pairs (use D211/D212)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D"]  # asserts are the point of tests; docstrings optional
+".claude/hooks/**" = ["S603", "S607"]  # local trusted hook scripts calling git
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+pretty = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "integration: real component interactions, cassette-replayed LLM calls (CI: separate job)",
+    "system: full E2E against dockerized lab targets (CI: nightly/workflow_dispatch only)",
+]
+
+# ---------------------------------------------------------------- coverage
+[tool.coverage.run]
+source = ["src/revalid"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

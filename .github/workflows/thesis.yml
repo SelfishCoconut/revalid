@@ -1,0 +1,24 @@
+name: Thesis PDF
+
+on:
+  push:
+    paths: ["thesis/**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build memoir (XeLaTeX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with XeLaTeX (Carlito installed for Calibri substitution)
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: TFG.tex
+          working_directory: thesis
+          latexmk_use_xelatex: true
+          extra_system_packages: font-carlito
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TFG-memoir
+          path: thesis/TFG.pdf

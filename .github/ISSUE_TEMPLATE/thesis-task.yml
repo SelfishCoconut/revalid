@@ -1,0 +1,20 @@
+name: Thesis task
+description: Work on the memoir (chapters, figures, bibliography, declaration)
+title: "thesis: <title>"
+labels: ["thesis"]
+body:
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which chapter/section and what must be true when Done
+    validations:
+      required: true
+  - type: checkboxes
+    id: rubric
+    attributes:
+      label: Rubric reminders
+      options:
+        - label: All new floats referenced and discussed in body text
+        - label: External content cited; original work clearly differentiated
+        - label: AI declaration updated if AI-assisted writing was used

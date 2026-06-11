@@ -1,0 +1,22 @@
+name: Bug
+description: Something behaves incorrectly
+labels: ["bug"]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed vs expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Exact commands / inputs (synthetic data only)
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Affected requirement (if known)
+      placeholder: FR-03
