@@ -12,7 +12,7 @@
 
 ## Current state (update me)
 
-**2026-06-11** — Environment phase complete (plan: [`development-plan.md`](development-plan.md), all verified: CI green, Pages live, thesis builds locally and on CI, hooks active, board populated). SRS + ADR-0002 merged (PR #21). **Nothing of the product is built yet. Next action: start M1 (walking skeleton).**
+**2026-06-11** — Environment phase complete (plan: [`development-plan.md`](development-plan.md), all verified: CI green, Pages live, thesis builds locally and on CI, hooks active, board populated). SRS + ADR-0002 merged (PR #21). M1 started: FR-02 minimal slice (DefectDojo-style JSON → domain model → SQLite → API) with FastAPI app factory and `Finding` domain schema. **Next action: M1 continues with FR-06 allowlist (#11), then FR-07 probe (#12) — `Probe`/`Verdict` schemas land with their FRs.**
 
 Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no real engagement data) and added to `tests/data/` — it defines the evaluation ground truth and what M2 must parse.
 
@@ -20,8 +20,8 @@ Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no rea
 
 ### M1 — Walking skeleton  ·  FR-02 #7, FR-06 #11, FR-07 #12, FR-09 #14
 Thin end-to-end slice proving the architecture. Scope deliberately minimal:
-- [ ] Package layout per ADR-0002: FastAPI app factory, SQLite via SQLAlchemy, domain models (Finding, Probe, Verdict) as Pydantic schemas
-- [ ] FR-02 (minimal): ingest a simple structured JSON findings file from `tests/data/` (full DefectDojo mapping can wait)
+- [x] Package layout per ADR-0002: FastAPI app factory, SQLite via SQLAlchemy, domain models as Pydantic schemas (`Finding` done; `Probe`/`Verdict` arrive with FR-07/FR-09)
+- [x] FR-02 (minimal): ingest a simple structured JSON findings file from `tests/data/` (full DefectDojo mapping can wait)
 - [ ] FR-06: allowlist config + executor-level enforcement (SSRF guard test from SRS)
 - [ ] FR-07 (minimal): execute ONE hardcoded-type HTTP probe (e.g. reflected-payload check) against local Juice Shop, capture request/response evidence
 - [ ] FR-09 (minimal): verdict still-open/fixed/inconclusive linked to evidence, exposed via one API endpoint
