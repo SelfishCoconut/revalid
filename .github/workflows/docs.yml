@@ -32,7 +32,7 @@ jobs:
           mkdir -p docs/reference/generated
           uv run pyreverse -o mmd -d docs/reference/generated -p revalid src/revalid
       - run: uv run mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - uses: actions/deploy-pages@v4
