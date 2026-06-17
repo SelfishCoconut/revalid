@@ -1,0 +1,105 @@
+# Kanban board automation (docs/development-plan.md §9).
+#
+# Moves cards on the user-level Project v2 board from repo events:
+#   issue opened/reopened            -> Backlog (added to board if missing)
+#   PR opened that closes an issue   -> In Progress
+#   CI workflow green on that PR     -> Verify
+#   issue closed (e.g. by merge)     -> Done
+# `Validate` is deliberately NOT automated: Álvaro drags the card there
+# after personally running the PR's "How to validate" steps.
+#
+# The default GITHUB_TOKEN cannot access user-level projects, so this needs
+# a fine-grained PAT in the BOARD_PAT secret with: Projects read/write
+# (account permission) + Issues read, Pull requests read, Metadata read
+# (repository permissions on this repo).
+
+name: Kanban board
+
+on:
+  issues:
+    types: [opened, reopened, closed]
+  pull_request:
+    types: [opened, ready_for_review]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  move-card:
+    runs-on: ubuntu-latest
+    # For workflow_run, only act on green CI runs that belong to a PR.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
+    env:
+      GH_TOKEN: ${{ secrets.BOARD_PAT }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.event.repository.name }}
+      PROJECT_ID: PVT_kwHOCtl9L84BaXXt
+      STATUS_FIELD: PVTSSF_lAHOCtl9L84BaXXtzhVPggQ
+      OPT_BACKLOG: 11dffbf4
+      OPT_IN_PROGRESS: 9d922c32
+      OPT_VERIFY: a7465eac
+      OPT_DONE: 842acc1a
+    steps:
+      - name: Move card for ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::BOARD_PAT secret is not set — see header of this workflow"
+            exit 1
+          fi
+
+          # Add (idempotent) and set Status. $1 = issue node id, $2 = option id.
+          set_status() {
+            local item_id
+            item_id=$(gh api graphql \
+              -f query='mutation($project:ID!,$content:ID!){
+                addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}' \
+              -f project="$PROJECT_ID" -f content="$1" \
+              --jq '.data.addProjectV2ItemById.item.id')
+            gh api graphql \
+              -f query='mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){
+                updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,
+                  fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}' \
+              -f project="$PROJECT_ID" -f item="$item_id" \
+              -f field="$STATUS_FIELD" -f option="$2" > /dev/null
+            echo "moved issue $1 to option $2"
+          }
+
+          # Issues an open PR declares it closes. $1 = PR number.
+          linked_issue_ids() {
+            gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$pr:Int!){
+                repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+                  closingIssuesReferences(first:20){nodes{id}}}}}' \
+              -f owner="$OWNER" -f repo="$REPO" -F pr="$1" \
+              --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[].id'
+          }
+
+          case "$GITHUB_EVENT_NAME" in
+            issues)
+              node_id=$(jq -r .issue.node_id "$GITHUB_EVENT_PATH")
+              case "$(jq -r .action "$GITHUB_EVENT_PATH")" in
+                opened|reopened) set_status "$node_id" "$OPT_BACKLOG" ;;
+                closed)          set_status "$node_id" "$OPT_DONE" ;;
+              esac
+              ;;
+            pull_request)
+              pr=$(jq -r .pull_request.number "$GITHUB_EVENT_PATH")
+              for id in $(linked_issue_ids "$pr"); do
+                set_status "$id" "$OPT_IN_PROGRESS"
+              done
+              ;;
+            workflow_run)
+              for pr in $(jq -r '.workflow_run.pull_requests[].number' "$GITHUB_EVENT_PATH"); do
+                for id in $(linked_issue_ids "$pr"); do
+                  set_status "$id" "$OPT_VERIFY"
+                done
+              done
+              ;;
+          esac
