@@ -30,7 +30,7 @@ jobs:
             echo '```'
           } > sanity-report.md
           cat sanity-report.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sanity-report
           path: sanity-report.md
