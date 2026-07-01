@@ -23,6 +23,7 @@ import httpx
 
 _LOGGER = logging.getLogger("revalid.allowlist")
 _ENV_VAR = "REVALID_ALLOWLIST"
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 DEFAULT_ALLOWLIST: frozenset[str] = frozenset({"http://localhost:3000/*"})
 
@@ -70,14 +71,30 @@ def canonicalize(url: str) -> str:
     return f"{scheme}://{host}{port}{_normalize_path(parts.path)}{query}"
 
 
+def _decode_traversal(path: str) -> str:
+    """Decode percent-encoded ``.`` and ``/`` so encoded traversal can't evade normpath.
+
+    A target framework that percent-decodes before resolving would otherwise let
+    ``/rest/%2e%2e/admin`` or ``/rest/..%2fadmin`` escape a ``/rest/*`` subtree
+    that a literal ``/rest/../admin`` is correctly denied from.
+    """
+    return re.sub(
+        r"%2[ef]",
+        lambda m: "." if m.group(0).lower() == "%2e" else "/",
+        path,
+        flags=re.IGNORECASE,
+    )
+
+
 def _normalize_path(path: str) -> str:
-    """Resolve dot-segments, preserving a meaningful trailing slash."""
+    """Resolve dot-segments (incl. percent-encoded), preserving a trailing slash."""
     if not path:
         return "/"
-    normalized = posixpath.normpath(path)
+    decoded = _decode_traversal(path)
+    normalized = posixpath.normpath(decoded)
     if normalized == "/":
         return "/"
-    if path.endswith("/"):
+    if decoded.endswith("/"):
         normalized += "/"
     return normalized
 
@@ -127,7 +144,10 @@ class TargetGuard:
         if self.is_allowed(url):
             return
         reason = "not in allowlist"
-        _LOGGER.warning("target_denied", extra={"target": url, "reason": reason})
+        _LOGGER.warning(
+            "target_denied",
+            extra={"target": _CONTROL_CHARS.sub("", url), "reason": reason},
+        )
         raise TargetNotAllowedError(url, reason)
 
 

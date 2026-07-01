@@ -64,6 +64,10 @@ def test_default_allowlist_value() -> None:
         ("http://localhost:3000/*", "https://localhost:3000/", False),
         ("http://localhost:3000/*", "http://localhost:3000@evil/x", False),
         ("http://localhost:3000/rest/*", "http://localhost:3000/rest/../../etc", False),
+        # Percent-encoded traversal must not escape a narrowed subtree either.
+        ("http://localhost:3000/rest/*", "http://localhost:3000/rest/%2e%2e/admin", False),
+        ("http://localhost:3000/rest/*", "http://localhost:3000/rest/%2E%2E/admin", False),
+        ("http://localhost:3000/rest/*", "http://localhost:3000/rest/..%2fadmin", False),
     ],
 )
 def test_match_truth_table(pattern: str, target: str, expected: bool) -> None:
@@ -96,6 +100,16 @@ def test_check_denied_raises_and_audits(caplog: pytest.LogCaptureFixture) -> Non
     assert record.getMessage() == "target_denied"
     assert record.target == "http://evil.example/"  # type: ignore[attr-defined]
     assert record.reason  # type: ignore[attr-defined]
+
+
+def test_check_denied_audit_strips_control_chars(caplog: pytest.LogCaptureFixture) -> None:
+    guard = TargetGuard(frozenset({"http://localhost:3000/*"}))
+    with caplog.at_level(logging.WARNING, logger="revalid.allowlist"):
+        with pytest.raises(TargetNotAllowedError):
+            guard.check("http://evil/\r\n2026-01-01 WARNING forged audit line")
+    record = caplog.records[-1]
+    assert "\n" not in record.target  # type: ignore[attr-defined]
+    assert "\r" not in record.target  # type: ignore[attr-defined]
 
 
 def test_guard_is_immutable() -> None:
