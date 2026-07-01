@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ from revalid.allowlist import (
     TargetGuard,
     TargetNotAllowedError,
     canonicalize,
+    load_allowlist,
 )
 
 
@@ -97,3 +99,43 @@ def test_guard_is_immutable() -> None:
     guard = TargetGuard(frozenset({"http://localhost:3000/*"}))
     with pytest.raises(FrozenInstanceError):
         guard.patterns = frozenset()  # type: ignore[misc]
+
+
+def test_load_default_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REVALID_ALLOWLIST", raising=False)
+    guard = load_allowlist()
+    assert guard.patterns == DEFAULT_ALLOWLIST
+    assert guard.is_allowed("http://localhost:3000/rest/products") is True
+
+
+def test_load_from_explicit_path_ignores_comments_and_blanks(tmp_path: Path) -> None:
+    f = tmp_path / "allow.txt"
+    f.write_text("# lab targets\n\n  http://localhost:3000/*  \nhttp://localhost:8080/api/*\n")
+    guard = load_allowlist(str(f))
+    assert guard.patterns == frozenset({"http://localhost:3000/*", "http://localhost:8080/api/*"})
+
+
+def test_load_from_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    f = tmp_path / "allow.txt"
+    f.write_text("http://localhost:9000/*\n")
+    monkeypatch.setenv("REVALID_ALLOWLIST", str(f))
+    guard = load_allowlist()
+    assert guard.is_allowed("http://localhost:9000/x") is True
+
+
+def test_explicit_path_overrides_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env_file = tmp_path / "env.txt"
+    env_file.write_text("http://localhost:1111/*\n")
+    monkeypatch.setenv("REVALID_ALLOWLIST", str(env_file))
+    arg_file = tmp_path / "arg.txt"
+    arg_file.write_text("http://localhost:2222/*\n")
+    guard = load_allowlist(str(arg_file))
+    assert guard.is_allowed("http://localhost:2222/x") is True
+    assert guard.is_allowed("http://localhost:1111/x") is False
+
+
+def test_load_rejects_schemeless_pattern(tmp_path: Path) -> None:
+    f = tmp_path / "bad.txt"
+    f.write_text("localhost:3000/*\n")
+    with pytest.raises(ValueError):
+        load_allowlist(str(f))

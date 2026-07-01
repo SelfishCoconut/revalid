@@ -11,10 +11,12 @@ string (no DNS resolution, per design decision D3).
 from __future__ import annotations
 
 import logging
+import os
 import posixpath
 import re
 from dataclasses import dataclass
 from functools import cached_property
+from pathlib import Path
 from urllib.parse import urlsplit
 
 _LOGGER = logging.getLogger("revalid.allowlist")
@@ -125,3 +127,37 @@ class TargetGuard:
         reason = "not in allowlist"
         _LOGGER.warning("target_denied", extra={"target": url, "reason": reason})
         raise TargetNotAllowedError(url, reason)
+
+
+def load_allowlist(path: str | None = None) -> TargetGuard:
+    """Build a guard from trusted config only (never from report content).
+
+    Source order: explicit ``path`` → ``$REVALID_ALLOWLIST`` → built-in
+    :data:`DEFAULT_ALLOWLIST`.
+
+    Args:
+        path: Optional allowlist file path overriding the env var.
+
+    Returns:
+        A guard over the parsed, validated patterns.
+
+    Raises:
+        ValueError: If any configured pattern lacks a scheme or host.
+        OSError: If a configured file path cannot be read.
+    """
+    source = path if path is not None else os.environ.get(_ENV_VAR)
+    if source is None:
+        return TargetGuard(DEFAULT_ALLOWLIST)
+    return TargetGuard(frozenset(_read_patterns(source)))
+
+
+def _read_patterns(path: str) -> list[str]:
+    """Parse a glob-per-line file, skipping blanks/comments, validating each."""
+    patterns: list[str] = []
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        canonicalize(line)  # fail-closed: rejects a schemeless/hostless pattern
+        patterns.append(line)
+    return patterns
