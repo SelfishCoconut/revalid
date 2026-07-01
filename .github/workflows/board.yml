@@ -30,11 +30,16 @@ permissions:
 jobs:
   move-card:
     runs-on: ubuntu-latest
-    # For workflow_run, only act on green CI runs that belong to a PR.
+    # Skip Dependabot-originated events: GitHub withholds repo secrets from
+    # Dependabot, so BOARD_PAT would be empty and the job would fail noisily.
+    # Dependabot PRs never close FR issues, so there is nothing to move anyway.
+    # For workflow_run, only act on green CI runs that belong to a (non-bot) PR.
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'pull_request')
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.actor.login != 'dependabot[bot]'))
     env:
       GH_TOKEN: ${{ secrets.BOARD_PAT }}
       OWNER: ${{ github.repository_owner }}
