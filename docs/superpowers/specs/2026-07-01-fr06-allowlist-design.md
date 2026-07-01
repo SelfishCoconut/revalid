@@ -4,7 +4,8 @@
 - **Requirement**: FR-06 (SRS §3) — priority *Must*. Issue **#11**. Milestone **M1**.
 - **Related**: ADR-0002 (stack: FastAPI + httpx + SQLite); NFR-03 (executor-level
   enforcement, localhost bind, non-destructive probes); NFR-04 (data protection).
-- **Status**: proposed — awaiting Álvaro's review before an implementation plan.
+- **Status**: accepted — Álvaro approved D1–D5 (D3 confirmed: string-match only,
+  no DNS-rebinding defense) on 2026-07-01. Cleared for implementation.
 
 ## 1. Context & problem
 
@@ -47,7 +48,7 @@ One new module, `src/revalid/allowlist.py`, following the flat-module convention
 | `AllowlistTransport` | `httpx.BaseTransport` subclass wrapping `inner` + `guard` | `handle_request` runs `guard.check` before delegating. |
 | `load_allowlist` | `load_allowlist(path: str | None = None) -> TargetGuard` | Parse a trusted config file (or env/default) into a guard. |
 
-Plus `TargetNotAllowed(Exception)` carrying `.target: str` and `.reason: str`,
+Plus `TargetNotAllowedError(Exception)` carrying `.target: str` and `.reason: str`,
 and `DEFAULT_ALLOWLIST: frozenset[str] = frozenset({"http://localhost:3000/*"})`.
 
 The pure matcher stays internal; the FR-05/FR-08 reuse surface is **not** built now
@@ -100,7 +101,7 @@ characters including `/`. Regexes are compiled **once** at guard construction
 | `http://localhost:3000/*` | `http://localhost:3001/` | ❌ (port) |
 | `http://localhost:3000/*` | `https://localhost:3000/` | ❌ (scheme) |
 | `http://localhost:3000/*` | `http://localhost:3000@evil/x` | ❌ (host is `evil`) |
-| `http://localhost:3000/*` | `http://localhost:3000/a/../../etc` | ❌ (normalizes to `/etc`) |
+| `http://localhost:3000/rest/*` | `http://localhost:3000/rest/../../etc` | ❌ (normalizes to `/etc`, escapes `/rest/`) |
 
 ## 5. Enforcement flow
 
@@ -170,7 +171,7 @@ All tests are no-I/O ⇒ `tests/unit/test_allowlist.py` (httpx via `MockTranspor
 - **Transport, allowed** — `AllowlistTransport` over an `httpx.MockTransport`
   returning 200 → request to an allowed URL delegates and returns 200.
 - **Transport, denied (AC1)** — request to a non-allowlisted URL raises
-  `TargetNotAllowed` **and** logs the `target_denied` audit event (`caplog`); the
+  `TargetNotAllowedError` **and** logs the `target_denied` audit event (`caplog`); the
   inner transport is never called.
 - **SSRF guard (AC1 + AC2)** — build a guard from `DEFAULT_ALLOWLIST`; take a
   `Finding` whose `raw`/`affected_endpoints` carry `http://evil.example/`; assert
