@@ -8,7 +8,7 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 
 - Álvaro makes all design decisions and reviews/validates ALL AI output. Claude assists; it never decides scope or architecture unilaterally.
 - Significant decisions → ADR in `docs/adr/` (use the `adr` skill). Decisions without an ADR don't exist.
-- Nothing merges without Álvaro executing the PR's "How to validate" steps himself.
+- PRs auto-merge (squash) once the required CI checks are green — the enterprise-standard gate. Claude may queue auto-merge; Álvaro reviews asynchronously and retains full revert authority. (Design ownership above is unchanged: the gate is CI + async review, not a manual pre-merge block.)
 - Every AI-assisted commit carries the `Co-Authored-By: Claude` trailer. Never strip it.
 
 ## Data protection (regulation §6 — hard rule)
@@ -28,10 +28,10 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 
 ## Workflow (Kanban — see docs/development-plan.md §9)
 
-- Card (GitHub issue) → feature branch → PR → `Verify` (CI green + automated review) → `Validate` (Álvaro runs it) → merge.
+- Card (GitHub issue) → feature branch → PR → `Verify` (required CI green + automated review) → auto-merge (squash) → `Validate` = Álvaro's async review (revert if needed).
 - Every PR MUST fill the "How to validate" section: exact commands, expected output, acceptance criteria checkboxes. If the feature isn't directly runnable, ship `scripts/demo/<feature>.py` or a `make demo-<feature>` target.
 - Conventional Commits (enforced by commit-msg hook): `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`.
-- Definition of Done: code + tests + docstrings + affected docs/diagrams updated + CI green + validated by Álvaro.
+- Definition of Done: code + tests + docstrings + affected docs/diagrams updated + required CI green (auto-merged); Álvaro's async review may add follow-ups.
 
 ## Documentation (docs-as-code)
 
