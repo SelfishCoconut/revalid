@@ -12,7 +12,7 @@
 
 ## Current state (update me)
 
-**2026-07-01** — M1 in progress. **Done:** package layout (FastAPI app factory, SQLite via SQLAlchemy, `Finding` domain schema); FR-02 minimal slice merged (DefectDojo-style JSON → domain model → SQLite → API, PR #23). Environment phase complete before that (SRS + ADR-0002 in PR #21; CI, Pages, thesis build, hooks, board all verified). Tooling added since: Kanban board automation (PRs #24/#29). CI on `main` is green except **Security** (starlette CVE PYSEC-2026-249) — fix in flight (PR #31). **Next action: FR-06 allowlist (#11)** — allowlist config + executor-level SSRF enforcement — then FR-07 probe (#12); `Probe`/`Verdict` schemas land with their FRs.
+**2026-07-01** — M1 in progress. **Done:** package layout (FastAPI app factory, SQLite via SQLAlchemy, `Finding` domain schema); FR-02 minimal slice merged (DefectDojo-style JSON → domain model → SQLite → API, PR #23). Environment phase complete before that (SRS + ADR-0002 in PR #21; CI, Pages, thesis build, hooks, board all verified). Tooling added since: Kanban board automation (PRs #24/#29). CI on `main` is green except **Security** (starlette CVE PYSEC-2026-249) — fix in flight (PR #31). **FR-06 allowlist (#11) implemented** — pure `canonicalize`, immutable `TargetGuard` (glob→regex matcher + fail-closed audit), unbypassable `AllowlistTransport` (httpx seam), and `load_allowlist` (trusted config only); AC1 (deny+audit) and AC2 (report URLs never expand the frozen allowlist) covered by unit tests; PR open, auto-merge on green. **Next action: FR-07 probe (#12)** — one hardcoded-type HTTP probe against local Juice Shop through the FR-06 transport; `Probe`/`Verdict` schemas land with their FRs.
 
 Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no real engagement data) and added to `tests/data/` — it defines the evaluation ground truth and what M2 must parse.
 
@@ -22,7 +22,7 @@ Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no rea
 Thin end-to-end slice proving the architecture. Scope deliberately minimal:
 - [x] Package layout per ADR-0002: FastAPI app factory, SQLite via SQLAlchemy, domain models as Pydantic schemas (`Finding` done; `Probe`/`Verdict` arrive with FR-07/FR-09)
 - [x] FR-02 (minimal): ingest a simple structured JSON findings file from `tests/data/` (full DefectDojo mapping can wait)
-- [ ] FR-06: allowlist config + executor-level enforcement (SSRF guard test from SRS)
+- [x] FR-06: allowlist config + executor-level enforcement (SSRF guard test from SRS) — `src/revalid/allowlist.py`, #11
 - [ ] FR-07 (minimal): execute ONE hardcoded-type HTTP probe (e.g. reflected-payload check) against local Juice Shop, capture request/response evidence
 - [ ] FR-09 (minimal): verdict still-open/fixed/inconclusive linked to evidence, exposed via one API endpoint
 - [ ] `lab/docker-compose.yml` with Juice Shop (fills in the `retest-lab` skill + system-tests CI job)
