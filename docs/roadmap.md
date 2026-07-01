@@ -12,7 +12,7 @@
 
 ## Current state (update me)
 
-**2026-06-11** — Environment phase complete (plan: [`development-plan.md`](development-plan.md), all verified: CI green, Pages live, thesis builds locally and on CI, hooks active, board populated). SRS + ADR-0002 merged (PR #21). M1 started: FR-02 minimal slice (DefectDojo-style JSON → domain model → SQLite → API) with FastAPI app factory and `Finding` domain schema. **Next action: M1 continues with FR-06 allowlist (#11), then FR-07 probe (#12) — `Probe`/`Verdict` schemas land with their FRs.**
+**2026-07-01** — M1 in progress. **Done:** package layout (FastAPI app factory, SQLite via SQLAlchemy, `Finding` domain schema); FR-02 minimal slice merged (DefectDojo-style JSON → domain model → SQLite → API, PR #23). Environment phase complete before that (SRS + ADR-0002 in PR #21; CI, Pages, thesis build, hooks, board all verified). Tooling added since: Kanban board automation (PRs #24/#29). CI on `main` is green except **Security** (starlette CVE PYSEC-2026-249) — fix in flight (PR #31). **Next action: FR-06 allowlist (#11)** — allowlist config + executor-level SSRF enforcement — then FR-07 probe (#12); `Probe`/`Verdict` schemas land with their FRs.
 
 Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no real engagement data) and added to `tests/data/` — it defines the evaluation ground truth and what M2 must parse.
 

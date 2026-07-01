@@ -33,6 +33,8 @@ thesis/**/*.lof
 thesis/**/*.lot
 thesis/**/*.loa
 thesis/**/*.lol
+thesis/**/*.loalgorithm
+thesis/**/*.locode
 thesis/**/*.bbl
 thesis/**/*.blg
 thesis/**/*.fls
