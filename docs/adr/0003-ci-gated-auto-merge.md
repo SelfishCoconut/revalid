@@ -28,6 +28,11 @@ We will adopt **CI-gated auto-merge**:
   locally in `.claude/settings.local.json` (gitignored, not repo policy).
 - `Validate` becomes Álvaro's **asynchronous** review after merge; he retains
   full revert authority.
+- Branch protection (the concrete gate): `main` requires green **Lint & types,
+  Unit tests, Integration tests, `pip-audit`, and CodeQL**. The strict
+  *branches-up-to-date* requirement is **off**, so small non-overlapping PRs
+  merge in parallel once their own checks pass, instead of serializing behind
+  each other. Revisit with a GitHub merge queue if contributor/PR volume grows.
 - Unchanged and still non-negotiable (§6): Álvaro owns all design decisions
   (recorded as ADRs), the `Co-Authored-By: Claude` trailer, data-protection
   rules, and the AI-usage declaration.
@@ -51,11 +56,10 @@ This amends only the merge step of ADR-0001; the rest of ADR-0001 stands.
   promptly; throughput is no longer capped by reviewer availability.
 - **Accepted debt / risk:** a flawed change can reach `main` before human eyes.
   Mitigated by required CI + revert authority — but this makes the *set* of
-  required checks load-bearing. Today only `Lint & types`, `Unit tests`, and
-  `Integration tests` are required; **Security (`pip-audit`) and `CodeQL` are
-  not.** Follow-up (tracked separately): add them to branch-protection required
-  checks so auto-merge cannot land a vulnerable change — exactly the class of
-  bug that motivated this ADR.
+  required checks load-bearing. Accordingly, **`pip-audit` (Security) and CodeQL
+  were added to the required checks** as part of this decision (previously only
+  Lint/Unit/Integration blocked a merge), so auto-merge cannot land a vulnerable
+  change — exactly the class of bug that motivated this ADR.
 - **Authorship (§6): unchanged.** Ownership, attribution, and declaration
   obligations are untouched; only the *timing* of review moves from pre-merge
   block to post-merge async.
