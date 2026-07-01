@@ -19,6 +19,8 @@ from functools import cached_property
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
+
 _LOGGER = logging.getLogger("revalid.allowlist")
 _ENV_VAR = "REVALID_ALLOWLIST"
 
@@ -127,6 +129,27 @@ class TargetGuard:
         reason = "not in allowlist"
         _LOGGER.warning("target_denied", extra={"target": url, "reason": reason})
         raise TargetNotAllowedError(url, reason)
+
+
+class AllowlistTransport(httpx.BaseTransport):
+    """httpx transport that enforces the allowlist before any socket opens.
+
+    Every request routed through the owning client passes ``guard.check`` first;
+    a denied target raises :class:`TargetNotAllowedError` before the inner
+    transport is touched. The executor builds its client with
+    ``follow_redirects=False``, so a 3xx is captured as evidence and never
+    chased — there is no redirect-hop path around the guard (design decision D2).
+    """
+
+    def __init__(self, inner: httpx.BaseTransport, guard: TargetGuard) -> None:
+        """Wrap ``inner`` so every request first passes ``guard``."""
+        self._inner = inner
+        self._guard = guard
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        """Enforce the guard, then delegate to the inner transport."""
+        self._guard.check(str(request.url))
+        return self._inner.handle_request(request)
 
 
 def load_allowlist(path: str | None = None) -> TargetGuard:

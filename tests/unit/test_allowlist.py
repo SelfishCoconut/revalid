@@ -6,15 +6,18 @@ import logging
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
+import httpx
 import pytest
 
 from revalid.allowlist import (
     DEFAULT_ALLOWLIST,
+    AllowlistTransport,
     TargetGuard,
     TargetNotAllowedError,
     canonicalize,
     load_allowlist,
 )
+from revalid.domain import Finding, Severity
 
 
 @pytest.mark.parametrize(
@@ -139,3 +142,57 @@ def test_load_rejects_schemeless_pattern(tmp_path: Path) -> None:
     f.write_text("localhost:3000/*\n")
     with pytest.raises(ValueError):
         load_allowlist(str(f))
+
+
+def _mock_transport(calls: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, text="ok")
+
+    return httpx.MockTransport(handler)
+
+
+def test_transport_allows_allowlisted_request() -> None:
+    calls: list[httpx.Request] = []
+    guard = TargetGuard(frozenset({"http://localhost:3000/*"}))
+    transport = AllowlistTransport(_mock_transport(calls), guard)
+    with httpx.Client(transport=transport) as client:
+        resp = client.get("http://localhost:3000/rest/products")
+    assert resp.status_code == 200
+    assert len(calls) == 1
+
+
+def test_transport_denies_and_never_calls_inner(caplog: pytest.LogCaptureFixture) -> None:
+    calls: list[httpx.Request] = []
+    guard = TargetGuard(frozenset({"http://localhost:3000/*"}))
+    transport = AllowlistTransport(_mock_transport(calls), guard)
+    with caplog.at_level(logging.WARNING, logger="revalid.allowlist"):
+        with httpx.Client(transport=transport) as client:
+            with pytest.raises(TargetNotAllowedError):
+                client.get("http://169.254.169.254/latest/meta-data/")
+    assert calls == []  # inner transport never touched → no socket opened
+    assert caplog.records[-1].getMessage() == "target_denied"
+
+
+def test_report_url_never_expands_allowlist(caplog: pytest.LogCaptureFixture) -> None:
+    guard = load_allowlist()  # DEFAULT_ALLOWLIST
+    before = guard.patterns
+    finding = Finding(
+        title="SSRF bait",
+        severity=Severity.HIGH,
+        affected_endpoints=("http://evil.example/",),
+        raw={"url": "http://169.254.169.254/latest/meta-data/"},
+    )
+    hostile_urls = (*finding.affected_endpoints, str(finding.raw["url"]))
+    for url in hostile_urls:
+        assert guard.is_allowed(url) is False
+
+    calls: list[httpx.Request] = []
+    transport = AllowlistTransport(_mock_transport(calls), guard)
+    with caplog.at_level(logging.WARNING, logger="revalid.allowlist"):
+        with httpx.Client(transport=transport) as client:
+            with pytest.raises(TargetNotAllowedError):
+                client.get(finding.affected_endpoints[0])
+
+    assert calls == []
+    assert guard.patterns == before == DEFAULT_ALLOWLIST  # frozen: unchanged
