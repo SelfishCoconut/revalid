@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import logging
 import posixpath
+import re
+from dataclasses import dataclass
+from functools import cached_property
 from urllib.parse import urlsplit
 
 _LOGGER = logging.getLogger("revalid.allowlist")
@@ -73,3 +76,52 @@ def _normalize_path(path: str) -> str:
     if path.endswith("/"):
         normalized += "/"
     return normalized
+
+
+def _compile_glob(pattern: str) -> re.Pattern[str]:
+    r"""Compile one allowlist glob to an anchored regex; only ``*`` is a wildcard.
+
+    ``fnmatch`` is avoided because it also treats ``?`` and ``[...]`` as
+    metacharacters, which occur literally in real URLs. Every character is
+    escaped, then ``\*`` is turned into ``.*`` (matching any run, incl. ``/``).
+    """
+    regex = re.escape(canonicalize(pattern)).replace(r"\*", ".*")
+    return re.compile(regex)
+
+
+@dataclass(frozen=True)
+class TargetGuard:
+    """Immutable set of allowlist globs; the sole authority on target matching.
+
+    Attributes:
+        patterns: Canonical-URL glob patterns. Built only by configuration —
+            no runtime code (least of all report ingestion) can mutate it, so a
+            report URL can never widen the allowlist (FR-06 AC2).
+    """
+
+    patterns: frozenset[str]
+
+    @cached_property
+    def _regexes(self) -> tuple[re.Pattern[str], ...]:
+        """Compile each glob once (the frozen instance caches via ``__dict__``)."""
+        return tuple(_compile_glob(p) for p in self.patterns)
+
+    def is_allowed(self, url: str) -> bool:
+        """Return whether ``url`` matches any pattern; fail-closed on bad URLs."""
+        try:
+            target = canonicalize(url)
+        except ValueError:
+            return False
+        return any(rx.fullmatch(target) is not None for rx in self._regexes)
+
+    def check(self, url: str) -> None:
+        """Return ``None`` if allowed; else emit the audit event and raise.
+
+        Raises:
+            TargetNotAllowedError: If ``url`` matches no allowlist pattern.
+        """
+        if self.is_allowed(url):
+            return
+        reason = "not in allowlist"
+        _LOGGER.warning("target_denied", extra={"target": url, "reason": reason})
+        raise TargetNotAllowedError(url, reason)
