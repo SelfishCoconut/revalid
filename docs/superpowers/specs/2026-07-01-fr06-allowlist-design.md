@@ -67,9 +67,12 @@ matching compares like with like. Steps, using `urllib.parse.urlsplit`:
    host `evil`, so it can never match a `localhost` pattern.
 3. **Port** → appended as `:<port>` only if explicitly present. Default ports are
    **not** synthesized (an `http://…:3000` pattern will not match a port-less URL).
-4. **Path** → dot-segments resolved with `posixpath.normpath` (`/rest/../admin` →
-   `/admin`); empty path becomes `/`; a trailing slash is preserved iff the original
-   had one and the path is not root (so `…/` ≠ `…/rest`).
+4. **Path** → percent-encoded `%2e`/`%2f` (case-insensitive) are **decoded first**,
+   then dot-segments resolved with `posixpath.normpath` (`/rest/../admin` **and**
+   `/rest/%2e%2e/admin` → `/admin`), so encoded traversal can't escape a narrowed
+   subtree that literal traversal is denied from (security review, 2026-07-01);
+   empty path becomes `/`; a trailing slash is preserved iff the original had one
+   and the path is not root (so `…/` ≠ `…/rest`).
 5. **Query** → preserved as `?<query>` (a trailing `*` naturally covers it).
    **Fragment** → dropped.
 
@@ -186,6 +189,10 @@ Quality gates: coverage ≥ 80 % on the module, `mypy --strict`, `ruff`, xenon �
 - **DB-persisted audit rows** — FR-10 (this ships the log event only).
 - **DNS-rebinding / IP-literal equivalence** — deferred per D3; would be a
   resolve-and-check-IP layer if the threat model expands.
+- **Double-encoded traversal** (`%252e%252e`) — single-level `%2e`/`%2f` decoding is
+  applied (security review); a target server that *doubly* percent-decodes could still
+  re-expose traversal. Out of scope while the default allowlist is whole-host (`/*`);
+  revisit if narrowed path subtrees become load-bearing.
 - **Matcher reuse at plan-approval (FR-05) / sanity-check (FR-08)** — the matcher is
   written reusably but no public reuse surface is built now.
 - **`lab/docker-compose.yml`** — a separate M1 item; FR-06's default simply names the
