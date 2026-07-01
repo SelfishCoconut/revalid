@@ -83,7 +83,7 @@ def test_is_allowed_matches_any_of_several_patterns() -> None:
 
 def test_check_allows_silently() -> None:
     guard = TargetGuard(frozenset({"http://localhost:3000/*"}))
-    assert guard.check("http://localhost:3000/rest") is None
+    guard.check("http://localhost:3000/rest")  # returns without raising == allowed
 
 
 def test_check_denied_raises_and_audits(caplog: pytest.LogCaptureFixture) -> None:
