@@ -69,7 +69,7 @@ Concise rules file covering:
 
 | Hook | Event / matcher | Behavior |
 |---|---|---|
-| `protect-private-data.sh` | PreToolUse on Read/Grep/Glob/Bash | **Deny** access to `data/private/**`, `*.env`, `*credentials*` → enforces the regulation's data-protection clause mechanically. |
+| `protect-private-data.py` | PreToolUse on Read/Grep/Glob | **Deny** access to `data/private/**`, `*.env`, credential/key files. Retained as generic secret-file hygiene; the enforced §6 data policy it originally implemented was removed (ADR-0006). |
 | `format-on-edit.sh` | PostToolUse on Edit/Write of `*.py` | `uv run ruff format` + `ruff check --fix` on the touched file. |
 | `pre-commit-gate.sh` | PreToolUse on Bash matching `git commit` | Run `gitleaks protect --staged` + verify Conventional Commit message format; block on failure. |
 | `log-ai-session.sh` | SessionEnd (and Stop as fallback) | Append a record to `docs/ai-usage/sessions/YYYY-MM.md`: timestamp, branch, `git diff --stat` of files touched, session id. Feeds the `/ai-declaration` skill. |
