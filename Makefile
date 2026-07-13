@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-walking-skeleton lab-up lab-down run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-walking-skeleton lab-up lab-down run
 
 lint:
 	uv run ruff check src tests
@@ -25,6 +25,10 @@ test: test-unit test-integration test-system
 # FR-02 walking-skeleton demo: ingest the synthetic sample, print what persisted
 demo-ingest:
 	uv run python scripts/demo/ingest_defectdojo.py
+
+# FR-01 demo: extract a PDF report into raw finding candidates (no LLM, no lab)
+demo-ingest-pdf:
+	uv run python scripts/demo/ingest_pdf.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

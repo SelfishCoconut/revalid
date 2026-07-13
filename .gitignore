@@ -50,6 +50,9 @@ docs/*.pdf
 # --- Local pentest report PDFs (kept local; scrub before deriving tests/data fixtures) ---
 /*.pdf
 
+# --- Local tool caches (codebase-memory MCP index) ---
+.codebase-memory/
+
 # --- OS / editor noise ---
 .DS_Store
 __MACOSX/
