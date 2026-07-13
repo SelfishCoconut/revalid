@@ -14,4 +14,4 @@ For a given diff/PR, check:
 4. **ADR gap** — does the diff embody a significant decision (new dependency, new architectural boundary, changed data flow, dropped approach) with no ADR in `docs/adr/`? Flag it; decisions need Álvaro's explicit ADR.
 5. **Build** — `make docs` must pass `--strict` (broken refs/links fail).
 
-Output: short checklist with pass/fail per item, each failure with file references and the minimal fix. You are diff-scoped; whole-repo quality trends belong to `codebase-sanity`, compliance to `ai-compliance-auditor` — don't duplicate them.
+Output: short checklist with pass/fail per item, each failure with file references and the minimal fix. You are diff-scoped; whole-repo quality trends belong to `codebase-sanity` — don't duplicate them.
