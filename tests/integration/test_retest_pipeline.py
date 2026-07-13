@@ -33,6 +33,15 @@ def test_probe_to_unlisted_target_is_blocked() -> None:
 
 
 @pytest.mark.integration
+def test_run_probe_does_not_swallow_allowlist_denial() -> None:
+    # run_probe only catches httpx.RequestError; an allowlist denial must
+    # propagate (fail-closed), never be downgraded to an inconclusive verdict.
+    # Guards the invariant against a future refactor that broadens the except.
+    with _guarded_client() as client, pytest.raises(TargetNotAllowedError):
+        run_probe(client, login_sqli_probe("http://169.254.169.254"))
+
+
+@pytest.mark.integration
 def test_allowlisted_probe_reaches_target_and_verdicts_still_open() -> None:
     with _guarded_client() as client:
         verdict = run_probe(client, login_sqli_probe("http://localhost:3000"))
