@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Engine, String, create_engine
+from sqlalchemy import JSON, Engine, ForeignKey, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from revalid.domain import Finding, Severity
+from revalid.domain import Evidence, Finding, Severity, Verdict, VerdictStatus
 
 IN_MEMORY = ":memory:"
 
@@ -55,6 +55,49 @@ class FindingRecord(Base):
             affected_endpoints=tuple(self.affected_endpoints),
             reproduction_steps=tuple(self.reproduction_steps),
             raw=self.raw,
+        )
+
+
+class VerdictRecord(Base):
+    """Persisted retest verdict linked to the finding it retested (FR-09).
+
+    The ``finding_id`` foreign key and the non-null ``evidence`` column enforce
+    the FR-09 invariant in storage: every verdict row references a finding and
+    carries the evidence it was derived from.
+    """
+
+    __tablename__ = "verdicts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    probe_kind: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))
+    reason_code: Mapped[str] = mapped_column(String(64))
+    rationale: Mapped[str]
+    matched_indicators: Mapped[list[str]] = mapped_column(JSON)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    @classmethod
+    def from_domain(cls, finding_id: int, probe_kind: str, verdict: Verdict) -> VerdictRecord:
+        """Build a row from a domain verdict against ``finding_id``."""
+        return cls(
+            finding_id=finding_id,
+            probe_kind=probe_kind,
+            status=verdict.status.value,
+            reason_code=verdict.reason_code,
+            rationale=verdict.rationale,
+            matched_indicators=list(verdict.matched_indicators),
+            evidence=verdict.evidence.model_dump(),
+        )
+
+    def to_domain(self) -> Verdict:
+        """Convert this row back to a domain verdict."""
+        return Verdict(
+            status=VerdictStatus(self.status),
+            reason_code=self.reason_code,
+            rationale=self.rationale,
+            matched_indicators=tuple(self.matched_indicators),
+            evidence=Evidence(**self.evidence),
         )
 
 

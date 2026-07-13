@@ -11,15 +11,18 @@ authentication in TFG scope.
 from collections.abc import Iterator
 from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from revalid import __version__
-from revalid.db import FindingRecord, create_db_engine, session_factory
-from revalid.domain import Finding
+from revalid.allowlist import load_allowlist
+from revalid.db import FindingRecord, VerdictRecord, create_db_engine, session_factory
+from revalid.domain import Finding, Verdict
 from revalid.ingest import IngestError, map_defectdojo_export
+from revalid.retest import build_probe_client, lab_base_url, login_sqli_probe, run_probe
 
 
 class FindingOut(Finding):
@@ -28,10 +31,29 @@ class FindingOut(Finding):
     id: int
 
 
+class VerdictOut(Verdict):
+    """A persisted verdict as returned by the API (domain model + linkage)."""
+
+    id: int
+    finding_id: int
+    probe_kind: str
+
+
 class ImportResult(BaseModel):
     """Outcome of a findings import."""
 
     imported: int
+
+
+def get_probe_client() -> Iterator[httpx.Client]:
+    """Yield an allowlist-enforcing HTTP client for probes.
+
+    Defined at module scope so tests can override it
+    (``app.dependency_overrides[get_probe_client]``) with a client backed by a
+    mock transport, keeping unit/integration tests off the network.
+    """
+    with build_probe_client(load_allowlist()) as client:
+        yield client
 
 
 def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> FastAPI:
@@ -54,6 +76,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
             yield session
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+    ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]  # noqa: N806
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -76,5 +99,34 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
         """List all persisted findings."""
         records = session.scalars(select(FindingRecord).order_by(FindingRecord.id))
         return [FindingOut(id=r.id, **r.to_domain().model_dump()) for r in records]
+
+    @app.post("/findings/{finding_id}/retest", response_model=VerdictOut)
+    def retest_finding(finding_id: int, session: SessionDep, client: ProbeClientDep) -> VerdictOut:
+        """Run the retest probe for a finding and persist the verdict (FR-07/FR-09)."""
+        if session.get(FindingRecord, finding_id) is None:
+            raise HTTPException(status_code=404, detail="finding not found")
+        probe = login_sqli_probe(lab_base_url())
+        verdict = run_probe(client, probe)
+        record = VerdictRecord.from_domain(finding_id, probe.kind, verdict)
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return VerdictOut(
+            id=record.id, finding_id=finding_id, probe_kind=probe.kind, **verdict.model_dump()
+        )
+
+    @app.get("/verdicts", response_model=list[VerdictOut])
+    def list_verdicts(session: SessionDep) -> list[VerdictOut]:
+        """List all persisted verdicts (FR-09)."""
+        records = session.scalars(select(VerdictRecord).order_by(VerdictRecord.id))
+        return [
+            VerdictOut(
+                id=r.id,
+                finding_id=r.finding_id,
+                probe_kind=r.probe_kind,
+                **r.to_domain().model_dump(),
+            )
+            for r in records
+        ]
 
     return app

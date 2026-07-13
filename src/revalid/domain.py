@@ -43,3 +43,92 @@ class Finding(BaseModel):
     affected_endpoints: tuple[str, ...] = ()
     reproduction_steps: tuple[str, ...] = ()
     raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class Probe(BaseModel):
+    """A single verification-only HTTP action used to retest a finding (FR-07).
+
+    Probes are non-destructive: they observe whether a vulnerability is still
+    present, never exploit it for impact. In the walking skeleton exactly one
+    ``kind`` exists; more join as their finding types land.
+
+    Attributes:
+        kind: Stable identifier of the probe type (e.g. ``sqli-login-bypass``).
+        method: HTTP method.
+        url: Absolute target URL; always checked against the allowlist (FR-06)
+            before any socket opens.
+        headers: Request headers to send.
+        json_body: JSON request body, or ``None`` for a body-less request.
+        expected_indicator: Human-readable note on what a still-open result
+            looks like — documentation, not matching logic.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: str = Field(min_length=1)
+    method: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    headers: dict[str, str] = Field(default_factory=dict)
+    json_body: dict[str, Any] | None = None
+    expected_indicator: str = ""
+
+
+class Evidence(BaseModel):
+    """Captured request/response of one executed probe step (FR-07).
+
+    Every field a verdict is justified by is recorded here so the verdict can
+    be re-derived and audited. ``response_status`` is ``0`` when the target was
+    unreachable and no HTTP response was received.
+
+    Attributes:
+        request_method: Method actually sent.
+        request_url: URL actually requested.
+        request_body: Serialized request body (empty string if none).
+        response_status: HTTP status code, or ``0`` if no response arrived.
+        response_headers: Response headers as received.
+        response_body_excerpt: Leading slice of the response body.
+        elapsed_ms: Wall-clock round-trip time in milliseconds.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    request_method: str
+    request_url: str
+    request_body: str = ""
+    response_status: int
+    response_headers: dict[str, str] = Field(default_factory=dict)
+    response_body_excerpt: str = ""
+    elapsed_ms: float = 0.0
+
+
+class VerdictStatus(enum.StrEnum):
+    """Outcome of retesting a finding (FR-09)."""
+
+    STILL_OPEN = "still_open"
+    FIXED = "fixed"
+    INCONCLUSIVE = "inconclusive"
+
+
+class Verdict(BaseModel):
+    """A retest outcome for a finding, bound to the evidence that justifies it.
+
+    Enforces the FR-09 invariants at the type level: a verdict cannot be built
+    without ``evidence`` (no verdict without linked evidence) and always carries
+    a machine-readable ``reason_code`` (required for inconclusive results).
+
+    Attributes:
+        status: still-open / fixed / inconclusive.
+        reason_code: Machine-readable justification token
+            (e.g. ``sqli_auth_bypass_succeeded``, ``endpoint_changed``).
+        rationale: Human-readable explanation of the verdict.
+        matched_indicators: Indicator tokens observed in the evidence.
+        evidence: The request/response the verdict is derived from.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    status: VerdictStatus
+    reason_code: str = Field(min_length=1)
+    rationale: str = ""
+    matched_indicators: tuple[str, ...] = ()
+    evidence: Evidence

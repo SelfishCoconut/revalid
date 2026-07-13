@@ -1,0 +1,21 @@
+# Local, intentionally vulnerable retest targets (retest-lab skill).
+#
+# The ONLY systems revalid ever retests are defined here, plus anything Álvaro
+# authorizes in writing (recorded as an ADR). Targets bind to localhost only —
+# never expose these ports beyond the host (data-protection rule, NFR-03).
+#
+#   make lab-up     # start, wait until Juice Shop answers
+#   make lab-down   # stop and remove
+#
+# The image tag is pinned so system-test ground truth is reproducible: the M5
+# evaluation asserts expected verdicts against this exact version.
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v17.1.1
+    container_name: revalid-juice-shop
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    # Readiness is polled from the host (the image lacks curl/wget for an
+    # in-container healthcheck): `make lab-up` and the CI job curl the version
+    # endpoint until Juice Shop answers.

@@ -12,7 +12,7 @@
 
 ## Current state (update me)
 
-**2026-07-01** — M1 in progress. **Done:** package layout (FastAPI app factory, SQLite via SQLAlchemy, `Finding` domain schema); FR-02 minimal slice merged (DefectDojo-style JSON → domain model → SQLite → API, PR #23). Environment phase complete before that (SRS + ADR-0002 in PR #21; CI, Pages, thesis build, hooks, board all verified). Tooling added since: Kanban board automation (PRs #24/#29). CI on `main` is green except **Security** (starlette CVE PYSEC-2026-249) — fix in flight (PR #31). **FR-06 allowlist (#11) implemented** — pure `canonicalize`, immutable `TargetGuard` (glob→regex matcher + fail-closed audit), unbypassable `AllowlistTransport` (httpx seam), and `load_allowlist` (trusted config only); AC1 (deny+audit) and AC2 (report URLs never expand the frozen allowlist) covered by unit tests; PR open, auto-merge on green. **Next action: FR-07 probe (#12)** — one hardcoded-type HTTP probe against local Juice Shop through the FR-06 transport; `Probe`/`Verdict` schemas land with their FRs.
+**2026-07-13** — **M1 walking skeleton COMPLETE** (pending the `v0.1.0` release tag). **Done:** package layout (FastAPI app factory, SQLite via SQLAlchemy, domain schemas); FR-02 ingest (#23); FR-06 allowlist/SSRF guard (#34); **FR-07 probe executor + FR-09 evidence-backed verdicts (#12/#14)** — one hardcoded SQLi login-bypass probe (`src/revalid/retest.py`) runs against the Juice Shop lab through the FR-06 `AllowlistTransport`, captures request/response/timing evidence, and yields a `still_open`/`fixed`/`inconclusive` `Verdict` with a machine-readable reason code; persisted (`verdicts` table) and exposed at `POST /findings/{id}/retest` + `GET /verdicts`. `lab/docker-compose.yml` (Juice Shop **v17.1.1**, pinned) + `make lab-up`/`lab-down`; `make demo-walking-skeleton` prints ingest→probe→verdict; the system test asserts `still_open` against the live lab (nightly `system-tests.yml` brings the lab up). Verified end-to-end locally (real HTTP 200 + JWT → `still_open`). **Process:** ADR-0004 right-sized the solo-dev workflow — kept the Kanban board, disabled the forced codebase-memory discovery gate (MCP still available on demand), reserved full PR ceremony for FR/NFR PRs. CI on `main` is green (the earlier starlette CVE was fixed in #31). **Next action: tag `v0.1.0` to close M1, then open M2 — FR-01 PDF ingestion (#6) and FR-03 LLM extraction (#8).**
 
 Pending side items: Álvaro's Juice Shop pentest report must be scrubbed (no real engagement data) and added to `tests/data/` — it defines the evaluation ground truth and what M2 must parse.
 
@@ -23,11 +23,11 @@ Thin end-to-end slice proving the architecture. Scope deliberately minimal:
 - [x] Package layout per ADR-0002: FastAPI app factory, SQLite via SQLAlchemy, domain models as Pydantic schemas (`Finding` done; `Probe`/`Verdict` arrive with FR-07/FR-09)
 - [x] FR-02 (minimal): ingest a simple structured JSON findings file from `tests/data/` (full DefectDojo mapping can wait)
 - [x] FR-06: allowlist config + executor-level enforcement (SSRF guard test from SRS) — `src/revalid/allowlist.py`, #11
-- [ ] FR-07 (minimal): execute ONE hardcoded-type HTTP probe (e.g. reflected-payload check) against local Juice Shop, capture request/response evidence
-- [ ] FR-09 (minimal): verdict still-open/fixed/inconclusive linked to evidence, exposed via one API endpoint
-- [ ] `lab/docker-compose.yml` with Juice Shop (fills in the `retest-lab` skill + system-tests CI job)
-- [ ] `scripts/demo/` walking-skeleton demo: one command, ingest→probe→verdict printed
-- **Done when**: the demo runs green against the lab; system test covers it; release `v0.1.0`.
+- [x] FR-07 (minimal): ONE hardcoded SQLi login-bypass probe against local Juice Shop through the FR-06 transport, capturing request/response/timing evidence — `src/revalid/retest.py`, #12
+- [x] FR-09 (minimal): `still_open`/`fixed`/`inconclusive` verdict linked to evidence with a machine-readable reason code, exposed at `POST /findings/{id}/retest` + `GET /verdicts` — #14
+- [x] `lab/docker-compose.yml` with Juice Shop (pinned v17.1.1) — fills in the `retest-lab` skill + system-tests CI job
+- [x] `scripts/demo/walking_skeleton.py` (`make demo-walking-skeleton`): one command, ingest→probe→verdict printed
+- **Done when**: the demo runs green against the lab; system test covers it; release `v0.1.0`. → demo + system test green end-to-end; **only the `v0.1.0` tag remains**.
 - **No LLM and no frontend in M1** — deterministic slice first.
 
 ### M2 — Report understanding  ·  FR-01 #6, FR-03 #8, FR-13 #18
