@@ -99,7 +99,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
-    "integration: real component interactions, cassette-replayed LLM calls (CI: separate job)",
+    "integration: real component interactions; LLM via deterministic Pydantic AI stand-ins (CI: separate job)",
     "system: full E2E against dockerized lab targets (CI: nightly/workflow_dispatch only)",
 ]
 filterwarnings = [
