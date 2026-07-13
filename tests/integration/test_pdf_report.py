@@ -6,11 +6,12 @@ Marked ``integration`` because it touches a file and the PDF stack rather than
 being pure logic.
 """
 
+import zlib
 from pathlib import Path
 
 import pytest
 
-from revalid.pdf import read_pdf, segment_findings
+from revalid.pdf import PdfError, read_pdf, segment_findings
 
 pytestmark = pytest.mark.integration
 
@@ -44,3 +45,40 @@ def test_reproduction_payload_preserved() -> None:
     report = read_pdf(FIXTURE.read_bytes())
     # The SQLi reproduction payload must survive verbatim for FR-03/FR-04.
     assert "' OR 1=1--" in report.text
+
+
+def _decompression_bomb(expanded_chars: int) -> bytes:
+    """A tiny PDF whose one Flate stream expands to ``expanded_chars`` of text."""
+    raw = b"BT /F1 12 Tf 72 720 Td (" + b"A" * expanded_chars + b") Tj ET"
+    comp = zlib.compress(raw)
+    objs = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+        b"4 0 obj\n<< /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream\nendobj\n"
+        % (len(comp), comp),
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    ]
+    pdf = b"%PDF-1.4\n"
+    offsets = []
+    for obj in objs:
+        offsets.append(len(pdf))
+        pdf += obj
+    xref_pos = len(pdf)
+    size = len(objs) + 1
+    xref = b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for off in offsets:
+        xref += b"%010d 00000 n \n" % off
+    pdf += xref
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref_pos)
+    return pdf
+
+
+def test_extraction_deadline_rejects_bomb(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A single crafted page expands to ~11 MiB of glyphs and hangs pdfminer's
+    # layout analysis; the wall-clock deadline must convert that into a PdfError
+    # (empirically it ran > 2 minutes before this guard existed).
+    monkeypatch.setattr("revalid.pdf._MAX_EXTRACT_SECONDS", 2.0)
+    with pytest.raises(PdfError, match="timed out"):
+        read_pdf(_decompression_bomb(11 * 2**20))

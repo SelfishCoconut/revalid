@@ -58,6 +58,15 @@ FR-03's LLM.
 - **Easier:** FR-01 is fully testable with zero network/LLM; malformed input fails closed
   with clear messages (satisfies FR-01's rejection criterion). pdfplumber's transitive
   deps (pdfminer.six, Pillow, pypdfium2) are all permissively licensed.
+- **Untrusted-input hardening:** pdfminer will happily exhaust memory or hang on a crafted
+  PDF, and this module is the trust boundary. A security review (during PR #42) found and
+  reproduced a decompression bomb — a sub-1 MB file that OOM-killed the interpreter, and a
+  single crafted page that hung layout analysis for minutes. `read_pdf` therefore enforces
+  input-size, page-count, extracted-text, and wall-clock-deadline bounds and converts *any*
+  lower-level parser failure into a typed `PdfError`, so it fails closed rather than
+  crashing. **Accepted debt:** the wall-clock guard uses `SIGALRM`, which only works on the
+  main thread; when the PDF path is later wired to a threadpool-served endpoint it must run
+  extraction in a subprocess (tracked as a follow-up).
 - **Harder / accepted debt:** `extract_text()` flattens complex multi-column tables;
   exotic layouts may later need explicit table handling or FR-03 prompt robustness.
   Scanned/image-only PDFs are rejected, not OCR'd — documented as future work.
