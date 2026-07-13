@@ -4,10 +4,13 @@ Usage::
 
     uv run python scripts/demo/extract_pdf.py [report.pdf]
 
-With ``ANTHROPIC_API_KEY`` set, this calls Claude for real. Without it, the demo
-falls back to a deterministic stand-in model so ``make demo-extract`` always runs
-offline — it still exercises the full FR-01 → FR-03 pipeline and the schema gate.
-Defaults to the synthetic Juice Shop fixture.
+Backend selection is configuration-only (FR-13, ADR-0010): with
+``REVALID_LLM_MODEL`` set (e.g. ``ollama:llama3.2`` plus ``OLLAMA_BASE_URL``),
+that backend is called for real; otherwise with ``ANTHROPIC_API_KEY`` set, this
+calls Claude. With neither, the demo falls back to a deterministic stand-in
+model so ``make demo-extract`` always runs offline — it still exercises the
+full FR-01 → FR-03 pipeline and the schema gate. Defaults to the synthetic
+Juice Shop fixture.
 """
 
 from __future__ import annotations
@@ -18,11 +21,13 @@ import re
 import sys
 from pathlib import Path
 
+from pydantic_ai.exceptions import ModelAPIError, UserError
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from revalid.extract import DEFAULT_MODEL, build_extraction_agent, extract_report
+from revalid.extract import build_extraction_agent, extract_report
+from revalid.llm import DEFAULT_MODEL, MODEL_ENV, resolve_model
 from revalid.pdf import PdfError, read_pdf
 
 DEFAULT_REPORT = Path(__file__).parents[2] / "tests" / "data" / "juice_shop_report_synthetic.pdf"
@@ -56,8 +61,11 @@ def _offline_extractor(messages: list[ModelMessage], info: AgentInfo) -> ModelRe
     )
 
 
-def _select_model() -> tuple[Model | KnownModelName, str]:
-    """Pick Claude when an API key is present, else the offline stand-in."""
+def _select_model() -> tuple[Model | KnownModelName | str, str]:
+    """Pick the configured backend, else Claude with a key, else the stand-in."""
+    if os.environ.get(MODEL_ENV):
+        model = resolve_model()
+        return model, f"{model} (live, from {MODEL_ENV})"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return DEFAULT_MODEL, f"{DEFAULT_MODEL} (live)"
     return FunctionModel(_offline_extractor), "offline stand-in (no ANTHROPIC_API_KEY)"
@@ -77,7 +85,11 @@ def main() -> int:
 
     model, label = _select_model()
     print(f"Reading {args.report}\nModel: {label}\n")
-    result = extract_report(build_extraction_agent(model), report)
+    try:
+        result = extract_report(build_extraction_agent(model), report)
+    except (ModelAPIError, UserError) as exc:
+        print(f"LLM backend failed ({label}): {exc}", file=sys.stderr)
+        return 1
 
     for index, finding in enumerate(result.findings, start=1):
         print(f"[{index}] {finding.severity.value.upper():8} {finding.title}")

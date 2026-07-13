@@ -115,8 +115,9 @@ def test_extracted_finding_schema_requires_title() -> None:
         )
 
 
-def test_default_agent_targets_claude() -> None:
+def test_default_agent_targets_claude(monkeypatch: pytest.MonkeyPatch) -> None:
     # Model-agnostic build, Claude default (ADR-0002); constructs offline.
+    monkeypatch.delenv("REVALID_LLM_MODEL", raising=False)
     agent = build_extraction_agent()
     assert agent.model == "anthropic:claude-sonnet-5"
     # NFR-02: the model name recorded in lineage is the configured string.

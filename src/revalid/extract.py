@@ -7,7 +7,9 @@ which must return :class:`ExtractedFinding` objects; output that fails schema
 validation is retried by Pydantic AI and, if still invalid, **flagged** as an
 :class:`ExtractionFailure` — never silently mapped to a ``Finding`` or persisted
 (FR-03's schema-validation gate). The model is injectable so unit tests drive it
-with Pydantic AI's ``TestModel``/``FunctionModel`` and never touch the network.
+with Pydantic AI's ``TestModel``/``FunctionModel`` and never touch the network;
+when none is passed, the configured backend is used (``REVALID_LLM_MODEL``,
+FR-13/ADR-0010).
 """
 
 from __future__ import annotations
@@ -18,11 +20,9 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import KnownModelName, Model
 
 from revalid.domain import Finding, Severity
+from revalid.llm import resolve_model
 from revalid.pdf import FindingCandidate, PdfReport, segment_findings
 
-# Claude primary (ADR-0002); swappable per FR-13. Deferred model check keeps
-# construction offline-safe and lets FR-13 pass arbitrary provider strings.
-DEFAULT_MODEL: KnownModelName = "anthropic:claude-sonnet-5"
 _MAX_OUTPUT_RETRIES = 2
 
 _INSTRUCTIONS = """\
@@ -96,19 +96,21 @@ class ExtractionReport(BaseModel):
 
 
 def build_extraction_agent(
-    model: Model | KnownModelName | str = DEFAULT_MODEL,
+    model: Model | KnownModelName | str | None = None,
 ) -> Agent[None, list[ExtractedFinding]]:
     """Build the finding-extraction agent.
 
     Args:
-        model: A Pydantic AI model instance or name. Defaults to Claude
-            (:data:`DEFAULT_MODEL`); tests pass ``TestModel``/``FunctionModel``.
+        model: A Pydantic AI model instance or name. When omitted, the
+            configured backend is used (``REVALID_LLM_MODEL``, Claude by
+            default — FR-13/ADR-0010); tests pass ``TestModel``/
+            ``FunctionModel``.
 
     Returns:
         An agent whose validated output is a list of :class:`ExtractedFinding`.
     """
     return Agent(
-        model,
+        model if model is not None else resolve_model(),
         output_type=list[ExtractedFinding],
         instructions=_INSTRUCTIONS,
         retries=_MAX_OUTPUT_RETRIES,
