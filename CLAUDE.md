@@ -11,12 +11,11 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 - PRs auto-merge (squash) once the required CI checks are green — the enterprise-standard gate. Claude may queue auto-merge; Álvaro reviews asynchronously and retains full revert authority. (Design ownership above is unchanged: the gate is CI + async review, not a manual pre-merge block.)
 - Every AI-assisted commit carries the `Co-Authored-By: Claude` trailer. Never strip it.
 
-## Data protection (regulation §6 — hard rule)
+## Data handling
 
-- NEVER read, paste, commit, or send to any AI/external service: real pentest reports, real client/system data, personal data, credentials.
-- All pentest data in this repo is synthetic (`tests/data/`) or from intentionally vulnerable lab containers.
-- `data/private/` is quarantined: gitignored and blocked by hook. Don't try to access it.
-- Retests only ever target explicitly authorized lab systems (see `retest-lab` skill).
+- There is **no enforced §6 data policy** in this repo — data handling is Álvaro's own responsibility (ADR-0006). The regulatory §6 obligation still applies externally; he upholds it directly. Test data in `tests/data/` is synthetic / lab-target derived.
+- A **secret-file guard** hook (`protect-private-data`) remains **unchanged** as general hygiene, not policy: it blocks AI tools from touching `data/private/`, `.env`, credential and key files. To remove it, delete `.claude/hooks/protect-private-data.py` and its wiring in `.claude/settings.json` (Álvaro's call — see ADR-0006).
+- Retests only ever hit **allowlisted** lab systems — enforced in code by the FR-06 allowlist, not by policy (see `retest-lab` skill).
 
 ## Coding standards
 

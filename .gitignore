@@ -47,6 +47,9 @@ docs/normativa/
 docs/Plantillas TFG/
 docs/*.pdf
 
+# --- Local pentest report PDFs (kept local; scrub before deriving tests/data fixtures) ---
+/*.pdf
+
 # --- OS / editor noise ---
 .DS_Store
 __MACOSX/
