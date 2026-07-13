@@ -29,10 +29,14 @@ class Finding(BaseModel):
         title: Short human-readable name of the finding.
         severity: Normalized severity level.
         description: Free-text description of the vulnerability.
+        impact: What an attacker gains / the business consequence (FR-03).
+        attack_vector: How the vulnerability is reached and exploited (FR-03).
         affected_endpoints: URLs or endpoint identifiers the finding applies to.
         reproduction_steps: Ordered steps to reproduce the issue.
         raw: Complete source payload as ingested, preserving fields the
-            internal model does not map (FR-02 audit criterion).
+            internal model does not map (FR-02 audit criterion). For
+            LLM-extracted findings it also carries extraction lineage — model
+            name and source text — for the audit trail (FR-10 / NFR-02).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -40,6 +44,8 @@ class Finding(BaseModel):
     title: str = Field(min_length=1)
     severity: Severity
     description: str = ""
+    impact: str = ""
+    attack_vector: str = ""
     affected_endpoints: tuple[str, ...] = ()
     reproduction_steps: tuple[str, ...] = ()
     raw: dict[str, Any] = Field(default_factory=dict)
