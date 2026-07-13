@@ -79,6 +79,31 @@ class Probe(BaseModel):
     expected_indicator: str = ""
 
 
+class RetestPlan(BaseModel):
+    """An ordered, approved-once set of typed actions to retest a finding (FR-04).
+
+    A plan is derived from a finding's reproduction steps and holds only
+    :class:`Probe` actions whose targets are on the FR-06 allowlist — the
+    generator drops anything else before it lands here, so a plan references
+    only authorized targets by construction. Plans are inert until approved
+    (FR-05); ``version`` is ``1`` at generation and bumps when FR-05 edits it.
+
+    Attributes:
+        finding_title: Title of the finding this plan retests (the link to it).
+        actions: The ordered typed probe actions to run.
+        version: Plan revision, starting at 1 (FR-05 versions edited plans).
+        raw: Generation lineage — model name and source finding — for the
+            audit trail (FR-10 / NFR-02).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    finding_title: str = Field(min_length=1)
+    actions: tuple[Probe, ...] = ()
+    version: int = Field(default=1, ge=1)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
 class Evidence(BaseModel):
     """Captured request/response of one executed probe step (FR-07).
 

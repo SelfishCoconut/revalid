@@ -14,10 +14,10 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from revalid.domain import Severity
 from revalid.extract import (
     ExtractedFinding,
-    _model_name,
     build_extraction_agent,
     extract_report,
 )
+from revalid.llm import agent_model_name
 from revalid.pdf import PdfPage, PdfReport
 
 _VALID: dict[str, Any] = {
@@ -121,4 +121,4 @@ def test_default_agent_targets_claude(monkeypatch: pytest.MonkeyPatch) -> None:
     agent = build_extraction_agent()
     assert agent.model == "anthropic:claude-sonnet-5"
     # NFR-02: the model name recorded in lineage is the configured string.
-    assert _model_name(agent) == "anthropic:claude-sonnet-5"
+    assert agent_model_name(agent) == "anthropic:claude-sonnet-5"
