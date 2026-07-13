@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-walking-skeleton lab-up lab-down run
 
 lint:
 	uv run ruff check src tests
@@ -25,6 +25,23 @@ test: test-unit test-integration test-system
 # FR-02 walking-skeleton demo: ingest the synthetic sample, print what persisted
 demo-ingest:
 	uv run python scripts/demo/ingest_defectdojo.py
+
+# M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
+demo-walking-skeleton:
+	uv run python scripts/demo/walking_skeleton.py
+
+# Retest lab (retest-lab skill) — intentionally vulnerable targets, localhost only
+lab-up:
+	docker compose -f lab/docker-compose.yml up -d
+	@echo "waiting for Juice Shop on http://localhost:3000 ..."
+	@for i in $$(seq 1 30); do \
+		if curl -sf -o /dev/null http://localhost:3000/rest/admin/application-version; then \
+			echo "lab is up"; exit 0; fi; \
+		sleep 2; \
+	done; echo "lab did not become ready in time" >&2; exit 1
+
+lab-down:
+	docker compose -f lab/docker-compose.yml down
 
 # Local web app — localhost only (NFR-03)
 run:

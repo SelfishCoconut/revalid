@@ -1,0 +1,16 @@
+{
+  "_comment": "SYNTHETIC finding in DefectDojo style. Target is the local OWASP Juice Shop lab container only. No real engagement data. Drives the M1 walking-skeleton retest (FR-07/FR-09).",
+  "scan_type": "Manual pentest",
+  "findings": [
+    {
+      "title": "SQL injection auth bypass in login",
+      "severity": "Critical",
+      "description": "The email field of POST /rest/user/login is concatenated into a SQL query. A tautology payload collapses the WHERE clause and returns a valid session for the first user without credentials.",
+      "steps_to_reproduce": "1. POST http://localhost:3000/rest/user/login with JSON {\"email\": \"' OR 1=1--\", \"password\": \"x\"}\n2. Observe HTTP 200 with an authentication.token in the response body",
+      "endpoints": ["http://localhost:3000/rest/user/login"],
+      "cwe": 89,
+      "found_by": ["manual-pentest"],
+      "references": "https://owasp.org/Top10/A03_2021-Injection/"
+    }
+  ]
+}
