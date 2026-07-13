@@ -100,7 +100,7 @@ Keep minimal — the code-review plugin already covers general review:
   - *Architectural drift*: module dependencies vs the declared C4/ADR boundaries (pydeps graph as evidence).
   - *Test health*: coverage erosion, skipped/trivial tests, assertions that test nothing.
   - Output: a sanity report in `docs/sanity/` + `tech-debt` labeled GitHub issues for each finding, so cleanup enters the Kanban backlog like any other work.
-- **`ai-compliance-auditor`** — audits **Álvaro's AI-usage practices** against the regulation (§6 of ReglamentoNormativaTFG_2026, summarized in the agent's instructions so it works without re-reading the PDF). Invoked on demand and before each iteration review. Checks: (1) *declaration completeness* — every work period in git history with Claude trailers has a matching entry in `docs/ai-usage/`; (2) *authorship balance* — flags merged work with no evidence of human review/decision (no ADR, no self-review checklist, no edits by Álvaro) as a risk of "effective AI authorship"; (3) *data protection* — scans repo and recent session logs for signs of real personal/client data entering AI context; (4) *thesis consistency* — the declaration section in the memoria matches the actual log; (5) *copyright* — third-party content (incl. AI-suggested snippets) is attributed. Produces a short compliance report with concrete fixes.
+- *AI-usage compliance (§6)* — **Álvaro's direct responsibility, not an agent's** (ADR-0005). He reviews declaration completeness, authorship balance, data protection, thesis consistency, and attribution himself, drawing on the audit trail (`docs/ai-usage/`, `Co-Authored-By` trailers) and the `ai-declaration` skill. A dedicated `ai-compliance-auditor` agent was tried and removed — Álvaro owns this judgment personally.
 
 ## 6. CI/CD (GitHub Actions, free for public repos)
 
@@ -194,7 +194,7 @@ This will grow large; the environment is designed so Claude works from **indexes
 3. Copy English template `docs/Plantillas TFG/PLANTILLA TFG_ENG/` → `thesis/`, apply Carlito font fix, verify local build (install TeX Live XeLaTeX + latexmk + ttf-carlito if missing).
 4. Write `CLAUDE.md`.
 5. Hooks scripts + project `settings.json` wiring.
-6. Skills (`ai-declaration`, `thesis`, `adr`, `progress-report`, `requirements`, `docs`, `retest-lab` stub) + agents (`security-auditor`, `thesis-reviewer`, `doc-curator`, `codebase-sanity`, `ai-compliance-auditor`).
+6. Skills (`ai-declaration`, `thesis`, `adr`, `progress-report`, `requirements`, `docs`, `retest-lab` stub) + agents (`security-auditor`, `thesis-reviewer`, `doc-curator`, `codebase-sanity`).
 6b. Documentation system: MkDocs Material + mkdocstrings + pyreverse/pydeps generation (`make docs`), C4/Mermaid seed pages, GitHub Pages deploy workflow.
 7. GitHub workflows + dependabot + issue/PR templates; push; configure branch protection; create the GitHub Projects **Kanban board** (columns + WIP limits + MoSCoW priority field, §9).
 8. Enable the marketplace plugins listed in §7.
