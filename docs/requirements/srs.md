@@ -139,7 +139,7 @@ non-lab targets, destructive exploitation.
 
 ### NFR-04 — Data protection (Reglamento TFG 2026 §6)
 - **Priority**: Must · **Source**: regulation
-- **Target**: no personal or real client/engagement data in the repository or in any LLM context; all evaluation data synthetic or from intentionally vulnerable lab targets; the evaluation report is scrubbed before use.
+- **Target**: no personal data in the repository or in any LLM context; all evaluation data is synthetic or derived from intentionally vulnerable lab targets (the author's own Juice Shop report included), so there is no client/engagement data in this project by construction.
 
 ### NFR-05 — Maintainability
 - **Priority**: Must · **Source**: development plan (ADR-0001)
