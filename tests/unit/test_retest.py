@@ -61,6 +61,15 @@ def test_assess_inconclusive_on_200_without_token() -> None:
     assert verdict.reason_code == "unexpected_response"
 
 
+@pytest.mark.parametrize("body", ["<html>not json</html>", "", "[]", '"a string"', "42"])
+def test_assess_inconclusive_on_200_with_non_object_body(body: str) -> None:
+    # The verdict-critical "never guess still_open" path: a 200 whose body is not
+    # a JSON object carrying a token must not read as still_open.
+    verdict = assess(_evidence(200, body))
+    assert verdict.status is VerdictStatus.INCONCLUSIVE
+    assert verdict.reason_code == "unexpected_response"
+
+
 def test_assess_inconclusive_on_unexpected_status() -> None:
     verdict = assess(_evidence(500, "boom"))
     assert verdict.status is VerdictStatus.INCONCLUSIVE
