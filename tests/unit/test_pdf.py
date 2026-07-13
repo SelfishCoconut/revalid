@@ -86,25 +86,6 @@ def test_read_pdf_extracts_text() -> None:
     assert "Finding 1 SQL Injection" in report.text
 
 
-def test_rejects_oversized_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("revalid.pdf._MAX_PDF_BYTES", 8)
-    with pytest.raises(PdfError, match="too large"):
-        read_pdf(_text_pdf(b"anything past the tiny byte cap"))
-
-
-def test_rejects_too_many_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A one-page PDF trips a zero-page cap — a decompression bomb hits the same guard.
-    monkeypatch.setattr("revalid.pdf._MAX_PAGES", 0)
-    with pytest.raises(PdfError, match="too many pages"):
-        read_pdf(_text_pdf(b"Finding 1"))
-
-
-def test_rejects_runaway_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("revalid.pdf._MAX_TEXT_CHARS", 3)
-    with pytest.raises(PdfError, match="exceeds"):
-        read_pdf(_text_pdf(b"Finding 1 SQL Injection"))
-
-
 def test_segments_by_finding_heading() -> None:
     text = (
         "Cover page and table of contents\n"

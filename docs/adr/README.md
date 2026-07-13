@@ -11,3 +11,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0005](0005-remove-ai-compliance-auditor.md) | Remove the ai-compliance-auditor agent; Álvaro owns §6 compliance directly | accepted | 2026-07-13 |
 | [0006](0006-remove-enforced-data-policy.md) | Remove the enforced §6 data policy; Álvaro owns data handling directly | accepted | 2026-07-13 |
 | [0007](0007-pdf-ingestion-pdfplumber.md) | PDF report ingestion: pdfplumber for extraction, a text seam to LLM structuring | proposed | 2026-07-13 |
+| [0008](0008-single-user-threat-model.md) | Single trusted-user threat model: drop the security-auditor agent and PDF bomb-hardening | accepted | 2026-07-13 |
