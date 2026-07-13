@@ -47,7 +47,8 @@ docs/normativa/
 docs/Plantillas TFG/
 docs/*.pdf
 
-# --- Local pentest report PDFs (kept local; scrub before deriving tests/data fixtures) ---
+# --- Local pentest report PDFs (kept local; not re-hosted) ---
+# The real evaluation report is an external, no-license work — see tests/data/README.md.
 /*.pdf
 
 # --- Local tool caches (codebase-memory MCP index) ---
