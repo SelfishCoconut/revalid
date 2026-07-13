@@ -103,7 +103,7 @@ Keep minimal — the code-review plugin already covers general review:
 
 ## 6. CI/CD (GitHub Actions, free for public repos)
 
-- **`ci.yml`** (push + PR): `uv sync` → `ruff check` + `ruff format --check` → `mypy` → unit tests with coverage threshold (80% on `src/`) → integration tests (cassette-replayed, no live LLM) as a separate job. Concurrency-cancel on stale runs.
+- **`ci.yml`** (push + PR): `uv sync` → `ruff check` + `ruff format --check` → `mypy` → unit tests with coverage threshold (80% on `src/`) → integration tests (no live LLM; deterministic Pydantic AI stand-ins) as a separate job. Concurrency-cancel on stale runs.
 - **`system-tests.yml`**: nightly schedule + `workflow_dispatch` — docker compose lab targets (Juice Shop/DVWA) + full E2E retest scenarios (§8).
 - **`docs.yml`**: on push to `main` — regenerate pyreverse UML + build MkDocs site → deploy to **GitHub Pages**. Diagrams are produced at build time from the current code, so they are structurally incapable of being stale (§11).
 - **`sanity.yml`**: weekly schedule + `workflow_dispatch` — runs the mechanical sanity metrics (pylint duplicate-code, vulture, radon/xenon, coverage trend, pydeps) and uploads the report; the `codebase-sanity` agent consumes it to file `tech-debt` issues. `xenon` also runs as a hard complexity gate in `ci.yml` so egregious regressions never merge.
@@ -133,7 +133,7 @@ Enable later when relevant:
 Layout `tests/unit/`, `tests/integration/`, `tests/system/` with pytest markers (`integration`, `system`) and Makefile targets `test-unit` / `test-integration` / `test-system` / `test` (all). Set up the structure, markers, CI wiring and conventions now; the tests themselves grow with the code.
 
 - **Unit** — per-module, fully isolated, no network/LLM/docker. LLM-dependent code tested with Pydantic AI's `TestModel`/`FunctionModel` (no API calls, deterministic). Coverage threshold (80% on `src/`) measured here. Runs on every push/PR.
-- **Integration** — real component interactions with fakes only at the outermost edge: report-parsing pipeline against synthetic sample reports in `tests/data/`, agent + tool wiring, persistence layer. LLM calls replayed from recorded cassettes (VCR-style) so CI is free and deterministic; a manually-triggered workflow can re-record against the live API. Runs on every PR as a separate CI job.
+- **Integration** — real component interactions with fakes only at the outermost edge: report-parsing pipeline against synthetic sample reports in `tests/data/`, agent + tool wiring, persistence layer. LLM calls use deterministic Pydantic AI stand-ins (`TestModel`/`FunctionModel`) so CI is free, deterministic, and needs no API key. Runs on every PR as a separate CI job.
 - **System (E2E)** — the full flow on the dockerized vulnerable lab (§4 `retest-lab`): synthetic pentest report in → findings extracted → retest executed against Juice Shop/DVWA containers → verdict (fixed / still vulnerable) asserted against known ground truth. Heavy: runs via docker compose in a `workflow_dispatch` + nightly-scheduled CI job, not on every PR. These same scenarios double as the **evaluation experiment** for the Results chapter (subobjective 4: time/reliability/effort vs manual retesting).
 - **Acceptance** — each FR in the SRS (§10) carries acceptance criteria; each gets a test (usually at integration or system level) tagged with the requirement ID, feeding the traceability matrix (requirement → issue → PR → test).
 

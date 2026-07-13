@@ -61,10 +61,9 @@ through Pydantic schema validation before it can become a domain finding.
 - **Domain/DB change:** `Finding` and `FindingRecord` gain `impact` /
   `attack_vector`. Fresh SQLite databases pick them up via `create_all`; there is
   no migration for pre-existing dev database files (throwaway).
-- **Deferred:** cassette-replay against real Claude needs an API key to record,
-  so the integration test currently uses a deterministic `FunctionModel` that
-  exercises the whole pipeline; recording real cassettes is a follow-up. The
-  FR-03 ≥90%-well-formed acceptance is measured on Álvaro's real report by the
+- **Testing:** the integration test uses a deterministic `FunctionModel` that
+  exercises the whole pipeline offline (no API key, no network). The FR-03
+  ≥90%-well-formed acceptance is measured on Álvaro's real report by the
   evaluation harness (FR-15), not asserted here.
 - **No HTTP endpoint yet:** extraction ships as a library + `make demo-extract`.
   The ingest → extract → persist endpoint arrives with the plan/approval flow

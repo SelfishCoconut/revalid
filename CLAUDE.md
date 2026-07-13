@@ -21,7 +21,7 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 
 - Python 3.12+, managed with `uv`. Run tools via `uv run` or `make`.
 - Full type hints; `mypy --strict` must pass. Ruff lint + format (line length 100, Google docstrings on public API — they feed the generated docs).
-- Tests per pyramid level: `tests/unit/` (no I/O, LLM via Pydantic AI TestModel/FunctionModel), `tests/integration/` (marker `integration`, cassette-replayed LLM), `tests/system/` (marker `system`, dockerized lab). Coverage ≥ 80% on `src/`.
+- Tests per pyramid level: `tests/unit/` (no I/O, LLM via Pydantic AI TestModel/FunctionModel), `tests/integration/` (marker `integration`, real I/O + component wiring; LLM via the same Pydantic AI stand-ins), `tests/system/` (marker `system`, dockerized lab). Coverage ≥ 80% on `src/`.
 - **Before writing any new helper/utility: search the codebase-memory graph for an existing implementation** (`search_graph`). Duplication is the #1 AI-development failure mode here.
 - Complexity gate: xenon max absolute C. If a function trips it, refactor, don't suppress.
 
