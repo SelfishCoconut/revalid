@@ -10,6 +10,8 @@ Generated from docstrings by mkdocstrings — edit the code, not this page.
 
 ::: revalid.pdf
 
+::: revalid.extract
+
 ::: revalid.db
 
 ::: revalid.app

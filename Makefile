@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-walking-skeleton lab-up lab-down run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-walking-skeleton lab-up lab-down run
 
 lint:
 	uv run ruff check src tests
@@ -29,6 +29,11 @@ demo-ingest:
 # FR-01 demo: extract a PDF report into raw finding candidates (no LLM, no lab)
 demo-ingest-pdf:
 	uv run python scripts/demo/ingest_pdf.py
+
+# FR-03 demo: LLM-extract structured findings from a PDF (Claude if ANTHROPIC_API_KEY,
+# else an offline stand-in model — runs the full FR-01 -> FR-03 pipeline either way)
+demo-extract:
+	uv run python scripts/demo/extract_pdf.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

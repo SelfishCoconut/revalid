@@ -30,6 +30,8 @@ class FindingRecord(Base):
     title: Mapped[str] = mapped_column(String(500))
     severity: Mapped[str] = mapped_column(String(16))
     description: Mapped[str]
+    impact: Mapped[str] = mapped_column(default="")
+    attack_vector: Mapped[str] = mapped_column(default="")
     affected_endpoints: Mapped[list[str]] = mapped_column(JSON)
     reproduction_steps: Mapped[list[str]] = mapped_column(JSON)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON)
@@ -41,6 +43,8 @@ class FindingRecord(Base):
             title=finding.title,
             severity=finding.severity.value,
             description=finding.description,
+            impact=finding.impact,
+            attack_vector=finding.attack_vector,
             affected_endpoints=list(finding.affected_endpoints),
             reproduction_steps=list(finding.reproduction_steps),
             raw=finding.raw,
@@ -52,6 +56,8 @@ class FindingRecord(Base):
             title=self.title,
             severity=Severity(self.severity),
             description=self.description,
+            impact=self.impact,
+            attack_vector=self.attack_vector,
             affected_endpoints=tuple(self.affected_endpoints),
             reproduction_steps=tuple(self.reproduction_steps),
             raw=self.raw,
