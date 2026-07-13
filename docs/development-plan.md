@@ -89,7 +89,6 @@ Keep hooks as small POSIX shell scripts; wire them in project `settings.json` so
 ## 5. Custom agents (`.claude/agents/`)
 
 Keep minimal — the code-review plugin already covers general review:
-- **`security-auditor`** — reviews diffs for vulnerabilities (it's a security tool; injection into the retest executor is a real risk), checks no sensitive data is being committed, validates that retest actions stay within lab-target scope.
 - **`thesis-reviewer`** — reviews chapter drafts against the tribunal's Anexo I rubric (structure, clear English, all figures/tables referenced and discussed, original sections differentiated, sources cited) and checks the AI declaration stays consistent with the log.
 - **`doc-curator`** — owns documentation health. On each PR / on demand: checks that public APIs have docstrings (they feed the generated docs), that authored Mermaid diagrams (sequence, C4) still match the code they describe, that `docs/` pages affected by the diff are updated, and flags when a decision deserves an ADR. Complements the auto-generated docs in §11, which never need manual syncing.
 - **`codebase-sanity`** — whole-repo, longitudinal quality guardian targeting the specific pathologies of AI-assisted development, which diff-scoped review cannot see (each PR looks fine; the codebase still degrades). Run on demand and **before every milestone release**; it interprets mechanical signals rather than just reading code:
@@ -194,7 +193,7 @@ This will grow large; the environment is designed so Claude works from **indexes
 3. Copy English template `docs/Plantillas TFG/PLANTILLA TFG_ENG/` → `thesis/`, apply Carlito font fix, verify local build (install TeX Live XeLaTeX + latexmk + ttf-carlito if missing).
 4. Write `CLAUDE.md`.
 5. Hooks scripts + project `settings.json` wiring.
-6. Skills (`ai-declaration`, `thesis`, `adr`, `progress-report`, `requirements`, `docs`, `retest-lab` stub) + agents (`security-auditor`, `thesis-reviewer`, `doc-curator`, `codebase-sanity`).
+6. Skills (`ai-declaration`, `thesis`, `adr`, `progress-report`, `requirements`, `docs`, `retest-lab` stub) + agents (`thesis-reviewer`, `doc-curator`, `codebase-sanity`).
 6b. Documentation system: MkDocs Material + mkdocstrings + pyreverse/pydeps generation (`make docs`), C4/Mermaid seed pages, GitHub Pages deploy workflow.
 7. GitHub workflows + dependabot + issue/PR templates; push; configure branch protection; create the GitHub Projects **Kanban board** (columns + WIP limits + MoSCoW priority field, §9).
 8. Enable the marketplace plugins listed in §7.

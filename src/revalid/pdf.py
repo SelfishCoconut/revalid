@@ -7,14 +7,9 @@ pdfplumber; text inside table cells is surfaced by its text extractor directly,
 so table-borne finding data (severity/CWE/endpoint grids) survives without
 separate table parsing.
 
-Malformed *and* hostile input fails closed with a clear :class:`PdfError` rather
-than crashing: a non-PDF (missing ``%PDF-`` header), a document over the size /
-page / extracted-text bounds (decompression-bomb guard), a document that blows a
-wall-clock deadline (a single crafted page can hang pdfminer's layout analysis),
-a structurally corrupt PDF, and a PDF with no extractable text (scanned/image-only
-— out of scope, no OCR) are all rejected. As the untrusted-input trust boundary,
-extraction also converts any lower-level parser failure (including ``MemoryError``
-from the pdfminer C path) into a ``PdfError``.
+Malformed input fails closed with a clear :class:`PdfError` rather than crashing:
+a non-PDF (missing ``%PDF-`` header), a structurally corrupt PDF, and a PDF with
+no extractable text (scanned/image-only — out of scope, no OCR) are all rejected.
 """
 
 from __future__ import annotations
@@ -22,24 +17,13 @@ from __future__ import annotations
 import io
 import itertools
 import re
-import signal
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from types import FrameType
 
 import pdfplumber
+from pdfminer.psexceptions import PSException
+from pdfplumber.utils.exceptions import PdfminerException
 from pydantic import BaseModel, ConfigDict, Field
 
 _PDF_MAGIC = b"%PDF-"
-
-# Resource bounds against malicious PDFs (decompression bombs, pathological page
-# counts): this module is the untrusted-input trust boundary, so it fails closed
-# rather than letting pdfminer exhaust memory. Generous for real pentest reports.
-_MAX_PDF_BYTES = 25 * 2**20  # 25 MiB input file
-_MAX_PAGES = 500  # pages per report
-_MAX_TEXT_CHARS = 10 * 2**20  # 10 MiB of cumulative extracted text
-_MAX_EXTRACT_SECONDS = 30.0  # wall-clock cap: a single crafted page can hang pdfminer
 
 # Common per-finding heading conventions in pentest reports. Verbose form so no
 # code formatter reflows it: whitespace here is ignored, but spaces inside the
@@ -117,22 +101,14 @@ def read_pdf(data: bytes) -> PdfReport:
         The extracted report: per-page and whole-document text.
 
     Raises:
-        PdfError: If ``data`` is not a PDF, exceeds the size/page/text bounds,
-            is structurally corrupt, or yields no extractable text (e.g. a
-            scanned/image-only document).
+        PdfError: If ``data`` is not a PDF, is structurally corrupt, or yields
+            no extractable text (e.g. a scanned/image-only document).
     """
     if data[: len(_PDF_MAGIC)] != _PDF_MAGIC:
         raise PdfError("not a PDF (missing %PDF- header)")
-    if len(data) > _MAX_PDF_BYTES:
-        raise PdfError(f"PDF too large ({len(data)} bytes > {_MAX_PDF_BYTES} limit)")
     try:
         pages = _extract_pages(data)
-    except PdfError:
-        raise  # our own bounds already carry a clear message — don't relabel
-    except Exception as exc:
-        # Untrusted-input boundary: convert *any* parser failure — including
-        # MemoryError/RecursionError/SystemError from the pdfminer C path — into
-        # a typed PdfError so the contract ("reject, never crash") holds.
+    except (PdfminerException, PSException) as exc:
         raise PdfError(f"could not parse PDF: {exc}") from exc
 
     text = "\n\n".join(page.text for page in pages if page.text).strip()
@@ -141,69 +117,13 @@ def read_pdf(data: bytes) -> PdfReport:
     return PdfReport(page_count=len(pages), pages=pages, text=text)
 
 
-class _ExtractionTimeoutError(Exception):
-    """Internal: the extraction wall-clock deadline fired."""
-
-
-@contextmanager
-def _extraction_deadline(seconds: float) -> Iterator[dict[str, bool]]:
-    """Best-effort wall-clock cap on extraction (main thread + POSIX only).
-
-    Yields a one-key flag dict set ``True`` if the deadline fired, letting the
-    caller tell a timeout (which pdfplumber may re-wrap into its own exception
-    type) apart from a genuine parse error. Off the main thread — e.g. under a
-    future threadpool-served endpoint — signal timers are unavailable, so the
-    guard is skipped and the size/page/text bounds are the only defence; that
-    path should run extraction in a subprocess instead (follow-up).
-
-    Args:
-        seconds: Deadline in wall-clock seconds.
-
-    Yields:
-        A ``{"fired": bool}`` flag, updated if the deadline expires.
-    """
-    hit = {"fired": False}
-    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "SIGALRM"):
-        yield hit
-        return
-
-    def _fire(signum: int, frame: FrameType | None) -> None:
-        hit["fired"] = True
-        raise _ExtractionTimeoutError
-
-    previous = signal.signal(signal.SIGALRM, _fire)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
-    try:
-        yield hit
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
-
-
 def _extract_pages(data: bytes) -> tuple[PdfPage, ...]:
-    """Open with pdfplumber and pull each page's text, bounded against bombs."""
-    pages: list[PdfPage] = []
-    total_chars = 0
-    with _extraction_deadline(_MAX_EXTRACT_SECONDS) as deadline:
-        try:
-            with pdfplumber.open(io.BytesIO(data)) as pdf:
-                for index, page in enumerate(pdf.pages, start=1):
-                    if index > _MAX_PAGES:
-                        raise PdfError(f"too many pages (> {_MAX_PAGES}); refusing to parse")
-                    text = (page.extract_text() or "").strip()
-                    total_chars += len(text)
-                    if total_chars > _MAX_TEXT_CHARS:
-                        raise PdfError(f"extracted text exceeds {_MAX_TEXT_CHARS}-char limit")
-                    pages.append(PdfPage(number=index, text=text))
-        except PdfError:
-            raise
-        except Exception as exc:
-            if deadline["fired"]:
-                raise PdfError(
-                    f"extraction timed out (> {_MAX_EXTRACT_SECONDS:g}s); refusing to parse"
-                ) from exc
-            raise
-    return tuple(pages)
+    """Open the document with pdfplumber and pull each page's text."""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        return tuple(
+            PdfPage(number=index, text=(page.extract_text() or "").strip())
+            for index, page in enumerate(pdf.pages, start=1)
+        )
 
 
 def segment_findings(report: PdfReport) -> tuple[FindingCandidate, ...]:
