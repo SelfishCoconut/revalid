@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import { errorMessage } from "../lib/format";
 import { useUploadReport } from "../hooks/useReports";
+import { Button } from "./ui/Button";
 import { Eyebrow, Panel } from "./ui/Panel";
 import { StatusBadge } from "./StatusBadge";
 
@@ -69,14 +70,12 @@ export function UploadReport() {
         <p className="text-sm text-dim">
           Drag a pentest PDF here, or
         </p>
-        <button
-          type="button"
+        <Button
           onClick={() => inputRef.current?.click()}
           disabled={upload.isPending}
-          className="rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-medium text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-50"
         >
           {upload.isPending ? "Uploading…" : "Choose PDF"}
-        </button>
+        </Button>
         <input
           ref={inputRef}
           type="file"

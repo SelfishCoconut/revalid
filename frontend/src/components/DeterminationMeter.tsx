@@ -1,18 +1,8 @@
 import type { VerdictStatus } from "../api/types";
-
-interface Segment {
-  status: VerdictStatus;
-  label: string;
-  bar: string;
-  text: string;
-}
+import { STATUS_META, TONE_FILL, TONE_TEXT, VERDICT_TONE } from "../lib/status";
 
 // Worst → best, read left to right: the instrument's aggregate reading.
-const SEGMENTS: Segment[] = [
-  { status: "still_open", label: "still open", bar: "bg-danger", text: "text-danger-fg" },
-  { status: "inconclusive", label: "inconclusive", bar: "bg-warn", text: "text-warn-fg" },
-  { status: "fixed", label: "fixed", bar: "bg-ok", text: "text-ok-fg" },
-];
+const ORDER: VerdictStatus[] = ["still_open", "inconclusive", "fixed"];
 
 /**
  * The determination ledger: one aggregate reading of every retest run so far,
@@ -24,7 +14,7 @@ export function DeterminationMeter({
 }: {
   counts: Record<VerdictStatus, number>;
 }) {
-  const total = SEGMENTS.reduce((sum, { status }) => sum + counts[status], 0);
+  const total = ORDER.reduce((sum, status) => sum + counts[status], 0);
 
   return (
     <div>
@@ -32,13 +22,13 @@ export function DeterminationMeter({
         {total === 0 ? (
           <div className="h-full w-full bg-[repeating-linear-gradient(135deg,var(--color-line)_0,var(--color-line)_1px,transparent_1px,transparent_9px)]" />
         ) : (
-          SEGMENTS.map(({ status, bar }) => {
+          ORDER.map((status) => {
             const value = counts[status];
             if (value === 0) return null;
             return (
               <div
                 key={status}
-                className={`rev-grow h-full ${bar}`}
+                className={`rev-grow h-full ${TONE_FILL[VERDICT_TONE[status]]}`}
                 style={{ width: `${String((value / total) * 100)}%` }}
               />
             );
@@ -47,19 +37,22 @@ export function DeterminationMeter({
       </div>
 
       <dl className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-line/60">
-        {SEGMENTS.map(({ status, label, bar, text }) => (
-          <div key={status} className="bg-panel px-4 py-3">
-            <dt className="flex items-center gap-2">
-              <span aria-hidden="true" className={`size-1.5 rounded-full ${bar}`} />
-              <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">
-                {label}
-              </span>
-            </dt>
-            <dd className={`mt-1.5 font-mono text-3xl font-semibold tabular-nums ${text}`}>
-              {counts[status]}
-            </dd>
-          </div>
-        ))}
+        {ORDER.map((status) => {
+          const tone = VERDICT_TONE[status];
+          return (
+            <div key={status} className="bg-panel px-4 py-3">
+              <dt className="flex items-center gap-2">
+                <span aria-hidden="true" className={`size-1.5 rounded-full ${TONE_FILL[tone]}`} />
+                <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">
+                  {STATUS_META[status].label}
+                </span>
+              </dt>
+              <dd className={`mt-1.5 font-mono text-3xl font-semibold tabular-nums ${TONE_TEXT[tone]}`}>
+                {counts[status]}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
 
       {total === 0 && (

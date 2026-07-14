@@ -8,6 +8,7 @@ import {
   useRetest,
 } from "../hooks/usePlans";
 import { errorMessage } from "../lib/format";
+import { Button } from "./ui/Button";
 import { Eyebrow, Panel } from "./ui/Panel";
 import { StatusBadge } from "./StatusBadge";
 
@@ -186,46 +187,42 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
         )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             disabled={!isProposed || busy}
             onClick={() => {
               edit.mutate(actions.map(toPlannedAction));
             }}
-            className="rounded-lg border border-line px-3 py-1.5 font-mono text-[13px] font-medium text-dim transition-colors hover:bg-panel-2 hover:text-fg disabled:opacity-45"
           >
             Save edits
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="positive"
             disabled={!isProposed || busy}
             onClick={() => {
               approve.mutate();
             }}
-            className="rounded-lg bg-ok px-3 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:brightness-110 disabled:opacity-45"
           >
             Approve
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="danger"
             disabled={!isProposed || busy}
             onClick={() => {
               reject.mutate();
             }}
-            className="rounded-lg border border-danger/40 px-3 py-1.5 font-mono text-[13px] font-medium text-danger-fg transition-colors hover:bg-danger/10 disabled:opacity-45"
           >
             Reject
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            className="ml-auto"
             disabled={!isApproved || busy}
             onClick={() => {
               runRetest.mutate();
             }}
-            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-45"
           >
             {runRetest.isPending ? "Running retest…" : "Run retest"}
-          </button>
+          </Button>
         </div>
 
         {(edit.isError || approve.isError || reject.isError || runRetest.isError) && (

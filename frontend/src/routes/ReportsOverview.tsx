@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 
-import type { VerdictStatus } from "../api/types";
 import { DeterminationMeter } from "../components/DeterminationMeter";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -9,17 +8,11 @@ import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { useReports } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage, formatDateTime } from "../lib/format";
+import { verdictCounts } from "../lib/selectors";
 
 function Hero() {
   const verdicts = useVerdicts();
-  const counts: Record<VerdictStatus, number> = {
-    still_open: 0,
-    inconclusive: 0,
-    fixed: 0,
-  };
-  for (const verdict of verdicts.data ?? []) {
-    counts[verdict.status] += 1;
-  }
+  const counts = verdictCounts(verdicts.data ?? []);
 
   return (
     <Panel className="overflow-hidden">
