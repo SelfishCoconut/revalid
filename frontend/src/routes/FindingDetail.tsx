@@ -2,28 +2,19 @@ import type { ReactNode } from "react";
 
 import { Link, useParams } from "react-router-dom";
 
-import type { Plan } from "../api/types";
 import { PipelineTrack } from "../components/PipelineTrack";
 import { PlanEditor } from "../components/PlanEditor";
 import { PlanHistory } from "../components/PlanHistory";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { Spinner } from "../components/Spinner";
 import { VerdictCard } from "../components/VerdictCard";
+import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { useFindings } from "../hooks/useFindings";
 import { useGeneratePlan, usePlans } from "../hooks/usePlans";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-
-/** The plan the workflow acts on: newest version that is proposed or approved. */
-function activePlan(plans: Plan[]): Plan | undefined {
-  return plans
-    .filter((plan) => plan.status === "proposed" || plan.status === "approved")
-    .reduce<Plan | undefined>(
-      (latest, plan) => (!latest || plan.version > latest.version ? plan : latest),
-      undefined,
-    );
-}
+import { activePlan } from "../lib/selectors";
 
 function DetailBlock({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -143,16 +134,15 @@ export function FindingDetail() {
             <p className="text-sm text-dim">
               No plan yet. Generate one to propose gated retest actions.
             </p>
-            <button
-              type="button"
+            <Button
+              className="mt-3"
               disabled={generate.isPending}
               onClick={() => {
                 generate.mutate();
               }}
-              className="mt-3 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-45"
             >
               {generate.isPending ? "Generating…" : "Generate plan"}
-            </button>
+            </Button>
             {generate.isError && (
               <p role="alert" className="mt-2 text-sm text-danger-fg">
                 {errorMessage(generate.error)}

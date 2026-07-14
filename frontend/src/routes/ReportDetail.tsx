@@ -1,6 +1,5 @@
 import { Link, useParams } from "react-router-dom";
 
-import type { Verdict } from "../api/types";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -9,16 +8,7 @@ import { useFindings } from "../hooks/useFindings";
 import { useReport } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-
-/** Latest verdict for a finding = highest id among that finding's verdicts. */
-function latestVerdict(verdicts: Verdict[], findingId: number): Verdict | undefined {
-  return verdicts
-    .filter((verdict) => verdict.finding_id === findingId)
-    .reduce<Verdict | undefined>(
-      (latest, verdict) => (!latest || verdict.id > latest.id ? verdict : latest),
-      undefined,
-    );
-}
+import { latestVerdict } from "../lib/selectors";
 
 function BackLink({ to, children }: { to: string; children: string }) {
   return (

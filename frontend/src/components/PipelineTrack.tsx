@@ -1,23 +1,15 @@
 import type { VerdictStatus } from "../api/types";
-
-const VERDICT_RING: Record<VerdictStatus, string> = {
-  still_open: "ring-danger/50",
-  inconclusive: "ring-warn/50",
-  fixed: "ring-ok/50",
-};
-const VERDICT_FILL: Record<VerdictStatus, string> = {
-  still_open: "bg-danger",
-  inconclusive: "bg-warn",
-  fixed: "bg-ok",
-};
+import { pipelineReach } from "../lib/selectors";
+import { TONE_FILL, TONE_RING, VERDICT_TONE } from "../lib/status";
 
 const STAGES = ["extract", "plan", "approve", "retest", "verdict"];
 
 /**
  * The revalidation pipeline as a live state track. Every finding travels the
  * same fixed sequence — extract → plan → approve → retest → verdict — so the
- * order carries real meaning; this shows how far *this* finding has reached.
- * The final node borrows the verdict's colour once a determination exists.
+ * order carries real meaning; this shows how far *this* finding has reached
+ * (see {@link pipelineReach}). The final node borrows the verdict's colour once
+ * a determination exists.
  */
 export function PipelineTrack({
   planned,
@@ -30,15 +22,7 @@ export function PipelineTrack({
   retested: boolean;
   verdict?: VerdictStatus;
 }) {
-  // Cumulative + monotonic: a later state implies the earlier ones happened.
-  const reached = [
-    true,
-    planned || approved || retested,
-    approved || retested,
-    retested,
-    retested,
-  ];
-  const current = reached.lastIndexOf(true);
+  const { reached, current } = pipelineReach({ planned, approved, retested });
 
   return (
     <div className="overflow-x-auto px-1 py-1">
@@ -57,11 +41,12 @@ export function PipelineTrack({
             let ring = "ring-line";
             let fill = "bg-line-2";
             if (isReached && i === 4 && verdict) {
-              ring = VERDICT_RING[verdict];
-              fill = VERDICT_FILL[verdict];
+              const tone = VERDICT_TONE[verdict];
+              ring = TONE_RING[tone];
+              fill = TONE_FILL[tone];
             } else if (isReached) {
-              ring = "ring-iris/50";
-              fill = "bg-iris";
+              ring = TONE_RING.iris;
+              fill = TONE_FILL.iris;
             }
             return (
               <li key={stage} className="flex flex-col items-center gap-2">
