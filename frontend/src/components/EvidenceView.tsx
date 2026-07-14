@@ -1,10 +1,22 @@
 import type { Verdict } from "../api/types";
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Field({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
-    <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[10rem_1fr]">
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className={`text-sm text-slate-800 ${mono ? "font-mono break-all" : ""}`}>{value}</dd>
+    <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[9rem_1fr] sm:gap-3">
+      <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">
+        {label}
+      </dt>
+      <dd className={`text-[13px] text-fg ${mono ? "break-all font-mono text-dim" : ""}`}>
+        {value}
+      </dd>
     </div>
   );
 }
@@ -16,11 +28,27 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
 export function EvidenceView({ verdict }: { verdict: Verdict }) {
   const { evidence } = verdict;
   return (
-    <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
-      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-slate-700">
+    <details className="group mt-3 overflow-hidden rounded-lg border border-line bg-panel-2/50">
+      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-dim transition-colors hover:text-fg">
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          aria-hidden="true"
+          className="transition-transform group-open:rotate-90"
+        >
+          <path
+            d="m3 1 4 4-4 4"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
         Evidence
       </summary>
-      <dl className="space-y-2 px-3 pb-3">
+      <dl className="space-y-2.5 border-t border-line px-3 py-3">
         <Field
           label="Request"
           value={`${evidence.request_method} ${evidence.request_url}`}

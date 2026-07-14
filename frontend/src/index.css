@@ -1,1 +1,154 @@
+/* Self-hosted fonts (no CDN — the tool runs offline on localhost, NFR-03).
+   IBM Plex is the "engineered instrument" superfamily: Mono carries every
+   machine value (methods, URLs, tokens, verdict labels), Sans carries prose. */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-700.css";
 @import "tailwindcss";
+
+@theme {
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo,
+    Consolas, monospace;
+
+  /* Instrument housing — cool graphite, not pure black. */
+  --color-ink: #080b11;
+  --color-ink-2: #0a0e15;
+  --color-panel: #10151e;
+  --color-panel-2: #151c27;
+  --color-line: #212a37;
+  --color-line-2: #2b3646;
+  --color-fg: #e8edf4;
+  --color-dim: #9aa7b8;
+  --color-faint: #6a7788;
+
+  /* The system's voice — AI extraction, proposals, the instrument firing. */
+  --color-iris: #8c7bff;
+  --color-iris-bright: #ab9dff;
+  --color-iris-deep: #5a4bd4;
+
+  /* Reality's verdict + severity ramp. */
+  --color-danger: #ff5d6e;
+  --color-warn: #f2b44e;
+  --color-ok: #33d19a;
+  --color-high: #ff8a4c;
+  --color-low: #4fb8e8;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    background-color: var(--color-ink);
+    background-image:
+      radial-gradient(
+        70rem 34rem at 50% -6rem,
+        color-mix(in oklab, var(--color-iris) 13%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        48rem 24rem at 102% -2rem,
+        color-mix(in oklab, #1b2637 55%, transparent),
+        transparent 70%
+      );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-iris) 42%, transparent);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-iris);
+    outline-offset: 2px;
+    border-radius: 5px;
+  }
+  * {
+    scrollbar-color: var(--color-line-2) transparent;
+    scrollbar-width: thin;
+  }
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-2);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-faint);
+    background-clip: padding-box;
+  }
+}
+
+/* Signature motion — a powered-on instrument, kept quiet. */
+@keyframes rev-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.78);
+  }
+}
+@keyframes rev-rise {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rev-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.rev-live {
+  animation: rev-pulse 2.4s ease-in-out infinite;
+}
+.rev-rise {
+  animation: rev-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rev-grow {
+  transform-origin: left;
+  animation: rev-grow 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

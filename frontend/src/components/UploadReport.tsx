@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import { errorMessage } from "../lib/format";
 import { useUploadReport } from "../hooks/useReports";
+import { Eyebrow, Panel } from "./ui/Panel";
 import { StatusBadge } from "./StatusBadge";
 
 /**
@@ -18,7 +19,12 @@ export function UploadReport() {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
+    <Panel className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <Eyebrow>Load report</Eyebrow>
+        <span className="font-mono text-[11px] text-faint">PDF</span>
+      </div>
+
       <div
         onDragOver={(event) => {
           event.preventDefault();
@@ -32,16 +38,42 @@ export function UploadReport() {
           setDragging(false);
           submit(event.dataTransfer.files[0]);
         }}
-        className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-6 py-8 text-center transition-colors ${
-          dragging ? "border-sky-400 bg-sky-50" : "border-slate-300"
+        className={`flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-6 py-9 text-center transition-colors ${
+          dragging
+            ? "border-iris/70 bg-iris/8"
+            : "border-line-2 bg-panel-2/40 hover:border-line-2/80"
         }`}
       >
-        <p className="text-sm text-slate-600">Drag a pentest PDF here, or</p>
+        <svg
+          width="30"
+          height="30"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+          className="text-faint"
+        >
+          <path
+            d="M12 15V4m0 0 4 4m-4-4-4 4"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+        <p className="text-sm text-dim">
+          Drag a pentest PDF here, or
+        </p>
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={upload.isPending}
-          className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          className="rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-medium text-ink transition-colors hover:bg-iris-bright disabled:opacity-50"
         >
           {upload.isPending ? "Uploading…" : "Choose PDF"}
         </button>
@@ -59,19 +91,20 @@ export function UploadReport() {
       </div>
 
       {upload.isError && (
-        <p role="alert" className="mt-3 text-sm text-red-700">
+        <p role="alert" className="mt-3 text-sm text-danger">
           Upload failed: {errorMessage(upload.error)}
         </p>
       )}
 
       {upload.isSuccess && (
-        <p className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+        <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-dim">
           <span>
-            Uploaded <span className="font-medium">{upload.data.filename}</span>
+            Uploaded{" "}
+            <span className="font-mono font-medium text-fg">{upload.data.filename}</span>
           </span>
           <StatusBadge status={upload.data.status} />
         </p>
       )}
-    </div>
+    </Panel>
   );
 }
