@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 
 import httpx
 
@@ -92,7 +93,7 @@ def run_probe(client: httpx.Client, probe: Probe) -> Verdict:
         evidence = execute(client, probe)
     except httpx.RequestError as exc:
         return _unreachable_verdict(probe, exc)
-    return assess(evidence)
+    return _ASSESSORS.get(probe.kind, assess_generic)(evidence)
 
 
 def assess(evidence: Evidence) -> Verdict:
@@ -134,6 +135,30 @@ def assess(evidence: Evidence) -> Verdict:
         matched_indicators=(f"http_{status}",),
         evidence=evidence,
     )
+
+
+def assess_generic(evidence: Evidence) -> Verdict:
+    """Assess a probe with no kind-specific matcher (FR-05 execution).
+
+    Without a bespoke matcher every outcome is honestly *inconclusive* — generic
+    indicator-matching from ``expected_indicator`` is FR-08/FR-09 work, not
+    guessed here. The observed status is recorded for the audit trail.
+    """
+    status = evidence.response_status
+    return Verdict(
+        status=VerdictStatus.INCONCLUSIVE,
+        reason_code="no_assessor",
+        rationale=(
+            f"No kind-specific assessor for this probe; observed HTTP {status}. "
+            "Manual review required (generic matching is FR-08/FR-09)."
+        ),
+        matched_indicators=(f"http_{status}",),
+        evidence=evidence,
+    )
+
+
+# Assessors keyed by probe kind; unknown kinds fall back to assess_generic.
+_ASSESSORS: dict[str, Callable[[Evidence], Verdict]] = {"sqli-login-bypass": assess}
 
 
 def _has_auth_token(body: str) -> bool:
