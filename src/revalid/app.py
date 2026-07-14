@@ -34,6 +34,7 @@ from revalid.approval import (
     reject_plan,
     save_generated_plan,
 )
+from revalid.audit import rederive_run
 from revalid.db import (
     FindingRecord,
     PlanRecord,
@@ -70,6 +71,24 @@ class VerdictOut(Verdict):
     finding_id: int
     probe_kind: str
     plan_version: int | None = None
+
+
+class DiscrepancyOut(BaseModel):
+    """A stored verdict that no longer re-derives from its evidence (FR-10)."""
+
+    verdict_id: int
+    finding_id: int
+    stored: str
+    rederived: str
+
+
+class AuditOut(BaseModel):
+    """Result of re-deriving every verdict from the stored audit trail (FR-10)."""
+
+    total: int
+    reproduced: int
+    ok: bool
+    discrepancies: list[DiscrepancyOut]
 
 
 class PlanOut(BaseModel):
@@ -453,6 +472,25 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
             )
             for r in records
         ]
+
+    @router.get("/audit", response_model=AuditOut)
+    def audit_rederive(session: SessionDep) -> AuditOut:
+        """Re-derive every verdict from stored evidence alone — no re-execution (FR-10)."""
+        report = rederive_run(session)
+        return AuditOut(
+            total=report.total,
+            reproduced=report.reproduced,
+            ok=report.ok,
+            discrepancies=[
+                DiscrepancyOut(
+                    verdict_id=d.verdict_id,
+                    finding_id=d.finding_id,
+                    stored=d.stored,
+                    rederived=d.rederived,
+                )
+                for d in report.discrepancies
+            ],
+        )
 
 
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:

@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -49,6 +49,11 @@ demo-approval:
 # downgrade, fully offline
 demo-sanity:
 	uv run python scripts/demo/execution_sanity.py
+
+# FR-10 audit trail (ADR-0015): re-derive every verdict from stored evidence
+# alone, no re-execution — offline
+demo-audit:
+	uv run python scripts/demo/audit_rederive.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

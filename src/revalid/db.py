@@ -167,6 +167,9 @@ class VerdictRecord(Base):
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)
     plan_version: Mapped[int | None] = mapped_column(default=None)
+    # Audit trail (FR-10): when the retest ran and who ran it (the executor).
+    actor: Mapped[str] = mapped_column(String(32), default="executor")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     @classmethod
     def from_domain(
@@ -177,8 +180,9 @@ class VerdictRecord(Base):
         *,
         plan_id: int | None = None,
         plan_version: int | None = None,
+        actor: str = "executor",
     ) -> VerdictRecord:
-        """Build a row from a domain verdict against ``finding_id``."""
+        """Build a row from a domain verdict against ``finding_id`` (FR-10 actor)."""
         return cls(
             finding_id=finding_id,
             probe_kind=probe_kind,
@@ -189,6 +193,7 @@ class VerdictRecord(Base):
             evidence=verdict.evidence.model_dump(),
             plan_id=plan_id,
             plan_version=plan_version,
+            actor=actor,
         )
 
     def to_domain(self) -> Verdict:

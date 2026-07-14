@@ -91,7 +91,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: Every system action (ingestion, extraction, plan generation, approval, each probe, verdict) shall be persisted with timestamp and actor (user / model / executor) such that any verdict can be re-derived from the trail alone.
 - **Acceptance criteria**:
-  - [ ] For any completed run, a re-derivation routine reproduces every verdict from stored data only (no re-execution).
+  - [x] For any completed run, a re-derivation routine reproduces every verdict from stored data only (no re-execution). *(ADR-0015: `audit.rederive_run` recomputes each verdict from its stored evidence via the shared pure `retest.assess_evidence` + FR-08 `review_verdict`; `GET /api/audit` + `make demo-audit`. `VerdictRecord` gained `created_at`/`actor` for the timestamp+actor trail.)*
 
 ### FR-11 — Results dashboard (web UI)
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -132,6 +132,7 @@ non-lab targets, destructive exploitation.
 ### NFR-02 — Full reproducibility
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Target**: every verdict re-derivable from the persisted audit trail alone (FR-10 acceptance is the test). Model name/version, prompts, and parameters recorded per LLM call.
+- **Status**: verdict re-derivation **met** via ADR-0015 (`audit.rederive_run`). LLM model name is persisted (report/plan `raw`); per-LLM-call prompt/parameter capture is a tracked follow-up (does not affect verdict re-derivability).
 
 ### NFR-03 — Safety
 - **Priority**: Must · **Source**: interview 2026-06-11 + regulation

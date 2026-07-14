@@ -44,7 +44,7 @@ Thin end-to-end slice proving the architecture. Scope deliberately minimal:
 
 ### M4 — Trust & audit  ·  FR-08 #13, FR-10 #15, FR-12 #17
 - [x] Execution sanity checker: plan-deviation blocking + ambiguity→inconclusive (endpoint-moved test case) (FR-08) — `src/revalid/sanity.py` (ADR-0014, proposed): an independent verifier wired into `execute_approved_plan` via `guarded_run`. Fail-closed plan-deviation block (`PlanDeviationError` + log → API 409, AC1); conservative ambiguity downgrade (any *fixed* on 404/410 → `endpoint_changed`, on 3xx → `ambiguous_response`, AC2) — only ever downgrades, never manufactures confidence. `make demo-sanity` shows both offline.
-- [ ] Full audit trail; verdict re-derivation routine (FR-10, NFR-02)
+- [x] Full audit trail; verdict re-derivation routine (FR-10, NFR-02) — `src/revalid/audit.py` (ADR-0015, proposed): a verdict is a pure function of its stored evidence, so `rederive_run` recomputes every verdict from the shared pure `retest.assess_evidence` + FR-08 `review_verdict` and diffs it against storage — reproduced from the trail alone, no re-execution. `VerdictRecord` gained `created_at`/`actor`; exposed at `GET /api/audit`; `make demo-audit`. NFR-02 met for verdicts (per-LLM-call prompt capture is a follow-up).
 - [ ] Versioned JSON export with schema (FR-12)
 - **Done when**: re-derivation reproduces all verdicts from stored data; release `v0.4.0`.
 
