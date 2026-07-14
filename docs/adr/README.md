@@ -15,3 +15,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0009](0009-llm-extraction-architecture.md) | LLM finding extraction: per-candidate Pydantic AI with a schema-validation gate | proposed | 2026-07-13 |
 | [0010](0010-model-agnostic-llm-config.md) | Model-agnostic LLM config: `REVALID_LLM_MODEL` env var, Ollama via Pydantic AI | proposed | 2026-07-13 |
 | [0011](0011-retest-plan-generation.md) | Retest-plan generation: LLM-proposed typed actions, deterministically gated | proposed | 2026-07-13 |
+| [0012](0012-server-side-plan-approval-gate.md) | Server-side plan approval gate: versioned plan rows, single execution chokepoint | proposed | 2026-07-14 |
