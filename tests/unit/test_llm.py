@@ -6,8 +6,8 @@ config-only switch never needs a backend to exist.
 
 import pytest
 
-from revalid.extract import _model_name, build_extraction_agent
-from revalid.llm import DEFAULT_MODEL, MODEL_ENV, resolve_model
+from revalid.extract import build_extraction_agent
+from revalid.llm import DEFAULT_MODEL, MODEL_ENV, agent_model_name, resolve_model
 
 
 def test_defaults_to_claude_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,4 +32,4 @@ def test_agent_follows_config_without_code_change(monkeypatch: pytest.MonkeyPatc
     agent = build_extraction_agent()
     assert agent.model == "ollama:llama3.2"
     # NFR-02: lineage records the configured backend, whichever it is.
-    assert _model_name(agent) == "ollama:llama3.2"
+    assert agent_model_name(agent) == "ollama:llama3.2"

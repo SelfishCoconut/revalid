@@ -20,7 +20,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import KnownModelName, Model
 
 from revalid.domain import Finding, Severity
-from revalid.llm import resolve_model
+from revalid.llm import agent_model_name, resolve_model
 from revalid.pdf import FindingCandidate, PdfReport, segment_findings
 
 _MAX_OUTPUT_RETRIES = 2
@@ -134,7 +134,7 @@ def extract_report(
     Returns:
         The valid findings and the flagged failures.
     """
-    model_name = _model_name(agent)
+    model_name = agent_model_name(agent)
     findings: list[Finding] = []
     failures: list[ExtractionFailure] = []
     for candidate in segment_findings(report):
@@ -171,11 +171,3 @@ def _to_finding(
             "extracted": extracted.model_dump(),
         },
     )
-
-
-def _model_name(agent: Agent[None, list[ExtractedFinding]]) -> str:
-    """Best-effort stable model identifier for the audit trail (NFR-02)."""
-    model = agent.model
-    if isinstance(model, str):
-        return model
-    return getattr(model, "model_name", str(model))

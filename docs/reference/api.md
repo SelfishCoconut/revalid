@@ -14,6 +14,8 @@ Generated from docstrings by mkdocstrings — edit the code, not this page.
 
 ::: revalid.extract
 
+::: revalid.plan
+
 ::: revalid.db
 
 ::: revalid.app

@@ -16,7 +16,9 @@ first use.
 from __future__ import annotations
 
 import os
+from typing import Any
 
+from pydantic_ai import Agent
 from pydantic_ai.models import KnownModelName
 
 MODEL_ENV = "REVALID_LLM_MODEL"
@@ -36,3 +38,23 @@ def resolve_model() -> str:
         A ``provider:model`` string for Pydantic AI (validated at first call).
     """
     return os.environ.get(MODEL_ENV, "").strip() or DEFAULT_MODEL
+
+
+def agent_model_name(agent: Agent[Any, Any]) -> str:
+    """Return a best-effort stable model identifier for an agent's audit lineage.
+
+    Recording which backend produced a finding or plan is required for the audit
+    trail (NFR-02). Works whether the agent was built from a model string or an
+    injected model instance (``TestModel``/``FunctionModel`` in tests).
+
+    Args:
+        agent: Any Pydantic AI agent.
+
+    Returns:
+        The model string, or the instance's ``model_name`` (falling back to its
+        ``repr``).
+    """
+    model = agent.model
+    if isinstance(model, str):
+        return model
+    return getattr(model, "model_name", str(model))

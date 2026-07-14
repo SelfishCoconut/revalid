@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-walking-skeleton lab-up lab-down run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-walking-skeleton lab-up lab-down run
 
 lint:
 	uv run ruff check src tests
@@ -34,6 +34,11 @@ demo-ingest-pdf:
 # else an offline stand-in model — runs the full FR-01 -> FR-03 pipeline either way)
 demo-extract:
 	uv run python scripts/demo/extract_pdf.py
+
+# FR-04 demo: derive a gated retest plan from a finding (configured backend or
+# an offline stand-in); shows an off-allowlist action being dropped by the gate
+demo-plan:
+	uv run python scripts/demo/plan_retest.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:
