@@ -68,7 +68,7 @@ def test_approved_plan_retest_still_open_via_api() -> None:
     app = create_app(engine=engine)
     with TestClient(app) as client:
         client.post(
-            "/findings/import",
+            "/api/findings/import",
             json={"findings": [{"title": "SQLi login", "severity": "Critical"}]},
         )
         with session_factory(engine)() as session:
@@ -79,7 +79,7 @@ def test_approved_plan_retest_still_open_via_api() -> None:
             )
             save_generated_plan(session, 1, PlanResult(plan=plan))
             approve_plan(session, 1)
-        verdicts = client.post("/findings/1/retest").json()
+        verdicts = client.post("/api/findings/1/retest").json()
 
     assert verdicts[0]["status"] == "still_open"
     assert verdicts[0]["reason_code"] == "sqli_auth_bypass_succeeded"

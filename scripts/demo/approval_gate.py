@@ -58,16 +58,19 @@ def main() -> int:
     app.dependency_overrides[get_probe_client] = _probe_client
     with TestClient(app) as client:
         client.post(
-            "/findings/import", json={"findings": [{"title": "SQLi login", "severity": "Critical"}]}
+            "/api/findings/import",
+            json={"findings": [{"title": "SQLi login", "severity": "Critical"}]},
         )
         print(
-            "1. retest before approval:", client.post("/findings/1/retest").status_code, "(refused)"
+            "1. retest before approval:",
+            client.post("/api/findings/1/retest").status_code,
+            "(refused)",
         )
-        print("2. generate plan:", client.post("/findings/1/plan").json()["status"], "v1")
-        edited = client.put("/findings/1/plan", json=[_ACTION]).json()
+        print("2. generate plan:", client.post("/api/findings/1/plan").json()["status"], "v1")
+        edited = client.put("/api/findings/1/plan", json=[_ACTION]).json()
         print(f"3. edit plan: v{edited['version']} ({edited['origin']})")
-        print("4. approve:", client.post("/findings/1/plan/approve").json()["status"])
-        verdict = client.post("/findings/1/retest").json()[0]
+        print("4. approve:", client.post("/api/findings/1/plan/approve").json()["status"])
+        verdict = client.post("/api/findings/1/retest").json()[0]
         print(f"5. retest: {verdict['status']} (executed plan v{verdict['plan_version']})")
     return 0
 

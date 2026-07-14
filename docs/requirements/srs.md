@@ -97,7 +97,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The React SPA shall provide: report/run overview, finding list with verdicts, drill-down to evidence and audit trail, and the plan-approval workflow (FR-05). Served by FastAPI on localhost only.
 - **Acceptance criteria**:
-  - [ ] The full evaluation flow (ingest → approve → execute → verdicts with evidence) is operable from the UI alone.
+  - [x] The full evaluation flow (ingest → approve → execute → verdicts with evidence) is operable from the UI alone. *(ADR-0013: Vite/React/TS/Tailwind SPA served by FastAPI at `/`, API under `/api`; PDF upload runs FR-01→FR-03 as a background job the UI polls. Verified end-to-end in a real browser on a live Ollama backend — upload → 4 findings → plan → approve → retest → evidence-backed verdict — plus unit/integration coverage of the `/api` chain.)*
 
 ### FR-12 — Machine-readable results export
 - **Priority**: Must · **Source**: interview 2026-06-11

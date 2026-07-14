@@ -76,15 +76,15 @@ def _token(_request: httpx.Request) -> httpx.Response:
 
 def test_retest_refused_until_approved_then_executes() -> None:
     with _client(_token) as client:
-        client.post("/findings/import", json=_IMPORT)
+        client.post("/api/findings/import", json=_IMPORT)
 
         # AC1: no approved plan -> 409, and nothing executes.
-        assert client.post("/findings/1/retest").status_code == 409
+        assert client.post("/api/findings/1/retest").status_code == 409
 
-        assert client.post("/findings/1/plan").json()["status"] == "proposed"
-        assert client.post("/findings/1/plan/approve").json()["status"] == "approved"
+        assert client.post("/api/findings/1/plan").json()["status"] == "proposed"
+        assert client.post("/api/findings/1/plan/approve").json()["status"] == "approved"
 
-        verdicts = client.post("/findings/1/retest").json()
+        verdicts = client.post("/api/findings/1/retest").json()
         # A generated planned-http probe assesses as inconclusive (FR-08/09 later),
         # but the chokepoint ran it and stamped the executed version (AC2).
         assert [v["status"] for v in verdicts] == ["inconclusive"]
@@ -94,47 +94,47 @@ def test_retest_refused_until_approved_then_executes() -> None:
 
 def test_edit_creates_v2_and_execution_uses_it() -> None:
     with _client(_token) as client:
-        client.post("/findings/import", json=_IMPORT)
-        client.post("/findings/1/plan")
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")
 
-        edited = client.put("/findings/1/plan", json=[_SQLI_ACTION]).json()
+        edited = client.put("/api/findings/1/plan", json=[_SQLI_ACTION]).json()
         assert edited["version"] == 2 and edited["origin"] == "edited"
 
-        plans = client.get("/findings/1/plans").json()
+        plans = client.get("/api/findings/1/plans").json()
         assert {p["version"]: p["status"] for p in plans} == {1: "superseded", 2: "proposed"}
 
-        client.post("/findings/1/plan/approve")
-        assert client.post("/findings/1/retest").json()[0]["plan_version"] == 2
+        client.post("/api/findings/1/plan/approve")
+        assert client.post("/api/findings/1/retest").json()[0]["plan_version"] == 2
 
 
 def test_edit_all_off_allowlist_is_422() -> None:
     off = {"method": "GET", "target": "http://evil.example/", "expected_indicator": "x"}
     with _client(_token) as client:
-        client.post("/findings/import", json=_IMPORT)
-        client.post("/findings/1/plan")
-        assert client.put("/findings/1/plan", json=[off]).status_code == 422
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")
+        assert client.put("/api/findings/1/plan", json=[off]).status_code == 422
 
 
 def test_approve_without_plan_is_409() -> None:
     with _client(_token) as client:
-        client.post("/findings/import", json=_IMPORT)
-        assert client.post("/findings/1/plan/approve").status_code == 409
+        client.post("/api/findings/import", json=_IMPORT)
+        assert client.post("/api/findings/1/plan/approve").status_code == 409
 
 
 def test_reject_blocks_execution() -> None:
     with _client(_token) as client:
-        client.post("/findings/import", json=_IMPORT)
-        client.post("/findings/1/plan")
-        assert client.post("/findings/1/plan/reject").json()["status"] == "rejected"
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")
+        assert client.post("/api/findings/1/plan/reject").json()["status"] == "rejected"
         # a rejected plan is not approved -> retest still refused (AC1)
-        assert client.post("/findings/1/retest").status_code == 409
+        assert client.post("/api/findings/1/retest").status_code == 409
         # nothing left to reject now
-        assert client.post("/findings/1/plan/reject").status_code == 409
+        assert client.post("/api/findings/1/plan/reject").status_code == 409
 
 
 def test_generate_empty_plan_is_422_and_not_persisted() -> None:
     with _client(_token, plan_actions=()) as client:
-        client.post("/findings/import", json=_IMPORT)
-        assert client.post("/findings/1/plan").status_code == 422
+        client.post("/api/findings/import", json=_IMPORT)
+        assert client.post("/api/findings/1/plan").status_code == 422
         # nothing persisted: an empty plan must not be a savable/approvable proposal
-        assert client.get("/findings/1/plans").json() == []
+        assert client.get("/api/findings/1/plans").json() == []

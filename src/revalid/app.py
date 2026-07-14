@@ -10,10 +10,12 @@ authentication in TFG scope.
 
 from collections.abc import Iterator
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from sqlalchemy import Engine, select
@@ -32,17 +34,32 @@ from revalid.approval import (
     reject_plan,
     save_generated_plan,
 )
-from revalid.db import FindingRecord, PlanRecord, VerdictRecord, create_db_engine, session_factory
-from revalid.domain import Finding, Probe, Verdict
+from revalid.db import (
+    FindingRecord,
+    PlanRecord,
+    ReportRecord,
+    VerdictRecord,
+    create_db_engine,
+    session_factory,
+)
+from revalid.domain import Finding, Probe, ReportStatus, Verdict
+from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
 from revalid.ingest import IngestError, map_defectdojo_export
+from revalid.llm import agent_model_name
+from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
+
+# Repo-root-relative location of the built SPA (frontend/dist); served at "/"
+# when present (FR-11). Absent in backend-only dev and CI unit runs.
+_SPA_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 class FindingOut(Finding):
     """A persisted finding as returned by the API (domain model + row id)."""
 
     id: int
+    report_id: int | None = None
 
 
 class VerdictOut(Verdict):
@@ -93,6 +110,31 @@ class ImportResult(BaseModel):
     imported: int
 
 
+class ReportOut(BaseModel):
+    """A persisted report / ingest job as returned by the API (FR-01/FR-11)."""
+
+    id: int
+    filename: str
+    status: str
+    model: str
+    error: str | None
+    finding_count: int
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: ReportRecord) -> "ReportOut":
+        """Build the API view from a persisted report row."""
+        return cls(
+            id=record.id,
+            filename=record.filename,
+            status=record.status,
+            model=record.model,
+            error=record.error,
+            finding_count=record.finding_count,
+            created_at=record.created_at,
+        )
+
+
 def get_probe_client() -> Iterator[httpx.Client]:
     """Yield an allowlist-enforcing HTTP client for probes.
 
@@ -109,11 +151,58 @@ def get_plan_agent() -> Agent[None, list[PlannedAction]]:
     return build_plan_agent()
 
 
+def get_extraction_agent() -> Agent[None, list[ExtractedFinding]]:
+    """Yield the FR-03 extraction agent (overridden in tests with a stand-in model)."""
+    return build_extraction_agent()
+
+
 # Both underlying dependencies (get_probe_client, get_plan_agent) are module-level
 # functions with no per-app-instance state, so these aliases can live here too —
 # unlike SessionDep, which closes over each app's own session factory.
 ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]
 PlanAgentDep = Annotated[Agent[None, list[PlannedAction]], Depends(get_plan_agent)]
+ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
+
+
+def run_extraction(
+    sessions: sessionmaker[Session],
+    report_id: int,
+    data: bytes,
+    agent: Agent[None, list[ExtractedFinding]],
+) -> None:
+    """Extract findings from an uploaded PDF and persist them (FR-01/FR-03/FR-11).
+
+    Runs as a FastAPI background task — a sync function Starlette dispatches to
+    its threadpool, so it must open its **own** session (the request session is
+    already closed once the ``202`` was sent) and it never blocks the event
+    loop. The report is always moved out of ``extracting``: to ``ready`` with
+    its findings persisted, or ``failed`` with the error recorded — so the UI's
+    status poll always terminates.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        report_id: The ``extracting`` report row to fill in.
+        data: The uploaded PDF bytes.
+        agent: The extraction agent (a stand-in model in tests).
+    """
+    with sessions() as session:
+        report = session.get(ReportRecord, report_id)
+        if report is None:  # pragma: no cover - the row was just committed
+            return
+        try:
+            result = extract_report(agent, read_pdf(data))
+        except PdfError as exc:
+            report.status, report.error = ReportStatus.FAILED.value, str(exc)
+            session.commit()
+            return
+        except Exception as exc:
+            report.status, report.error = ReportStatus.FAILED.value, f"extraction failed: {exc}"
+            session.commit()
+            return
+        session.add_all(FindingRecord.from_domain(f, report_id=report_id) for f in result.findings)
+        report.status = ReportStatus.READY.value
+        report.finding_count = len(result.findings)
+        session.commit()
 
 
 def _get_finding_or_404(session: Session, finding_id: int) -> FindingRecord:
@@ -204,14 +293,15 @@ def _retest_finding(session: Session, client: httpx.Client, finding_id: int) -> 
     ]
 
 
-def _register_core_routes(app: FastAPI, sessions: sessionmaker[Session]) -> None:
+def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register ``/health`` and the FR-02 finding import/list routes.
 
     Split from :func:`_register_plan_and_retest_routes` purely to keep each
     registration function's route-closure count under the mccabe gate (each
     nested route def adds to its enclosing function's measured complexity).
     Each registration function binds its own ``SessionDep``, closing over this
-    app's ``sessions`` factory, rather than sharing one across functions.
+    app's ``sessions`` factory, rather than sharing one across functions. Routes
+    are registered on the ``/api`` router (FR-11): the SPA owns the root paths.
     """
 
     def get_session() -> Iterator[Session]:
@@ -220,12 +310,12 @@ def _register_core_routes(app: FastAPI, sessions: sessionmaker[Session]) -> None
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
 
-    @app.get("/health")
+    @router.get("/health")
     def health() -> dict[str, str]:
         """Liveness check."""
         return {"status": "ok", "version": __version__}
 
-    @app.post("/findings/import", response_model=ImportResult)
+    @router.post("/findings/import", response_model=ImportResult)
     def import_findings(payload: dict[str, Any], session: SessionDep) -> ImportResult:
         """Ingest a DefectDojo-style JSON export (FR-02)."""
         try:
@@ -236,14 +326,72 @@ def _register_core_routes(app: FastAPI, sessions: sessionmaker[Session]) -> None
         session.commit()
         return ImportResult(imported=len(findings))
 
-    @app.get("/findings", response_model=list[FindingOut])
-    def list_findings(session: SessionDep) -> list[FindingOut]:
-        """List all persisted findings."""
-        records = session.scalars(select(FindingRecord).order_by(FindingRecord.id))
-        return [FindingOut(id=r.id, **r.to_domain().model_dump()) for r in records]
+    @router.get("/findings", response_model=list[FindingOut])
+    def list_findings(session: SessionDep, report_id: int | None = None) -> list[FindingOut]:
+        """List persisted findings, optionally filtered to one report (FR-11)."""
+        stmt = select(FindingRecord).order_by(FindingRecord.id)
+        if report_id is not None:
+            stmt = stmt.where(FindingRecord.report_id == report_id)
+        records = session.scalars(stmt)
+        return [
+            FindingOut(id=r.id, report_id=r.report_id, **r.to_domain().model_dump())
+            for r in records
+        ]
 
 
-def _register_plan_and_retest_routes(app: FastAPI, sessions: sessionmaker[Session]) -> None:
+def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-01/FR-11 report-upload and status routes.
+
+    Upload runs FR-01→FR-03 in a background task (:func:`run_extraction`); the
+    two GET routes are the overview list and the poll target the SPA watches
+    until the report settles on ``ready``/``failed``.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/reports", response_model=ReportOut, status_code=202)
+    async def create_report(
+        file: UploadFile,
+        background: BackgroundTasks,
+        session: SessionDep,
+        agent: ExtractionAgentDep,
+    ) -> ReportOut:
+        """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11)."""
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="empty upload")
+        report = ReportRecord(
+            filename=file.filename or "report.pdf",
+            status=ReportStatus.EXTRACTING.value,
+            model=agent_model_name(agent),
+            finding_count=0,
+        )
+        session.add(report)
+        session.commit()
+        session.refresh(report)
+        background.add_task(run_extraction, sessions, report.id, data, agent)
+        return ReportOut.from_record(report)
+
+    @router.get("/reports", response_model=list[ReportOut])
+    def list_reports(session: SessionDep) -> list[ReportOut]:
+        """List uploaded reports, newest first (FR-11 overview)."""
+        records = session.scalars(select(ReportRecord).order_by(ReportRecord.id.desc()))
+        return [ReportOut.from_record(r) for r in records]
+
+    @router.get("/reports/{report_id}", response_model=ReportOut)
+    def get_report(report_id: int, session: SessionDep) -> ReportOut:
+        """Return one report's current status (the SPA's poll target, FR-11)."""
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        return ReportOut.from_record(report)
+
+
+def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-05 plan lifecycle routes and the plan-driven retest/verdicts routes."""
 
     def get_session() -> Iterator[Session]:
@@ -252,41 +400,41 @@ def _register_plan_and_retest_routes(app: FastAPI, sessions: sessionmaker[Sessio
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
 
-    @app.post("/findings/{finding_id}/plan", response_model=PlanOut)
+    @router.post("/findings/{finding_id}/plan", response_model=PlanOut)
     def create_plan(finding_id: int, session: SessionDep, agent: PlanAgentDep) -> PlanOut:
         """Generate a retest plan (FR-04) and persist it as a proposed version (FR-05)."""
         return _generate_plan(session, finding_id, agent)
 
-    @app.put("/findings/{finding_id}/plan", response_model=PlanOut)
+    @router.put("/findings/{finding_id}/plan", response_model=PlanOut)
     def edit_plan_endpoint(
         finding_id: int, actions: list[PlannedAction], session: SessionDep
     ) -> PlanOut:
         """Replace the plan with edited actions as a new proposed version (FR-05)."""
         return _edit_plan(session, finding_id, actions)
 
-    @app.post("/findings/{finding_id}/plan/approve", response_model=PlanOut)
+    @router.post("/findings/{finding_id}/plan/approve", response_model=PlanOut)
     def approve_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
         """Approve the latest proposed plan version (FR-05)."""
         return _approve_plan(session, finding_id)
 
-    @app.post("/findings/{finding_id}/plan/reject", response_model=PlanOut)
+    @router.post("/findings/{finding_id}/plan/reject", response_model=PlanOut)
     def reject_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
         """Reject the latest proposed plan version (FR-05)."""
         return _reject_plan(session, finding_id)
 
-    @app.get("/findings/{finding_id}/plans", response_model=list[PlanOut])
+    @router.get("/findings/{finding_id}/plans", response_model=list[PlanOut])
     def get_plans(finding_id: int, session: SessionDep) -> list[PlanOut]:
         """List all plan versions for a finding (FR-05)."""
         return _list_plans(session, finding_id)
 
-    @app.post("/findings/{finding_id}/retest", response_model=list[VerdictOut])
+    @router.post("/findings/{finding_id}/retest", response_model=list[VerdictOut])
     def retest_finding(
         finding_id: int, session: SessionDep, client: ProbeClientDep
     ) -> list[VerdictOut]:
         """Execute the finding's APPROVED plan and persist the verdicts (FR-05/FR-07/FR-09)."""
         return _retest_finding(session, client, finding_id)
 
-    @app.get("/verdicts", response_model=list[VerdictOut])
+    @router.get("/verdicts", response_model=list[VerdictOut])
     def list_verdicts(session: SessionDep) -> list[VerdictOut]:
         """List all persisted verdicts (FR-09)."""
         records = session.scalars(select(VerdictRecord).order_by(VerdictRecord.id))
@@ -300,6 +448,29 @@ def _register_plan_and_retest_routes(app: FastAPI, sessions: sessionmaker[Sessio
             )
             for r in records
         ]
+
+
+def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
+    """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
+
+    No-op when the build is absent (backend-only dev, CI unit runs) — the API
+    still works. Registered after the ``/api`` router so it never shadows it;
+    the catch-all serves any real built file and otherwise returns
+    ``index.html`` so deep links (``/findings/5``) reload into the SPA. Binds
+    nothing new: the app still listens only on ``127.0.0.1`` (NFR-03).
+    """
+    index = dist / "index.html"
+    if not index.is_file():
+        return
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> FileResponse:
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=404)
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and dist in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)
 
 
 def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> FastAPI:
@@ -317,7 +488,11 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     sessions = session_factory(db_engine)
     app = FastAPI(title="revalid", version=__version__)
 
-    _register_core_routes(app, sessions)
-    _register_plan_and_retest_routes(app, sessions)
+    api = APIRouter(prefix="/api")
+    _register_core_routes(api, sessions)
+    _register_report_routes(api, sessions)
+    _register_plan_and_retest_routes(api, sessions)
+    app.include_router(api)
+    _mount_spa(app)
 
     return app

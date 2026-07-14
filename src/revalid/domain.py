@@ -113,6 +113,20 @@ class PlanStatus(enum.StrEnum):
     SUPERSEDED = "superseded"
 
 
+class ReportStatus(enum.StrEnum):
+    """Lifecycle state of an uploaded report's ingest job (FR-01/FR-11).
+
+    A report starts ``EXTRACTING`` when uploaded and always settles on exactly
+    one terminal state — ``READY`` once its findings are persisted, or
+    ``FAILED`` (with the error recorded) if extraction never completes — so the
+    UI's status poll is guaranteed to terminate.
+    """
+
+    EXTRACTING = "extracting"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class Evidence(BaseModel):
     """Captured request/response of one executed probe step (FR-07).
 

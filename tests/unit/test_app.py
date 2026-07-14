@@ -32,17 +32,17 @@ def client() -> Iterator[TestClient]:
 
 
 def test_health(client: TestClient) -> None:
-    response = client.get("/health")
+    response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
 def test_import_then_list_roundtrip(client: TestClient) -> None:
-    response = client.post("/findings/import", json=SAMPLE_EXPORT)
+    response = client.post("/api/findings/import", json=SAMPLE_EXPORT)
     assert response.status_code == 200
     assert response.json() == {"imported": 2}
 
-    listed = client.get("/findings").json()
+    listed = client.get("/api/findings").json()
     assert [f["title"] for f in listed] == [
         "SQL injection in product search",
         "Verbose error page",
@@ -56,11 +56,11 @@ def test_import_then_list_roundtrip(client: TestClient) -> None:
 
 def test_import_invalid_export_is_422_and_nothing_persisted(client: TestClient) -> None:
     bad = {"findings": [{"title": "ok", "severity": "Low"}, {"title": "no severity"}]}
-    response = client.post("/findings/import", json=bad)
+    response = client.post("/api/findings/import", json=bad)
     assert response.status_code == 422
     assert "severity" in response.json()["detail"]
-    assert client.get("/findings").json() == []
+    assert client.get("/api/findings").json() == []
 
 
 def test_list_empty_initially(client: TestClient) -> None:
-    assert client.get("/findings").json() == []
+    assert client.get("/api/findings").json() == []

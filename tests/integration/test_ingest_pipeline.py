@@ -25,7 +25,7 @@ def test_sample_export_persists_and_serves(tmp_path: Path) -> None:
 
     # A fresh app instance over the same file sees the data (durability).
     with TestClient(create_app(db_path=str(db_path))) as client:
-        listed = client.get("/findings").json()
+        listed = client.get("/api/findings").json()
     assert [f["severity"] for f in listed] == ["critical", "high", "low"]
     # Unknown source fields survive the full trip (FR-02 audit criterion).
     assert listed[0]["raw"]["cwe"] == 89
