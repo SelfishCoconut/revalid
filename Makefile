@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-walking-skeleton lab-up lab-down run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-walking-skeleton lab-up lab-down run
 
 lint:
 	uv run ruff check src tests
@@ -39,6 +39,11 @@ demo-extract:
 # an offline stand-in); shows an off-allowlist action being dropped by the gate
 demo-plan:
 	uv run python scripts/demo/plan_retest.py
+
+# FR-05 demo: nothing executes without approval — refused -> approve -> retest,
+# plus an edit creating v2 (offline: in-memory app + mock probe target)
+demo-approval:
+	uv run python scripts/demo/approval_gate.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:
