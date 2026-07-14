@@ -87,13 +87,29 @@ def run_probe(client: httpx.Client, probe: Probe) -> Verdict:
     """Execute ``probe`` and return the assessed verdict, evidence attached.
 
     An unreachable target yields an inconclusive verdict rather than raising, so
-    every retest still produces an evidence-backed verdict (FR-09).
+    every retest still produces an evidence-backed verdict (FR-09). Assessment is
+    delegated to :func:`assess_evidence` so the live path and audit re-derivation
+    (FR-10) share one deterministic function.
     """
     try:
         evidence = execute(client, probe)
     except httpx.RequestError as exc:
-        return _unreachable_verdict(probe, exc)
-    return _ASSESSORS.get(probe.kind, assess_generic)(evidence)
+        evidence = _unreachable_evidence(probe, exc)
+    return assess_evidence(probe.kind, evidence)
+
+
+def assess_evidence(probe_kind: str, evidence: Evidence) -> Verdict:
+    """Map captured evidence to a verdict, purely — no network (FR-09/FR-10).
+
+    The single deterministic assessment shared by live execution
+    (:func:`run_probe`) and audit re-derivation (:mod:`revalid.audit`): the same
+    ``(probe_kind, evidence)`` always yields the same verdict, so a stored verdict
+    can be reproduced from its evidence alone. A ``response_status`` of 0 marks an
+    unreachable target.
+    """
+    if evidence.response_status == 0:
+        return _unreachable_verdict(evidence)
+    return _ASSESSORS.get(probe_kind, assess_generic)(evidence)
 
 
 def assess(evidence: Evidence) -> Verdict:
@@ -173,15 +189,19 @@ def _has_auth_token(body: str) -> bool:
     return isinstance(auth, dict) and bool(auth.get("token"))
 
 
-def _unreachable_verdict(probe: Probe, exc: httpx.RequestError) -> Verdict:
-    """Build an inconclusive verdict for a probe whose target never responded."""
-    evidence = Evidence(
+def _unreachable_evidence(probe: Probe, exc: httpx.RequestError) -> Evidence:
+    """Build the status-0 evidence recorded when a probe's target never responded."""
+    return Evidence(
         request_method=probe.method,
         request_url=probe.url,
         request_body=json.dumps(probe.json_body) if probe.json_body is not None else "",
         response_status=0,
         response_body_excerpt=f"request failed: {exc}",
     )
+
+
+def _unreachable_verdict(evidence: Evidence) -> Verdict:
+    """Inconclusive verdict for a probe whose target never responded (status 0)."""
     return Verdict(
         status=VerdictStatus.INCONCLUSIVE,
         reason_code="target_unreachable",

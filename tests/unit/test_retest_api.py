@@ -123,3 +123,15 @@ def test_retest_unknown_finding_is_404() -> None:
 def test_verdicts_empty_initially() -> None:
     with _make_client(_token_response) as client:
         assert client.get("/api/verdicts").json() == []
+
+
+def test_audit_endpoint_rederives_all_verdicts() -> None:
+    """FR-10: GET /api/audit reproduces every verdict from stored evidence."""
+    with _make_client(_token_response) as client:
+        _approve(client)
+        client.post("/api/findings/1/retest")
+        audit = client.get("/api/audit").json()
+        assert audit["total"] >= 1
+        assert audit["reproduced"] == audit["total"]
+        assert audit["ok"] is True
+        assert audit["discrepancies"] == []
