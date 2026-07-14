@@ -14,7 +14,7 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 ## Data handling
 
 - There is **no enforced §6 data policy** in this repo — data handling is Álvaro's own responsibility (ADR-0006). The regulatory §6 obligation still applies externally; he upholds it directly. Test data in `tests/data/` is synthetic / lab-target derived.
-- A **secret-file guard** hook (`protect-private-data`) remains **unchanged** as general hygiene, not policy: it blocks AI tools from touching `data/private/`, `.env`, credential and key files. To remove it, delete `.claude/hooks/protect-private-data.py` and its wiring in `.claude/settings.json` (Álvaro's call — see ADR-0006).
+- The `protect-private-data` secret-file guard hook was **removed** (2026-07-14, see the ADR-0006 update) under the single-user threat model (ADR-0008): secret hygiene is Álvaro's direct responsibility, not an enforced hook. `data/private/` stays gitignored.
 - Retests only ever hit **allowlisted** lab systems — enforced in code by the FR-06 allowlist, not by policy (see `retest-lab` skill).
 
 ## Coding standards

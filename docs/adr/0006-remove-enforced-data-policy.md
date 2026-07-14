@@ -59,3 +59,15 @@ This supersedes the data-protection element of ADR-0001; the rest stands.
   data is lab-only.
 - **Reversible:** re-instating the policy is a docs edit; the hook was never
   removed.
+
+## Update — 2026-07-14: the secret-file hook was removed
+
+Álvaro exercised the removal option documented in the Decision above. The
+`protect-private-data` PreToolUse hook (`.claude/hooks/protect-private-data.py`)
+and its `.claude/settings.json` wiring were **deleted**. Rationale: under the
+single trusted-user threat model (ADR-0008), a string-matching guard on a
+solo-developer local checkout is ceremony without a matching threat — the same
+reasoning that retired the `security-auditor` agent. Secret hygiene and data
+handling remain Álvaro's direct responsibility. Unaffected: the FR-06 allowlist
+(a code-level control) and the `data/private/` gitignore. Reversible by restoring
+the file and its wiring.
