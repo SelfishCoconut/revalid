@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-walking-skeleton lab-up lab-down run
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -62,9 +62,37 @@ lab-up:
 lab-down:
 	docker compose -f lab/docker-compose.yml down
 
-# Local web app — localhost only (NFR-03)
+# Local web app — localhost only (NFR-03). Serves the built SPA at / when
+# `make build-ui` has produced frontend/dist; the /api backend either way.
 run:
 	uv run uvicorn --factory revalid.app:create_app --host 127.0.0.1 --port 8000
+
+# --- Frontend (React SPA, FR-11) ---
+# Reproducible install of the SPA toolchain
+ui-install:
+	npm --prefix frontend ci
+
+ui-lint:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+
+ui-test:
+	npm --prefix frontend run test
+
+# Build the SPA into frontend/dist (then `make run` serves the whole tool at /)
+build-ui: ui-install
+	npm --prefix frontend run build
+
+# SPA dev server with hot reload; proxies /api -> 127.0.0.1:8000. Run `make run`
+# in another shell for the backend.
+dev-ui:
+	npm --prefix frontend run dev
+
+# FR-11 acceptance demo: build the SPA and serve the whole tool on localhost so
+# the full flow (upload PDF -> approve plan -> retest -> verdicts) is operable
+# from the browser alone. Prereqs for a live retest: `make lab-up` and an LLM
+# backend (ANTHROPIC_API_KEY, or REVALID_LLM_MODEL=ollama:<model> + a server).
+demo-ui: build-ui run
 
 # Mechanical signals consumed by the codebase-sanity agent (see docs/development-plan.md §5)
 sanity:
