@@ -1,7 +1,7 @@
 # 0011. Retest-plan generation: LLM-proposed typed actions, deterministically gated
 
 Date: 2026-07-13
-Status: proposed
+Status: accepted
 
 ## Context
 
