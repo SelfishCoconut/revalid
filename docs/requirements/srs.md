@@ -77,8 +77,8 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11 (author's design)
 - **Description**: An independent verifier shall monitor execution against the approved plan and the finding's intent. It shall detect (a) deviation from the approved plan, and (b) ambiguous outcomes — e.g. the model rationalizing between "vulnerability patched" and "endpoint changed/moved" — forcing the verdict to *inconclusive* with a stated reason instead of a guess.
 - **Acceptance criteria**:
-  - [ ] A plan-deviation test case (executor attempts an action not in the plan) is blocked and logged.
-  - [ ] An endpoint-moved test case (finding's path returns 404 while the app is up) yields *inconclusive* with reason "endpoint changed", never *fixed*.
+  - [x] A plan-deviation test case (executor attempts an action not in the plan) is blocked and logged. *(ADR-0014: `sanity.assert_in_plan` fail-closed — logs + raises `PlanDeviationError` before any request; API maps it to 409.)*
+  - [x] An endpoint-moved test case (finding's path returns 404 while the app is up) yields *inconclusive* with reason "endpoint changed", never *fixed*. *(ADR-0014: `sanity.review_verdict` downgrades any *fixed* on 404/410 → `endpoint_changed` and on 3xx → `ambiguous_response`; verified through `execute_approved_plan`.)*
 
 ### FR-09 — Evidence-backed verdicts
 - **Priority**: Must · **Source**: interview 2026-06-11

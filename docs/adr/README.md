@@ -17,3 +17,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0011](0011-retest-plan-generation.md) | Retest-plan generation: LLM-proposed typed actions, deterministically gated | accepted | 2026-07-13 |
 | [0012](0012-server-side-plan-approval-gate.md) | Server-side plan approval gate: versioned plan rows, single execution chokepoint | accepted | 2026-07-14 |
 | [0013](0013-react-spa-architecture.md) | React SPA architecture: PDF-ingest background jobs, `/api` prefix, FastAPI-served SPA | accepted | 2026-07-14 |
+| [0014](0014-execution-sanity-checker.md) | Execution sanity checker: independent verifier — fail-closed plan-deviation block + conservative ambiguity downgrade | proposed | 2026-07-14 |

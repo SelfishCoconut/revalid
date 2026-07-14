@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -44,6 +44,11 @@ demo-plan:
 # plus an edit creating v2 (offline: in-memory app + mock probe target)
 demo-approval:
 	uv run python scripts/demo/approval_gate.py
+
+# FR-08 execution sanity checker (ADR-0014): plan-deviation block + ambiguity
+# downgrade, fully offline
+demo-sanity:
+	uv run python scripts/demo/execution_sanity.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

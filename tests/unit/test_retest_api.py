@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
@@ -18,7 +19,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from revalid.app import create_app, get_plan_agent, get_probe_client
 from revalid.db import IN_MEMORY, create_db_engine
+from revalid.domain import Probe
 from revalid.plan import PlannedAction, build_plan_agent
+from revalid.sanity import PlanDeviationError
 
 FINDING_EXPORT: dict[str, object] = {
     "scan_type": "Manual pentest",
@@ -94,6 +97,22 @@ def test_retest_executes_approved_plan_and_stamps_version() -> None:
 
         listed = client.get("/api/verdicts").json()
         assert listed[0]["plan_version"] == 1
+
+
+def test_retest_blocks_a_plan_deviation_with_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-08 AC1 at the API: a blocked plan deviation surfaces as 409, not a 500."""
+
+    def deviate(*_args: object, **_kwargs: object) -> list[object]:
+        raise PlanDeviationError(
+            Probe(kind="planned-http", method="GET", url="http://x/rest/admin")
+        )
+
+    monkeypatch.setattr("revalid.app.execute_approved_plan", deviate)
+    with _make_client(_token_response) as client:
+        _approve(client)
+        response = client.post("/api/findings/1/retest")
+        assert response.status_code == 409
+        assert "deviat" in response.json()["detail"].lower()
 
 
 def test_retest_unknown_finding_is_404() -> None:

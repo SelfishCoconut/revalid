@@ -49,6 +49,7 @@ from revalid.llm import agent_model_name
 from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
+from revalid.sanity import PlanDeviationError
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -280,6 +281,10 @@ def _retest_finding(session: Session, client: httpx.Client, finding_id: int) -> 
     except PlanNotApprovedError as exc:
         raise HTTPException(
             status_code=409, detail="no approved plan; approve one before retesting"
+        ) from exc
+    except PlanDeviationError as exc:
+        raise HTTPException(
+            status_code=409, detail="execution blocked: probe deviates from the approved plan"
         ) from exc
     return [
         VerdictOut(
