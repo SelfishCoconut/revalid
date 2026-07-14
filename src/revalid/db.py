@@ -6,13 +6,23 @@ Single-file zero-ops storage. Findings, plans, runs, and the audit trail
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Engine, ForeignKey, String, create_engine
+from sqlalchemy import JSON, DateTime, Engine, ForeignKey, String, create_engine, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from revalid.domain import Evidence, Finding, Severity, Verdict, VerdictStatus
+from revalid.domain import (
+    Evidence,
+    Finding,
+    PlanStatus,
+    Probe,
+    RetestPlan,
+    Severity,
+    Verdict,
+    VerdictStatus,
+)
 
 IN_MEMORY = ":memory:"
 
@@ -64,6 +74,56 @@ class FindingRecord(Base):
         )
 
 
+class PlanRecord(Base):
+    """One immutable version of a retest plan for a finding (FR-05).
+
+    Each edit or regeneration inserts a new row (``version`` bumped); a row is
+    only ever mutated to record its own decision or to be marked ``superseded``.
+    The approval fields (``status``/``decided_at``/``decided_by``) are the
+    minimal audit of the review event (FR-10 later unifies the full trail).
+    """
+
+    __tablename__ = "plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    version: Mapped[int]
+    status: Mapped[str] = mapped_column(String(16))
+    origin: Mapped[str] = mapped_column(String(16))
+    actions: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    rejected_actions: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    raw: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    decided_by: Mapped[str | None] = mapped_column(String(32), default=None)
+
+    @classmethod
+    def from_plan(
+        cls,
+        finding_id: int,
+        plan: RetestPlan,
+        *,
+        version: int,
+        status: PlanStatus,
+        origin: str,
+        rejected_actions: list[dict[str, Any]],
+    ) -> PlanRecord:
+        """Build a proposed/decided plan row from a domain plan."""
+        return cls(
+            finding_id=finding_id,
+            version=version,
+            status=status.value,
+            origin=origin,
+            actions=[p.model_dump() for p in plan.actions],
+            rejected_actions=rejected_actions,
+            raw=plan.raw,
+        )
+
+    def probes(self) -> tuple[Probe, ...]:
+        """Rehydrate the stored actions as runnable probes."""
+        return tuple(Probe(**action) for action in self.actions)
+
+
 class VerdictRecord(Base):
     """Persisted retest verdict linked to the finding it retested (FR-09).
 
@@ -82,9 +142,19 @@ class VerdictRecord(Base):
     rationale: Mapped[str]
     matched_indicators: Mapped[list[str]] = mapped_column(JSON)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)
+    plan_version: Mapped[int | None] = mapped_column(default=None)
 
     @classmethod
-    def from_domain(cls, finding_id: int, probe_kind: str, verdict: Verdict) -> VerdictRecord:
+    def from_domain(
+        cls,
+        finding_id: int,
+        probe_kind: str,
+        verdict: Verdict,
+        *,
+        plan_id: int | None = None,
+        plan_version: int | None = None,
+    ) -> VerdictRecord:
         """Build a row from a domain verdict against ``finding_id``."""
         return cls(
             finding_id=finding_id,
@@ -94,6 +164,8 @@ class VerdictRecord(Base):
             rationale=verdict.rationale,
             matched_indicators=list(verdict.matched_indicators),
             evidence=verdict.evidence.model_dump(),
+            plan_id=plan_id,
+            plan_version=plan_version,
         )
 
     def to_domain(self) -> Verdict:
