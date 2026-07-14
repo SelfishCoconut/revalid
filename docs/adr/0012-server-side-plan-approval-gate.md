@@ -11,7 +11,9 @@ trail. Before this decision, FR-04 (`plan.py`, ADR-0011) produced a
 `RetestPlan` that lived only in memory — no `PlanRecord`, no plan endpoints,
 `RetestPlan.version` unused — while execution (`POST /findings/{id}/retest`)
 ignored plans entirely and hardcoded the M1 SQLi probe. So "no plan executes
-without approval" was not yet a real guarantee anywhere in the code.
+without approval" was not yet a real guarantee anywhere in the code, even
+though ADR-0002 had already fixed the plan → human-approve → execute model
+and SQLite persistence this decision now implements end to end.
 
 Two acceptance criteria fix the shape of the gate:
 
@@ -28,7 +30,8 @@ not a UI-side convention that a future client could bypass.
 
 Approval is enforced by **construction of the call graph**, not by a rule the
 caller must remember: plans are persisted as **versioned rows**, and exactly
-**one function** stands between stored plans and the network.
+**one function** stands between stored plans and the network — persisting
+and gating the `RetestPlan`/`Probe` that FR-04 (ADR-0011) produces.
 
 - **Versioned plan rows.** A new `plans` table holds one row **per version**
   (append-only; a row is mutated only to record its own decision or to be
@@ -54,9 +57,13 @@ caller must remember: plans are persisted as **versioned rows**, and exactly
   transport and persists one `VerdictRecord` per probe. The FastAPI retest
   endpoint (`POST /findings/{id}/retest`, now returning `list[VerdictOut]`)
   calls it and nothing else does — so AC1 is an invariant of the call graph,
-  not a convention the UI (or any future client) has to honor. The M1
-  hardcoded SQLi probe becomes a seeded approved plan in the demo and system
-  test rather than a special-cased code path.
+  not a convention the UI (or any future client) has to honor. The system
+  test seeds the real M1 `login_sqli_probe` (`sqli-login-bypass`) as an
+  approved plan (`test_approved_plan_retest_still_open_via_api`), proving
+  `still_open` end-to-end instead of a special-cased code path; the demo
+  (`scripts/demo/approval_gate.py`) instead drives generate/edit/approve/
+  retest through the endpoints with a stand-in `FunctionModel` agent,
+  honestly reporting `inconclusive` for the generated `planned-http` probe.
 - **Edited actions are re-gated, not trusted.** `plan.py`'s allowlist/method
   gate (`_gate`) is extracted into a reusable `gate_actions(actions, guard,
   base_url)`, used by both `generate_plan` (FR-04, behaviour unchanged) and
@@ -134,11 +141,3 @@ caller must remember: plans are persisted as **versioned rows**, and exactly
   design, and the minimal-audit-now split from FR-10 are Álvaro's to ratify in
   async review, per the design dialogue recorded in
   `docs/superpowers/specs/2026-07-14-fr05-approval-gate-design.md`.
-
-## Related
-
-- [ADR-0011](0011-retest-plan-generation.md) — FR-04 plan generation; this
-  decision persists and gates the `RetestPlan`/`Probe` it produces, and
-  extracts its allowlist gate (`gate_actions`) for reuse on edits.
-- [ADR-0002](0002-product-architecture.md) — fixes the plan → human approve →
-  execute model and SQLite persistence that this decision implements.
