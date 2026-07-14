@@ -126,3 +126,20 @@ def test_lab_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert lab_base_url() == DEFAULT_LAB_BASE_URL
     monkeypatch.setenv("REVALID_LAB_BASE_URL", "http://localhost:9999")
     assert lab_base_url() == "http://localhost:9999"
+
+
+def test_assess_generic_is_inconclusive_with_no_assessor_reason() -> None:
+    from revalid.retest import assess_generic
+
+    verdict = assess_generic(_evidence(200, "irrelevant"))
+    assert verdict.status is VerdictStatus.INCONCLUSIVE
+    assert verdict.reason_code == "no_assessor"
+    assert "http_200" in verdict.matched_indicators
+
+
+def test_run_probe_dispatches_unknown_kind_to_generic() -> None:
+    from revalid.domain import Probe
+
+    probe = Probe(kind="planned-http", method="GET", url="http://localhost:3000/rest/x")
+    verdict = run_probe(_client(lambda _r: httpx.Response(200, text="ok")), probe)
+    assert verdict.reason_code == "no_assessor"

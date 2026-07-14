@@ -56,8 +56,8 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The web UI shall present each retest plan for review; the user can approve, reject, or edit per finding (and batch-approve). No plan executes without approval.
 - **Acceptance criteria**:
-  - [ ] Unapproved plans are not executable through any code path (enforced server-side, not only in UI).
-  - [ ] Plan edits are versioned; the executed version is recorded in the audit trail.
+  - [x] Unapproved plans are not executable through any code path (enforced server-side, not only in UI).
+  - [x] Plan edits are versioned; the executed version is recorded in the audit trail.
 
 ### FR-06 — Target authorization allowlist
 - **Priority**: Must · **Source**: interview 2026-06-11

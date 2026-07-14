@@ -140,3 +140,14 @@ def test_default_agent_uses_configured_backend(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("REVALID_LLM_MODEL", raising=False)
     agent = build_plan_agent()
     assert agent.model == "anthropic:claude-sonnet-5"
+
+
+def test_gate_actions_splits_survivors_from_rejects() -> None:
+    from revalid.plan import PlannedAction, gate_actions
+
+    ok = PlannedAction(**_LOGIN_ACTION)
+    bad = PlannedAction(**{**_LOGIN_ACTION, "target": "http://evil.example/"})
+    probes, rejected = gate_actions([ok, bad], _GUARD, _BASE_URL)
+
+    assert [p.url for p in probes] == ["http://localhost:3000/rest/user/login"]
+    assert [r.reason for r in rejected] == ["not_allowlisted"]

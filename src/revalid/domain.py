@@ -104,6 +104,15 @@ class RetestPlan(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class PlanStatus(enum.StrEnum):
+    """Lifecycle state of a persisted retest-plan version (FR-05)."""
+
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
 class Evidence(BaseModel):
     """Captured request/response of one executed probe step (FR-07).
 
