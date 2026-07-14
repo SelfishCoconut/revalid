@@ -13,6 +13,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "pydantic>=2.9",
     "pydantic-ai-slim[anthropic,openai]>=2.9.0",
+    "python-multipart>=0.0.20",
     "sqlalchemy>=2.0",
     "uvicorn>=0.32",
 ]

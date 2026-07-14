@@ -69,22 +69,22 @@ def _token_response(_request: httpx.Request) -> httpx.Response:
 
 
 def _approve(client: TestClient) -> None:
-    client.post("/findings/import", json=FINDING_EXPORT)
-    client.post("/findings/1/plan")
-    client.post("/findings/1/plan/approve")
+    client.post("/api/findings/import", json=FINDING_EXPORT)
+    client.post("/api/findings/1/plan")
+    client.post("/api/findings/1/plan/approve")
 
 
 def test_retest_requires_approval() -> None:
     with _make_client(_token_response) as client:
-        client.post("/findings/import", json=FINDING_EXPORT)
-        client.post("/findings/1/plan")
-        assert client.post("/findings/1/retest").status_code == 409  # AC1
+        client.post("/api/findings/import", json=FINDING_EXPORT)
+        client.post("/api/findings/1/plan")
+        assert client.post("/api/findings/1/retest").status_code == 409  # AC1
 
 
 def test_retest_executes_approved_plan_and_stamps_version() -> None:
     with _make_client(_token_response) as client:
         _approve(client)
-        verdicts = client.post("/findings/1/retest").json()
+        verdicts = client.post("/api/findings/1/retest").json()
         # Generated planned-http probe -> inconclusive (FR-08/09 add matchers);
         # the chokepoint still ran it against /rest/user/login and stamped v1.
         assert verdicts[0]["status"] == "inconclusive"
@@ -92,15 +92,15 @@ def test_retest_executes_approved_plan_and_stamps_version() -> None:
         assert verdicts[0]["plan_version"] == 1
         assert verdicts[0]["evidence"]["request_url"].endswith("/rest/user/login")
 
-        listed = client.get("/verdicts").json()
+        listed = client.get("/api/verdicts").json()
         assert listed[0]["plan_version"] == 1
 
 
 def test_retest_unknown_finding_is_404() -> None:
     with _make_client(_token_response) as client:
-        assert client.post("/findings/999/retest").status_code == 404
+        assert client.post("/api/findings/999/retest").status_code == 404
 
 
 def test_verdicts_empty_initially() -> None:
     with _make_client(_token_response) as client:
-        assert client.get("/verdicts").json() == []
+        assert client.get("/api/verdicts").json() == []

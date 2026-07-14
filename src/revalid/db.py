@@ -31,6 +31,27 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+class ReportRecord(Base):
+    """An uploaded pentest report and its ingest-job status (FR-01/FR-11).
+
+    One row per uploaded PDF; it doubles as the ingest job the UI polls
+    (:class:`~revalid.domain.ReportStatus`). ``model`` records the LLM backend
+    used (NFR-02 lineage); ``error`` holds the failure message when
+    ``status`` is ``failed``. Its findings link back via
+    :attr:`FindingRecord.report_id`.
+    """
+
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filename: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(128))
+    error: Mapped[str | None] = mapped_column(default=None)
+    finding_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class FindingRecord(Base):
     """Persisted row for a :class:`revalid.domain.Finding`."""
 
@@ -45,10 +66,11 @@ class FindingRecord(Base):
     affected_endpoints: Mapped[list[str]] = mapped_column(JSON)
     reproduction_steps: Mapped[list[str]] = mapped_column(JSON)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON)
+    report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id"), default=None)
 
     @classmethod
-    def from_domain(cls, finding: Finding) -> FindingRecord:
-        """Build a row from a domain finding."""
+    def from_domain(cls, finding: Finding, report_id: int | None = None) -> FindingRecord:
+        """Build a row from a domain finding, optionally linked to a report."""
         return cls(
             title=finding.title,
             severity=finding.severity.value,
@@ -58,6 +80,7 @@ class FindingRecord(Base):
             affected_endpoints=list(finding.affected_endpoints),
             reproduction_steps=list(finding.reproduction_steps),
             raw=finding.raw,
+            report_id=report_id,
         )
 
     def to_domain(self) -> Finding:
