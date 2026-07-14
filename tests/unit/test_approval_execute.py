@@ -66,3 +66,16 @@ def test_execute_runs_approved_plan_and_stamps_version() -> None:
         assert verdict.status == VerdictStatus.STILL_OPEN.value
         assert verdict.plan_version == 1  # AC2: executed version recorded
         assert verdict.finding_id == 1
+
+
+def test_execute_stamps_the_actual_approved_version() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"authentication": {"token": "t"}})
+
+    with _session() as session:
+        save_generated_plan(session, 1, _sqli_generated())  # v1, immediately superseded
+        save_generated_plan(session, 1, _sqli_generated())  # v2, proposed
+        approve_plan(session, 1)  # approves v2
+        [verdict] = execute_approved_plan(session, _probe_client(handler), 1)
+        assert verdict.status == VerdictStatus.STILL_OPEN.value
+        assert verdict.plan_version == 2  # AC2: stamp tracks the real version, not a constant
