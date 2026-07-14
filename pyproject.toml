@@ -44,10 +44,11 @@ build-backend = "uv_build"
 
 # ---------------------------------------------------------------- uv
 [tool.uv]
-# Security floor on a transitive dependency (pulled in by FastAPI/Starlette).
-# starlette < 1.3.1 is affected by PYSEC-2026-249; pin the floor without making
-# starlette a direct dependency. Remove once FastAPI's own floor covers it.
-constraint-dependencies = ["starlette>=1.3.1"]
+# Security floors on transitive dependencies, pinned without making them direct
+# deps. Remove each once an upstream floor covers it.
+#   - starlette < 1.3.1  → PYSEC-2026-249 (pulled in by FastAPI/Starlette)
+#   - setuptools < 83.0.0 → PYSEC-2026-3447 (build/tooling transitive)
+constraint-dependencies = ["starlette>=1.3.1", "setuptools>=83.0.0"]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]
