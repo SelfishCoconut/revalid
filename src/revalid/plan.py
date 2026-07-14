@@ -14,6 +14,7 @@ never executed — so a plan references only authorized targets by construction
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urljoin
 
@@ -140,6 +141,35 @@ def _finding_prompt(finding: Finding) -> str:
     )
 
 
+def gate_actions(
+    actions: Iterable[PlannedAction], guard: TargetGuard, base_url: str
+) -> tuple[list[Probe], list[RejectedAction]]:
+    """Split proposed actions into gated probes and audited rejections (FR-04/FR-06).
+
+    The single allowlist/method gate for both model-generated (FR-04) and
+    user-edited (FR-05) actions: each action is resolved against ``base_url`` and
+    checked against ``guard``; only non-destructive methods on allowlisted targets
+    survive. Dropped actions are returned with a machine-readable reason.
+
+    Args:
+        actions: The proposed actions to gate.
+        guard: The FR-06 allowlist guard — the sole authority on allowed targets.
+        base_url: Allowlisted base URL that relative targets resolve against.
+
+    Returns:
+        A ``(probes, rejected)`` pair: runnable probes and audited rejections.
+    """
+    probes: list[Probe] = []
+    rejected: list[RejectedAction] = []
+    for item in actions:
+        outcome = _gate(item, guard, base_url)
+        if isinstance(outcome, Probe):
+            probes.append(outcome)
+        else:
+            rejected.append(RejectedAction(action=item, reason=outcome))
+    return probes, rejected
+
+
 def generate_plan(
     agent: Agent[None, list[PlannedAction]],
     finding: Finding,
@@ -169,14 +199,7 @@ def generate_plan(
     except UnexpectedModelBehavior as exc:
         return PlanResult(plan=_empty_plan(finding, model_name), error=str(exc))
 
-    actions: list[Probe] = []
-    rejected: list[RejectedAction] = []
-    for item in proposed:
-        probe_or_reason = _gate(item, guard, base_url)
-        if isinstance(probe_or_reason, Probe):
-            actions.append(probe_or_reason)
-        else:
-            rejected.append(RejectedAction(action=item, reason=probe_or_reason))
+    actions, rejected = gate_actions(proposed, guard, base_url)
 
     plan = RetestPlan(
         finding_title=finding.title,
