@@ -1,11 +1,11 @@
 import type { Severity } from "../api/types";
 
 const STYLES: Record<Severity, string> = {
-  critical: "text-danger bg-danger/12 ring-danger/25",
-  high: "text-high bg-high/12 ring-high/25",
-  medium: "text-warn bg-warn/12 ring-warn/25",
-  low: "text-low bg-low/12 ring-low/25",
-  info: "text-faint bg-white/5 ring-white/10",
+  critical: "text-danger-fg bg-danger/12 ring-danger/30",
+  high: "text-high-fg bg-high/12 ring-high/30",
+  medium: "text-warn-fg bg-warn/12 ring-warn/30",
+  low: "text-low-fg bg-low/12 ring-low/30",
+  info: "text-faint bg-faint/10 ring-faint/20",
 };
 
 /** Colour-coded pill for a finding's severity. */

@@ -1,56 +1,108 @@
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 
 import { BrandMark } from "./components/BrandMark";
+import { SidebarContent } from "./components/Sidebar";
+import { useTheme } from "./lib/theme";
 import { FindingDetail } from "./routes/FindingDetail";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
 
-function Masthead() {
+function MenuIcon() {
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-ink/70 backdrop-blur-md">
-      <div className="mx-auto flex max-w-[72rem] items-center justify-between gap-4 px-5 py-3.5">
-        <NavLink to="/" className="group flex items-center gap-3" aria-label="revalid home">
-          <BrandMark />
-          <span className="leading-none">
-            <span className="font-mono text-[17px] font-semibold tracking-tight text-fg">
-              revalid
-            </span>
-            <span className="mt-1 hidden font-mono text-[10px] uppercase tracking-[0.22em] text-faint sm:block">
-              revalidation console
-            </span>
-          </span>
-        </NavLink>
-
-        <span className="inline-flex items-center gap-2 rounded-full border border-line bg-panel/60 px-3 py-1.5 font-mono text-[11px] tracking-wide text-dim">
-          <span aria-hidden="true" className="rev-live size-1.5 rounded-full bg-ok" />
-          localhost
-          <span className="hidden text-faint sm:inline">· single-user</span>
-        </span>
-      </div>
-    </header>
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path
+        d="M2.5 4.5h13M2.5 9h13M2.5 13.5h13"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
 export function App() {
+  const { theme, setTheme } = useTheme();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Sidebar links close the drawer via onNavigate; also close it on Escape.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drawerOpen]);
+
   return (
-    <div className="flex min-h-screen flex-col">
-      <Masthead />
-      <main className="mx-auto w-full max-w-[72rem] flex-1 px-5 py-8">
-        <Routes>
-          <Route path="/" element={<ReportsOverview />} />
-          <Route path="/reports/:id" element={<ReportDetail />} />
-          <Route path="/findings/:id" element={<FindingDetail />} />
-        </Routes>
-      </main>
-      <footer className="border-t border-line">
-        <div className="mx-auto flex max-w-[72rem] flex-wrap items-center gap-x-2 gap-y-1 px-5 py-4 font-mono text-[11px] text-faint">
-          <span className="text-dim">revalid</span>
-          <span aria-hidden="true">·</span>
-          <span>AI-driven revalidation of pentest findings</span>
-          <span aria-hidden="true">·</span>
-          <span>retests only ever hit allowlisted lab targets</span>
+    <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
+      <aside className="sticky top-0 hidden h-screen flex-col border-r border-line bg-ink/50 backdrop-blur lg:flex">
+        <SidebarContent theme={theme} setTheme={setTheme} />
+      </aside>
+
+      <div className="flex min-h-screen min-w-0 flex-col">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-ink/70 px-4 py-3 backdrop-blur-md lg:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setDrawerOpen(true);
+            }}
+            aria-label="Open navigation"
+            className="rounded-lg border border-line p-1.5 text-dim transition-colors hover:text-fg"
+          >
+            <MenuIcon />
+          </button>
+          <NavLink to="/" className="flex items-center gap-2.5" aria-label="revalid home">
+            <BrandMark size={26} />
+            <span className="font-mono text-[15px] font-semibold tracking-tight text-fg">
+              revalid
+            </span>
+          </NavLink>
+        </header>
+
+        <main className="mx-auto w-full min-w-0 max-w-[64rem] flex-1 px-5 py-8">
+          <Routes>
+            <Route path="/" element={<ReportsOverview />} />
+            <Route path="/reports/:id" element={<ReportDetail />} />
+            <Route path="/findings/:id" element={<FindingDetail />} />
+          </Routes>
+        </main>
+
+        <footer className="border-t border-line">
+          <div className="mx-auto flex max-w-[64rem] flex-wrap items-center gap-x-2 gap-y-1 px-5 py-4 font-mono text-[11px] text-faint">
+            <span className="text-dim">revalid</span>
+            <span aria-hidden="true">·</span>
+            <span>AI-driven revalidation of pentest findings</span>
+            <span aria-hidden="true">·</span>
+            <span>retests only ever hit allowlisted lab targets</span>
+          </div>
+        </footer>
+      </div>
+
+      {drawerOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => {
+              setDrawerOpen(false);
+            }}
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          />
+          <div className="rev-drawer absolute inset-y-0 left-0 w-[280px] max-w-[85%] border-r border-line bg-ink shadow-2xl">
+            <SidebarContent
+              theme={theme}
+              setTheme={setTheme}
+              onNavigate={() => {
+                setDrawerOpen(false);
+              }}
+            />
+          </div>
         </div>
-      </footer>
+      )}
     </div>
   );
 }

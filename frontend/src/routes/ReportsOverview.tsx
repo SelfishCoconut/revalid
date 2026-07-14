@@ -73,7 +73,7 @@ export function ReportsOverview() {
               <Spinner label="Loading reports" />
             </div>
           ) : reports.isError ? (
-            <p role="alert" className="px-4 py-6 text-sm text-danger">
+            <p role="alert" className="px-4 py-6 text-sm text-danger-fg">
               {errorMessage(reports.error)}
             </p>
           ) : ordered.length === 0 ? (
@@ -97,7 +97,7 @@ export function ReportsOverview() {
                       <td className="px-4 py-3">
                         <Link
                           to={`/reports/${String(report.id)}`}
-                          className="font-mono text-[13px] font-medium text-fg underline-offset-4 hover:text-iris-bright hover:underline"
+                          className="font-mono text-[13px] font-medium text-fg underline-offset-4 hover:text-iris-fg hover:underline"
                         >
                           {report.filename}
                         </Link>

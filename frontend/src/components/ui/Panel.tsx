@@ -27,7 +27,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={`rounded-xl border border-line bg-panel/80 shadow-[0_1px_0_0_rgb(255_255_255/0.03)_inset,0_24px_50px_-34px_rgb(0_0_0/0.85)] backdrop-blur-sm ${className}`}
+      className={`rounded-xl border border-line bg-panel/80 shadow-[var(--panel-shadow)] backdrop-blur-sm ${className}`}
     >
       {children}
     </section>

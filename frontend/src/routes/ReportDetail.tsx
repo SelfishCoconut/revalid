@@ -46,7 +46,7 @@ export function ReportDetail() {
   }
   if (report.isError) {
     return (
-      <p role="alert" className="text-sm text-danger">
+      <p role="alert" className="text-sm text-danger-fg">
         {errorMessage(report.error)}
       </p>
     );
@@ -75,7 +75,7 @@ export function ReportDetail() {
           </div>
         )}
         {data.status === "failed" && (
-          <p role="alert" className="mt-4 border-t border-line pt-4 text-sm text-danger">
+          <p role="alert" className="mt-4 border-t border-line pt-4 text-sm text-danger-fg">
             Extraction failed: {data.error ?? "unknown error"}
           </p>
         )}
@@ -96,7 +96,7 @@ export function ReportDetail() {
               <Spinner label="Loading findings" />
             </div>
           ) : findings.isError ? (
-            <p role="alert" className="px-4 py-6 text-sm text-danger">
+            <p role="alert" className="px-4 py-6 text-sm text-danger-fg">
               {errorMessage(findings.error)}
             </p>
           ) : (findings.data ?? []).length === 0 ? (

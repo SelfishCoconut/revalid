@@ -1,0 +1,141 @@
+import { NavLink } from "react-router-dom";
+
+import type { ReportStatus } from "../api/types";
+import { useReports } from "../hooks/useReports";
+import type { Theme } from "../lib/theme";
+import { BrandMark } from "./BrandMark";
+import { Spinner } from "./Spinner";
+import { ThemeToggle } from "./ThemeToggle";
+import { Eyebrow } from "./ui/Panel";
+
+const STATUS_DOT: Record<ReportStatus, string> = {
+  extracting: "bg-iris",
+  ready: "bg-ok",
+  failed: "bg-danger",
+};
+
+function navItemClass({ isActive }: { isActive: boolean }): string {
+  const base =
+    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors";
+  return isActive
+    ? `${base} bg-iris/12 text-fg ring-1 ring-inset ring-iris/25`
+    : `${base} text-dim hover:bg-panel-2 hover:text-fg`;
+}
+
+function OverviewIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <rect x="1.5" y="1.5" width="5" height="5" rx="1.4" fill="currentColor" />
+      <rect x="9.5" y="1.5" width="5" height="5" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="1.5" y="9.5" width="5" height="5" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * The console's left rail: identity, primary navigation, a live jump-list of
+ * recent reports, and the theme control. Rendered both as the desktop sidebar
+ * and inside the mobile drawer, so `onNavigate` lets the drawer close on a tap.
+ */
+export function SidebarContent({
+  theme,
+  setTheme,
+  onNavigate,
+}: {
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  onNavigate?: () => void;
+}) {
+  const reports = useReports();
+  const recent = [...(reports.data ?? [])]
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+        b.id - a.id,
+    )
+    .slice(0, 8);
+
+  return (
+    <div className="flex h-full flex-col">
+      <NavLink
+        to="/"
+        end
+        onClick={onNavigate}
+        className="flex items-center gap-3 border-b border-line px-4 py-4"
+        aria-label="revalid home"
+      >
+        <BrandMark />
+        <span className="leading-none">
+          <span className="block font-mono text-[15px] font-semibold tracking-tight text-fg">
+            revalid
+          </span>
+          <span className="mt-1 block font-mono text-[10px] uppercase tracking-[0.2em] text-faint">
+            revalidation console
+          </span>
+        </span>
+      </NavLink>
+
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+        <div>
+          <Eyebrow className="px-2">Navigate</Eyebrow>
+          <div className="mt-2">
+            <NavLink to="/" end onClick={onNavigate} className={navItemClass}>
+              <OverviewIcon />
+              Overview
+            </NavLink>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between px-2">
+            <Eyebrow>Reports</Eyebrow>
+            <span className="font-mono text-[10px] text-faint">{recent.length}</span>
+          </div>
+          <div className="mt-2 space-y-0.5">
+            {reports.isPending ? (
+              <div className="px-2 py-1">
+                <Spinner label="Loading" />
+              </div>
+            ) : recent.length === 0 ? (
+              <p className="px-2.5 py-1.5 text-[12px] text-faint">No reports yet.</p>
+            ) : (
+              recent.map((report) => (
+                <NavLink
+                  key={report.id}
+                  to={`/reports/${String(report.id)}`}
+                  onClick={onNavigate}
+                  className={navItemClass}
+                  title={report.filename}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[report.status]}`}
+                  />
+                  <span className="truncate font-mono text-[12px]">
+                    {report.filename}
+                  </span>
+                </NavLink>
+              ))
+            )}
+          </div>
+        </div>
+      </nav>
+
+      <div className="space-y-3 border-t border-line px-3 py-3">
+        <ThemeToggle theme={theme} setTheme={setTheme} />
+        <div className="flex items-center gap-2 px-1 font-mono text-[11px] text-faint">
+          <span aria-hidden="true" className="rev-live size-1.5 rounded-full bg-ok" />
+          localhost · single-user
+        </div>
+      </div>
+    </div>
+  );
+}

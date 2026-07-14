@@ -97,7 +97,7 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
                 className="grid grid-cols-1 gap-3 rounded-lg border border-line bg-panel-2/40 p-3 sm:grid-cols-[7rem_1fr]"
               >
                 <div className="flex items-center gap-2 font-mono text-[11px] text-faint sm:col-span-2">
-                  <span className="grid size-5 place-items-center rounded-md bg-iris/12 text-[10px] font-semibold text-iris-bright ring-1 ring-inset ring-iris/25">
+                  <span className="grid size-5 place-items-center rounded-md bg-iris/12 text-[10px] font-semibold text-iris-fg ring-1 ring-inset ring-iris/30">
                     {index + 1}
                   </span>
                   probe action
@@ -152,7 +152,7 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
                 viewBox="0 0 16 16"
                 fill="none"
                 aria-hidden="true"
-                className="text-danger"
+                className="text-danger-fg"
               >
                 <path
                   d="M8 1 1 14h14L8 1Z"
@@ -168,7 +168,7 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
                 />
                 <circle cx="8" cy="11.6" r="0.55" fill="currentColor" />
               </svg>
-              <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-danger">
+              <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-danger-fg">
                 Dropped by the safety gate
               </h3>
             </div>
@@ -202,7 +202,7 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
             onClick={() => {
               approve.mutate();
             }}
-            className="rounded-lg bg-ok px-3 py-1.5 font-mono text-[13px] font-semibold text-ink transition-colors hover:brightness-110 disabled:opacity-45"
+            className="rounded-lg bg-ok px-3 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:brightness-110 disabled:opacity-45"
           >
             Approve
           </button>
@@ -212,7 +212,7 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
             onClick={() => {
               reject.mutate();
             }}
-            className="rounded-lg border border-danger/40 px-3 py-1.5 font-mono text-[13px] font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-45"
+            className="rounded-lg border border-danger/40 px-3 py-1.5 font-mono text-[13px] font-medium text-danger-fg transition-colors hover:bg-danger/10 disabled:opacity-45"
           >
             Reject
           </button>
@@ -222,14 +222,14 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
             onClick={() => {
               runRetest.mutate();
             }}
-            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-ink transition-colors hover:bg-iris-bright disabled:opacity-45"
+            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-45"
           >
             {runRetest.isPending ? "Running retest…" : "Run retest"}
           </button>
         </div>
 
         {(edit.isError || approve.isError || reject.isError || runRetest.isError) && (
-          <p role="alert" className="mt-3 text-sm text-danger">
+          <p role="alert" className="mt-3 text-sm text-danger-fg">
             {errorMessage(edit.error ?? approve.error ?? reject.error ?? runRetest.error)}
           </p>
         )}

@@ -9,9 +9,9 @@ interface Segment {
 
 // Worst → best, read left to right: the instrument's aggregate reading.
 const SEGMENTS: Segment[] = [
-  { status: "still_open", label: "still open", bar: "bg-danger", text: "text-danger" },
-  { status: "inconclusive", label: "inconclusive", bar: "bg-warn", text: "text-warn" },
-  { status: "fixed", label: "fixed", bar: "bg-ok", text: "text-ok" },
+  { status: "still_open", label: "still open", bar: "bg-danger", text: "text-danger-fg" },
+  { status: "inconclusive", label: "inconclusive", bar: "bg-warn", text: "text-warn-fg" },
+  { status: "fixed", label: "fixed", bar: "bg-ok", text: "text-ok-fg" },
 ];
 
 /**

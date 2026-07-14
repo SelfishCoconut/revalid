@@ -73,7 +73,7 @@ export function UploadReport() {
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={upload.isPending}
-          className="rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-medium text-ink transition-colors hover:bg-iris-bright disabled:opacity-50"
+          className="rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-medium text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-50"
         >
           {upload.isPending ? "Uploading…" : "Choose PDF"}
         </button>
@@ -91,7 +91,7 @@ export function UploadReport() {
       </div>
 
       {upload.isError && (
-        <p role="alert" className="mt-3 text-sm text-danger">
+        <p role="alert" className="mt-3 text-sm text-danger-fg">
           Upload failed: {errorMessage(upload.error)}
         </p>
       )}

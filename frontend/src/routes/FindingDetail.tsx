@@ -49,7 +49,7 @@ export function FindingDetail() {
   }
   if (findings.isError) {
     return (
-      <p role="alert" className="text-sm text-danger">
+      <p role="alert" className="text-sm text-danger-fg">
         {errorMessage(findings.error)}
       </p>
     );
@@ -149,12 +149,12 @@ export function FindingDetail() {
               onClick={() => {
                 generate.mutate();
               }}
-              className="mt-3 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-ink transition-colors hover:bg-iris-bright disabled:opacity-45"
+              className="mt-3 rounded-lg bg-iris px-3.5 py-1.5 font-mono text-[13px] font-semibold text-onaccent transition-colors hover:bg-iris-bright disabled:opacity-45"
             >
               {generate.isPending ? "Generating…" : "Generate plan"}
             </button>
             {generate.isError && (
-              <p role="alert" className="mt-2 text-sm text-danger">
+              <p role="alert" className="mt-2 text-sm text-danger-fg">
                 {errorMessage(generate.error)}
               </p>
             )}

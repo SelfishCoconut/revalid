@@ -11,6 +11,12 @@
 @import "@fontsource/ibm-plex-mono/latin-700.css";
 @import "tailwindcss";
 
+/* Token model, three tiers:
+   1. neutrals      — flip between dark (default) and light themes
+   2. accent fills  — stay vivid in both themes (bars, dots, buttons, tints)
+   3. accent text   — `-fg`, theme-aware so the same role stays legible on
+                      whichever surface it sits (bright on dark, deep on light)
+   Defaults below are the DARK theme; the light block overrides the flippers. */
 @theme {
   --font-sans:
     "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -19,7 +25,7 @@
     "IBM Plex Mono", ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo,
     Consolas, monospace;
 
-  /* Instrument housing — cool graphite, not pure black. */
+  /* neutrals (flip per theme) */
   --color-ink: #080b11;
   --color-ink-2: #0a0e15;
   --color-panel: #10151e;
@@ -30,22 +36,61 @@
   --color-dim: #9aa7b8;
   --color-faint: #6a7788;
 
-  /* The system's voice — AI extraction, proposals, the instrument firing. */
+  /* accent fills (vivid, constant) — the system's iris voice + the triad */
   --color-iris: #8c7bff;
-  --color-iris-bright: #ab9dff;
+  --color-iris-bright: #a99bff;
   --color-iris-deep: #5a4bd4;
-
-  /* Reality's verdict + severity ramp. */
   --color-danger: #ff5d6e;
   --color-warn: #f2b44e;
   --color-ok: #33d19a;
   --color-high: #ff8a4c;
   --color-low: #4fb8e8;
+
+  /* accent text (theme-aware readable) */
+  --color-iris-fg: #ab9dff;
+  --color-danger-fg: #ff8a95;
+  --color-warn-fg: #f4c06a;
+  --color-ok-fg: #56e0b0;
+  --color-high-fg: #ff9d63;
+  --color-low-fg: #74c8ee;
+
+  /* text that sits on a vivid fill (buttons) — constant dark, both themes */
+  --color-onaccent: #0a0e15;
+}
+
+:root[data-theme="light"] {
+  --color-ink: #eef1f7;
+  --color-ink-2: #e7ecf4;
+  --color-panel: #ffffff;
+  --color-panel-2: #f1f4f9;
+  --color-line: #dee4ed;
+  --color-line-2: #cbd4e0;
+  --color-fg: #131a26;
+  --color-dim: #4b5766;
+  --color-faint: #7a8695;
+
+  --color-iris-fg: #5b46e6;
+  --color-danger-fg: #d1293c;
+  --color-warn-fg: #9a6100;
+  --color-ok-fg: #0b8a5c;
+  --color-high-fg: #c05512;
+  --color-low-fg: #1f7fb0;
 }
 
 @layer base {
   :root {
     color-scheme: dark;
+    --panel-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 24px 50px -34px rgb(0 0 0 / 0.85);
+    --page-glow: color-mix(in oklab, var(--color-iris) 13%, transparent);
+    --page-corner: color-mix(in oklab, #1b2637 55%, transparent);
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --panel-shadow:
+      0 1px 2px rgb(16 24 40 / 0.04), 0 14px 34px -22px rgb(16 24 40 / 0.22);
+    --page-glow: color-mix(in oklab, var(--color-iris) 10%, transparent);
+    --page-corner: color-mix(in oklab, #dbe4f2 75%, transparent);
   }
   html,
   body,
@@ -55,16 +100,8 @@
   body {
     background-color: var(--color-ink);
     background-image:
-      radial-gradient(
-        70rem 34rem at 50% -6rem,
-        color-mix(in oklab, var(--color-iris) 13%, transparent),
-        transparent 68%
-      ),
-      radial-gradient(
-        48rem 24rem at 102% -2rem,
-        color-mix(in oklab, #1b2637 55%, transparent),
-        transparent 70%
-      );
+      radial-gradient(70rem 34rem at 50% -6rem, var(--page-glow), transparent 68%),
+      radial-gradient(48rem 24rem at 102% -2rem, var(--page-corner), transparent 70%);
     background-repeat: no-repeat;
     background-attachment: fixed;
     color: var(--color-fg);
@@ -74,7 +111,6 @@
   }
   ::selection {
     background: color-mix(in oklab, var(--color-iris) 42%, transparent);
-    color: #fff;
   }
   :focus-visible {
     outline: 2px solid var(--color-iris);
@@ -131,6 +167,14 @@
     transform: scaleX(1);
   }
 }
+@keyframes rev-drawer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
 
 .rev-live {
   animation: rev-pulse 2.4s ease-in-out infinite;
@@ -141,6 +185,9 @@
 .rev-grow {
   transform-origin: left;
   animation: rev-grow 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rev-drawer {
+  animation: rev-drawer 0.24s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

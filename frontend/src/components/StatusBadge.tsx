@@ -8,11 +8,11 @@ import type { PlanStatus, ReportStatus, VerdictStatus } from "../api/types";
 type Tone = "iris" | "ok" | "warn" | "danger" | "neutral";
 
 const TONE_STYLES: Record<Tone, string> = {
-  iris: "text-iris-bright bg-iris/12 ring-iris/25",
-  ok: "text-ok bg-ok/12 ring-ok/25",
-  warn: "text-warn bg-warn/12 ring-warn/25",
-  danger: "text-danger bg-danger/12 ring-danger/25",
-  neutral: "text-faint bg-white/5 ring-white/10",
+  iris: "text-iris-fg bg-iris/12 ring-iris/30",
+  ok: "text-ok-fg bg-ok/12 ring-ok/30",
+  warn: "text-warn-fg bg-warn/12 ring-warn/30",
+  danger: "text-danger-fg bg-danger/12 ring-danger/30",
+  neutral: "text-faint bg-faint/10 ring-faint/20",
 };
 
 type KnownStatus = ReportStatus | PlanStatus | VerdictStatus;
