@@ -20,7 +20,7 @@ from revalid.allowlist import TargetGuard
 from revalid.db import PlanRecord, VerdictRecord
 from revalid.domain import PlanStatus, RetestPlan
 from revalid.plan import PlannedAction, PlanResult, RejectedAction, gate_actions
-from revalid.retest import run_probe
+from revalid.sanity import guarded_run
 
 _ACTOR = "user"
 
@@ -204,15 +204,22 @@ def execute_approved_plan(
 ) -> list[VerdictRecord]:
     """Run the approved plan's probes; the ONLY path from storage to the network.
 
+    Each probe runs through the FR-08 :func:`~revalid.sanity.guarded_run` verifier
+    (ADR-0014): an off-plan probe is blocked before any request, and an
+    over-confident *fixed* verdict is downgraded to *inconclusive*.
+
     Raises:
         PlanNotApprovedError: If the finding has no approved plan version (AC1).
+        PlanDeviationError: If a probe not in the approved plan reaches execution
+            (FR-08 AC1) — fail-closed; the run aborts.
     """
     plan = approved_plan(session, finding_id)
     if plan is None:
         raise PlanNotApprovedError(finding_id)
+    approved = plan.probes()
     records: list[VerdictRecord] = []
-    for probe in plan.probes():
-        verdict = run_probe(client, probe)
+    for probe in approved:
+        verdict = guarded_run(client, probe, approved)
         records.append(
             VerdictRecord.from_domain(
                 finding_id, probe.kind, verdict, plan_id=plan.id, plan_version=plan.version

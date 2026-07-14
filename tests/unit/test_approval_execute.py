@@ -68,6 +68,20 @@ def test_execute_runs_approved_plan_and_stamps_version() -> None:
         assert verdict.finding_id == 1
 
 
+def test_execute_yields_inconclusive_on_endpoint_moved_404() -> None:
+    """FR-08 AC2 through the chokepoint: a 404 stays inconclusive, never fixed."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    with _session() as session:
+        save_generated_plan(session, 1, _sqli_generated())
+        approve_plan(session, 1)
+        [verdict] = execute_approved_plan(session, _probe_client(handler), 1)
+        assert verdict.status == VerdictStatus.INCONCLUSIVE.value
+        assert verdict.reason_code == "endpoint_changed"
+
+
 def test_execute_stamps_the_actual_approved_version() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"authentication": {"token": "t"}})
