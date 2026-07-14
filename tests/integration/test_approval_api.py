@@ -55,7 +55,10 @@ def _agent_proposing(*actions: dict[str, Any]) -> Agent[None, list[PlannedAction
     return build_plan_agent(FunctionModel(respond))
 
 
-def _client(handler: Callable[[httpx.Request], httpx.Response]) -> TestClient:
+def _client(
+    handler: Callable[[httpx.Request], httpx.Response],
+    plan_actions: tuple[dict[str, Any], ...] = (_SQLI_ACTION,),
+) -> TestClient:
     app = create_app(engine=create_db_engine(IN_MEMORY))
 
     def probe_override() -> Iterator[httpx.Client]:
@@ -63,7 +66,7 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> TestClient:
             yield client
 
     app.dependency_overrides[get_probe_client] = probe_override
-    app.dependency_overrides[get_plan_agent] = lambda: _agent_proposing(_SQLI_ACTION)
+    app.dependency_overrides[get_plan_agent] = lambda: _agent_proposing(*plan_actions)
     return TestClient(app)
 
 
@@ -127,3 +130,11 @@ def test_reject_blocks_execution() -> None:
         assert client.post("/findings/1/retest").status_code == 409
         # nothing left to reject now
         assert client.post("/findings/1/plan/reject").status_code == 409
+
+
+def test_generate_empty_plan_is_422_and_not_persisted() -> None:
+    with _client(_token, plan_actions=()) as client:
+        client.post("/findings/import", json=_IMPORT)
+        assert client.post("/findings/1/plan").status_code == 422
+        # nothing persisted: an empty plan must not be a savable/approvable proposal
+        assert client.get("/findings/1/plans").json() == []

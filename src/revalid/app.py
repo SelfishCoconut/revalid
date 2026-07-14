@@ -132,6 +132,10 @@ def _generate_plan(
     result = generate_plan(agent, finding.to_domain(), load_allowlist(), lab_base_url())
     if result.error:
         raise HTTPException(status_code=422, detail=f"plan generation failed: {result.error}")
+    if not result.plan.actions:
+        raise HTTPException(
+            status_code=422, detail="no runnable actions could be planned for this finding"
+        )
     return PlanOut.from_record(save_generated_plan(session, finding_id, result))
 
 

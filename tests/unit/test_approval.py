@@ -97,6 +97,16 @@ def test_approving_new_version_supersedes_prior_approved() -> None:
         assert statuses == {1: PlanStatus.SUPERSEDED.value, 2: PlanStatus.APPROVED.value}
 
 
+def test_edit_as_first_action_creates_proposed_v1() -> None:
+    with _session() as session:
+        record, rejected = edit_plan(session, 1, [_ACTION], _GUARD, _BASE_URL, finding_title="F")
+        assert record.version == 1
+        assert record.status == PlanStatus.PROPOSED.value
+        assert record.origin == "edited"
+        assert rejected == []
+        assert [p.version for p in list_plans(session, 1)] == [1]
+
+
 def test_edit_with_all_actions_off_allowlist_raises() -> None:
     off = PlannedAction(method="GET", target="http://evil.example/", expected_indicator="x")
     with _session() as session:

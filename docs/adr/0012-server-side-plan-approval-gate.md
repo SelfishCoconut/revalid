@@ -136,7 +136,11 @@ and gating the `RetestPlan`/`Probe` that FR-04 (ADR-0011) produces.
   arbitrary generated actions; there is no rich edit UI yet (FR-11 provides
   the client), so today the edit endpoint is only exercised via API calls and
   the demo script; no optimistic locking on approve-vs-edit races, consistent
-  with the single-user, single-process threat model (ADR-0008).
+  with the single-user, single-process threat model (ADR-0008); there is no
+  explicit approval-revocation verb — rejecting only acts on a `proposed`
+  version, so once approved a version stays runnable until a newer version is
+  approved (regenerating/editing creates a new `proposed` version but does not
+  auto-unapprove the current one).
 - **Status `proposed`:** the versioned-rows model, the single-chokepoint
   design, and the minimal-audit-now split from FR-10 are Álvaro's to ratify in
   async review, per the design dialogue recorded in
