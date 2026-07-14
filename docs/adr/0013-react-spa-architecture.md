@@ -1,7 +1,7 @@
 # 0013. React SPA architecture: PDF-ingest background jobs, `/api` prefix, FastAPI-served single-page app
 
 Date: 2026-07-14
-Status: proposed
+Status: accepted
 
 ## Context
 
