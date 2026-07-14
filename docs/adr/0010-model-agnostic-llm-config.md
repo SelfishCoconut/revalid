@@ -1,7 +1,7 @@
 # 0010. Model-agnostic LLM config: `REVALID_LLM_MODEL` env var, Ollama via Pydantic AI
 
 Date: 2026-07-13
-Status: proposed
+Status: accepted
 
 ## Context
 

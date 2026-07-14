@@ -1,7 +1,7 @@
 # 0012. Server-side plan approval gate: versioned plan rows, single execution chokepoint
 
 Date: 2026-07-14
-Status: proposed
+Status: accepted
 
 ## Context
 

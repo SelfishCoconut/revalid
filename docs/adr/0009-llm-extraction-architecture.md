@@ -1,7 +1,7 @@
 # 0009. LLM finding extraction: per-candidate Pydantic AI with a schema-validation gate
 
 Date: 2026-07-13
-Status: proposed
+Status: accepted
 
 ## Context
 
