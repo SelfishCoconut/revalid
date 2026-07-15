@@ -1,7 +1,7 @@
 # 0016. Versioned run export as a Pydantic-generated JSON document with a published schema
 
 Date: 2026-07-15
-Status: proposed
+Status: accepted
 
 ## Context
 
