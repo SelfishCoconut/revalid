@@ -11,7 +11,7 @@ authentication in TFG scope.
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 
 from revalid import __version__
 from revalid.allowlist import load_allowlist
@@ -44,15 +45,16 @@ from revalid.db import (
     create_db_engine,
     session_factory,
 )
-from revalid.domain import Finding, Probe, ReportStatus, Verdict
+from revalid.domain import Finding, Probe, ReportStatus, Settings, Verdict
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
 from revalid.ingest import IngestError, map_defectdojo_export
-from revalid.llm import agent_model_name
+from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
 from revalid.sanity import PlanDeviationError
+from revalid.settings import load_or_seed
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -177,14 +179,24 @@ def get_browser_runner() -> BrowserRunner:
     return make_browser_runner(load_allowlist())
 
 
-def get_plan_agent() -> Agent[None, list[PlannedAction]]:
-    """Yield the FR-04 plan agent (overridden in tests with a stand-in model)."""
-    return build_plan_agent()
+def get_settings_dep(request: Request) -> Settings:
+    """Load the persisted model/provider setting, seeding a fresh DB (ADR-0021)."""
+    sessions = cast("sessionmaker[Session]", request.app.state.sessions)
+    with sessions() as session:
+        return load_or_seed(session)
 
 
-def get_extraction_agent() -> Agent[None, list[ExtractedFinding]]:
-    """Yield the FR-03 extraction agent (overridden in tests with a stand-in model)."""
-    return build_extraction_agent()
+SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
+
+
+def get_plan_agent(settings: SettingsDep) -> Agent[None, list[PlannedAction]]:
+    """Yield the FR-04 plan agent built from the persisted setting (ADR-0021)."""
+    return build_plan_agent(build_model(settings))
+
+
+def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFinding]]:
+    """Yield the FR-03 extraction agent built from the persisted setting (ADR-0021)."""
+    return build_extraction_agent(build_model(settings))
 
 
 # Both underlying dependencies (get_probe_client, get_plan_agent) are module-level
@@ -577,6 +589,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     db_engine = engine if engine is not None else create_db_engine(db_path)
     sessions = session_factory(db_engine)
     app = FastAPI(title="revalid", version=__version__)
+    app.state.sessions = sessions
 
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
