@@ -1,10 +1,9 @@
 """Unit tests for the rewired retest endpoint: execution requires approval (FR-05).
 
 The probe client is an ``httpx.MockTransport`` and the plan agent is a
-``FunctionModel``, so the flow runs off-network. A *generated* action becomes a
-``planned-http`` probe, which assesses as ``inconclusive``/``no_assessor`` here;
-the login probe's still-open verdict is covered in ``test_retest.py`` and
-``test_approval_execute.py``.
+``FunctionModel``, so the flow runs off-network. A *generated* action for the
+SQLi-login finding is classified as ``sqli-login-bypass`` (ADR-0019) and, given
+the mock's token response, assesses as a conclusive ``still_open``.
 """
 
 from collections.abc import Callable, Iterator
@@ -89,10 +88,11 @@ def test_retest_executes_approved_plan_and_stamps_version() -> None:
     with _make_client(_token_response) as client:
         _approve(client)
         verdicts = client.post("/api/findings/1/retest").json()
-        # Generated planned-http probe -> inconclusive (FR-08/09 add matchers);
-        # the chokepoint still ran it against /rest/user/login and stamped v1.
-        assert verdicts[0]["status"] == "inconclusive"
-        assert verdicts[0]["reason_code"] == "no_assessor"
+        # The generated action for the SQLi-login finding is classified as
+        # sqli-login-bypass (ADR-0019); the mock returns a token, so the verdict is
+        # a conclusive still_open — the chokepoint ran it and stamped v1.
+        assert verdicts[0]["status"] == "still_open"
+        assert verdicts[0]["reason_code"] == "sqli_auth_bypass_succeeded"
         assert verdicts[0]["plan_version"] == 1
         assert verdicts[0]["evidence"]["request_url"].endswith("/rest/user/login")
 

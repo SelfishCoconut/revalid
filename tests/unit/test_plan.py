@@ -152,3 +152,17 @@ def test_gate_actions_splits_survivors_from_rejects() -> None:
 
     assert [p.url for p in probes] == ["http://localhost:3000/rest/user/login"]
     assert [r.reason for r in rejected] == ["not_allowlisted"]
+
+
+def test_action_kind_hint_tags_the_probe() -> None:
+    # ADR-0019: the model's lenient kind hint is normalized onto the probe kind,
+    # selecting the assessor/renderer — here an IDOR read over another basket.
+    action = {**_LOGIN_ACTION, "method": "GET", "target": "/rest/basket/2", "kind": "idor"}
+    [probe] = _plan_for(action).plan.actions
+    assert probe.kind == "access-control"
+
+
+def test_finding_fallback_tags_the_probe_when_no_hint() -> None:
+    # No kind hint: the fallback classifies from the finding — a SQLi-login here.
+    [probe] = _plan_for(_LOGIN_ACTION).plan.actions
+    assert probe.kind == "sqli-login-bypass"

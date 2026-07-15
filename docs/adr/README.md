@@ -22,4 +22,5 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0016](0016-versioned-run-export.md) | Versioned run export: Pydantic-generated JSON document + published, drift-tested JSON schema | accepted | 2026-07-15 |
 | [0017](0017-evaluation-harness-nfr01-scoring.md) | Evaluation harness: score an FR-12 export against title-keyed ground truth with conservative NFR-01 buckets | proposed | 2026-07-15 |
 | [0018](0018-browser-driven-probes-playwright.md) | Browser-driven probes via Playwright (optional extra), as a swapped executor under the unchanged FR-08 guard | proposed | 2026-07-15 |
+| [0019](0019-retest-technique-registry.md) | Extensible retest-technique registry: kind-keyed assessors + command rendering, FR-04 kind tagging (scope stays human-validated) | proposed | 2026-07-15 |
 | [0021](0021-user-configurable-model-provider-setting.md) | User-configurable model/provider setting: DB-persisted, runtime-switchable, env-seeded | proposed | 2026-07-15 |

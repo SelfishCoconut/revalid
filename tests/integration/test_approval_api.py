@@ -2,10 +2,9 @@
 
 The plan agent is overridden with a FunctionModel; the probe client is a
 MockTransport. Proves: no execution without approval (AC1), and edits are
-versioned with the executed version stamped (AC2). A *generated* action becomes a
-``planned-http`` probe, which assesses as ``inconclusive``/``no_assessor`` (generic
-matching is FR-08/FR-09) — the still-open verdict for the login probe is proven in
-``tests/unit/test_approval_execute.py`` and the live-lab system test.
+versioned with the executed version stamped (AC2). A *generated* action for the
+SQLi-login finding is classified as ``sqli-login-bypass`` (ADR-0019) and assesses
+as a conclusive ``still_open`` given the mock's token response.
 """
 
 from collections.abc import Callable, Iterator
@@ -85,10 +84,11 @@ def test_retest_refused_until_approved_then_executes() -> None:
         assert client.post("/api/findings/1/plan/approve").json()["status"] == "approved"
 
         verdicts = client.post("/api/findings/1/retest").json()
-        # A generated planned-http probe assesses as inconclusive (FR-08/09 later),
-        # but the chokepoint ran it and stamped the executed version (AC2).
-        assert [v["status"] for v in verdicts] == ["inconclusive"]
-        assert verdicts[0]["reason_code"] == "no_assessor"
+        # The generated action is classified as sqli-login-bypass (ADR-0019); the
+        # mock returns a token, so it assesses as a conclusive still_open — and the
+        # chokepoint stamped the executed version (AC2).
+        assert [v["status"] for v in verdicts] == ["still_open"]
+        assert verdicts[0]["reason_code"] == "sqli_auth_bypass_succeeded"
         assert verdicts[0]["plan_version"] == 1
 
 

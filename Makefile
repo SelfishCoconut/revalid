@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton demo-settings lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-techniques demo-browser-xss demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests
@@ -34,6 +34,11 @@ demo-ingest-pdf:
 # else an offline stand-in model — runs the full FR-01 -> FR-03 pipeline either way)
 demo-extract:
 	uv run python scripts/demo/extract_pdf.py
+
+# ADR-0019 demo: the retest-technique registry — finding classification, curl
+# rendering, and conservative verdicts on synthetic evidence (offline, no lab)
+demo-techniques:
+	uv run python scripts/demo/techniques.py
 
 # FR-04 demo: derive a gated retest plan from a finding (configured backend or
 # an offline stand-in); shows an off-allowlist action being dropped by the gate

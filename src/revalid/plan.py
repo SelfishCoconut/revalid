@@ -26,8 +26,9 @@ from pydantic_ai.models import KnownModelName, Model
 from revalid.allowlist import TargetGuard, canonicalize
 from revalid.domain import Finding, Probe, RetestPlan
 from revalid.llm import agent_model_name, resolve_model
+from revalid.retest import GENERIC_KIND, classify_finding_kind, classify_probe_kind
 
-_MAX_OUTPUT_RETRIES = 2
+_MAX_OUTPUT_RETRIES = 3
 
 # Verification-only verbs. POST is included because some retests read a result
 # back (e.g. the Juice Shop login-bypass), which is non-destructive; state-
@@ -48,6 +49,13 @@ For each action set:
 - json_body: a JSON object body, or null for a body-less request.
 - expected_indicator: what an observed *still-open* result looks like for this
   action (e.g. "HTTP 200 with an authentication token"). Always state one.
+- kind: the vulnerability class this action checks, as a short slug — one of
+  access-control (IDOR/BOLA, missing authentication, admin access),
+  sensitive-file-exposure (path traversal, backup/config files), or
+  sqli-login-bypass (SQL-injection login bypass). Leave empty if none clearly fits.
+
+Prefer a relative path for target (e.g. /rest/basket/2); the system supplies the
+authorized host, so never copy a hostname from the report.
 
 Keep actions verification-only: observe whether the issue is present, never
 exploit it for real impact or modify data. Return the actions in execution
@@ -71,6 +79,8 @@ class PlannedAction(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     json_body: dict[str, Any] | None = None
     expected_indicator: str = Field(min_length=1)
+    kind: str = Field(default="")
+    """Lenient technique-class hint (ADR-0019); code normalizes it — see ``_gate``."""
 
 
 class RejectedAction(BaseModel):
@@ -142,7 +152,10 @@ def _finding_prompt(finding: Finding) -> str:
 
 
 def gate_actions(
-    actions: Iterable[PlannedAction], guard: TargetGuard, base_url: str
+    actions: Iterable[PlannedAction],
+    guard: TargetGuard,
+    base_url: str,
+    default_kind: str = GENERIC_KIND,
 ) -> tuple[list[Probe], list[RejectedAction]]:
     """Split proposed actions into gated probes and audited rejections (FR-04/FR-06).
 
@@ -155,6 +168,8 @@ def gate_actions(
         actions: The proposed actions to gate.
         guard: The FR-06 allowlist guard — the sole authority on allowed targets.
         base_url: Allowlisted base URL that relative targets resolve against.
+        default_kind: Technique kind assigned when an action carries no usable
+            ``kind`` hint (ADR-0019); the caller derives it from the finding.
 
     Returns:
         A ``(probes, rejected)`` pair: runnable probes and audited rejections.
@@ -162,7 +177,7 @@ def gate_actions(
     probes: list[Probe] = []
     rejected: list[RejectedAction] = []
     for item in actions:
-        outcome = _gate(item, guard, base_url)
+        outcome = _gate(item, guard, base_url, default_kind)
         if isinstance(outcome, Probe):
             probes.append(outcome)
         else:
@@ -199,7 +214,8 @@ def generate_plan(
     except UnexpectedModelBehavior as exc:
         return PlanResult(plan=_empty_plan(finding, model_name), error=str(exc))
 
-    actions, rejected = gate_actions(proposed, guard, base_url)
+    default_kind = classify_finding_kind(finding)
+    actions, rejected = gate_actions(proposed, guard, base_url, default_kind)
 
     plan = RetestPlan(
         finding_title=finding.title,
@@ -216,12 +232,17 @@ def generate_plan(
     return PlanResult(plan=plan, rejected=tuple(rejected))
 
 
-def _gate(action: PlannedAction, guard: TargetGuard, base_url: str) -> Probe | str:
+def _gate(
+    action: PlannedAction, guard: TargetGuard, base_url: str, default_kind: str
+) -> Probe | str:
     """Return a runnable :class:`Probe`, or a machine-readable drop reason.
 
     Enforces, in order: a non-destructive method, a resolvable target, and the
     FR-06 allowlist. The model's proposal is untrusted for targets (like report
-    content), so an off-allowlist URL is dropped here — it never runs.
+    content), so an off-allowlist URL is dropped here — it never runs. A survivor
+    is tagged with its technique ``kind`` (ADR-0019): the model's lenient hint
+    normalized by :func:`~revalid.retest.classify_probe_kind`, falling back to
+    ``default_kind`` — the routing that selects the assessor and renderer.
     """
     if action.method.upper() not in SAFE_METHODS:
         return "unsafe_method"
@@ -232,7 +253,7 @@ def _gate(action: PlannedAction, guard: TargetGuard, base_url: str) -> Probe | s
     if not guard.is_allowed(url):
         return "not_allowlisted"
     return Probe(
-        kind="planned-http",
+        kind=classify_probe_kind(action.kind, default_kind),
         method=action.method.upper(),
         url=url,
         headers=action.headers,
