@@ -36,6 +36,8 @@ dev = [
     "mkdocstrings[python]>=0.27",
     "mkdocs-mermaid2-plugin>=1.2",
     "reportlab>=4.2",
+    "jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0.20260518",
 ]
 
 [build-system]

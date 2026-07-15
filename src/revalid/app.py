@@ -44,6 +44,7 @@ from revalid.db import (
     session_factory,
 )
 from revalid.domain import Finding, Probe, ReportStatus, Verdict
+from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
 from revalid.ingest import IngestError, map_defectdojo_export
 from revalid.llm import agent_model_name
@@ -493,6 +494,31 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
         )
 
 
+def _register_export_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-12 versioned run-export routes.
+
+    ``/export`` serves the whole run as one versioned JSON document (the FR-15
+    evaluation harness consumes it); ``/export/schema`` serves the JSON Schema
+    that document validates against.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.get("/export", response_model=RunExport)
+    def export_run(session: SessionDep) -> RunExport:
+        """Export the complete run as a versioned JSON document (FR-12)."""
+        return build_export(session)
+
+    @router.get("/export/schema")
+    def export_run_schema() -> dict[str, Any]:
+        """Return the published JSON Schema the export validates against (FR-12)."""
+        return export_schema()
+
+
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
     """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
 
@@ -535,6 +561,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_core_routes(api, sessions)
     _register_report_routes(api, sessions)
     _register_plan_and_retest_routes(api, sessions)
+    _register_export_routes(api, sessions)
     app.include_router(api)
     _mount_spa(app)
 

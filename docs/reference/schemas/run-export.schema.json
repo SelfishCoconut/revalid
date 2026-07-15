@@ -1,0 +1,545 @@
+{
+  "$defs": {
+    "Evidence": {
+      "description": "Captured request/response of one executed probe step (FR-07).\n\nEvery field a verdict is justified by is recorded here so the verdict can\nbe re-derived and audited. ``response_status`` is ``0`` when the target was\nunreachable and no HTTP response was received.\n\nAttributes:\n    request_method: Method actually sent.\n    request_url: URL actually requested.\n    request_body: Serialized request body (empty string if none).\n    response_status: HTTP status code, or ``0`` if no response arrived.\n    response_headers: Response headers as received.\n    response_body_excerpt: Leading slice of the response body.\n    elapsed_ms: Wall-clock round-trip time in milliseconds.",
+      "properties": {
+        "elapsed_ms": {
+          "default": 0.0,
+          "title": "Elapsed Ms",
+          "type": "number"
+        },
+        "request_body": {
+          "default": "",
+          "title": "Request Body",
+          "type": "string"
+        },
+        "request_method": {
+          "title": "Request Method",
+          "type": "string"
+        },
+        "request_url": {
+          "title": "Request Url",
+          "type": "string"
+        },
+        "response_body_excerpt": {
+          "default": "",
+          "title": "Response Body Excerpt",
+          "type": "string"
+        },
+        "response_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Response Headers",
+          "type": "object"
+        },
+        "response_status": {
+          "title": "Response Status",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_method",
+        "request_url",
+        "response_status"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Finding": {
+      "description": "A single pentest finding in the internal model (FR-02/FR-03).\n\nAttributes:\n    title: Short human-readable name of the finding.\n    severity: Normalized severity level.\n    description: Free-text description of the vulnerability.\n    impact: What an attacker gains / the business consequence (FR-03).\n    attack_vector: How the vulnerability is reached and exploited (FR-03).\n    affected_endpoints: URLs or endpoint identifiers the finding applies to.\n    reproduction_steps: Ordered steps to reproduce the issue.\n    raw: Complete source payload as ingested, preserving fields the\n        internal model does not map (FR-02 audit criterion). For\n        LLM-extracted findings it also carries extraction lineage \u2014 model\n        name and source text \u2014 for the audit trail (FR-10 / NFR-02).",
+      "properties": {
+        "affected_endpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Endpoints",
+          "type": "array"
+        },
+        "attack_vector": {
+          "default": "",
+          "title": "Attack Vector",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "impact": {
+          "default": "",
+          "title": "Impact",
+          "type": "string"
+        },
+        "raw": {
+          "additionalProperties": true,
+          "title": "Raw",
+          "type": "object"
+        },
+        "reproduction_steps": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reproduction Steps",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "severity"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "FindingExport": {
+      "description": "A persisted finding with its row id and originating report (FR-02/FR-03).",
+      "properties": {
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "report_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Report Id"
+        }
+      },
+      "required": [
+        "id",
+        "report_id",
+        "finding"
+      ],
+      "title": "FindingExport",
+      "type": "object"
+    },
+    "Generator": {
+      "description": "Provenance of the tool that produced the export (NFR-02 lineage).",
+      "properties": {
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "version"
+      ],
+      "title": "Generator",
+      "type": "object"
+    },
+    "PlanExport": {
+      "description": "One retest-plan version with its approval decision (FR-04/FR-05).",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/Probe"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decided At"
+        },
+        "decided_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decided By"
+        },
+        "finding_id": {
+          "title": "Finding Id",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "origin": {
+          "title": "Origin",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "finding_id",
+        "version",
+        "status",
+        "origin",
+        "actions",
+        "created_at",
+        "decided_at",
+        "decided_by"
+      ],
+      "title": "PlanExport",
+      "type": "object"
+    },
+    "Probe": {
+      "description": "A single verification-only HTTP action used to retest a finding (FR-07).\n\nProbes are non-destructive: they observe whether a vulnerability is still\npresent, never exploit it for impact. In the walking skeleton exactly one\n``kind`` exists; more join as their finding types land.\n\nAttributes:\n    kind: Stable identifier of the probe type (e.g. ``sqli-login-bypass``).\n    method: HTTP method.\n    url: Absolute target URL; always checked against the allowlist (FR-06)\n        before any socket opens.\n    headers: Request headers to send.\n    json_body: JSON request body, or ``None`` for a body-less request.\n    expected_indicator: Human-readable note on what a still-open result\n        looks like \u2014 documentation, not matching logic.",
+      "properties": {
+        "expected_indicator": {
+          "default": "",
+          "title": "Expected Indicator",
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object"
+        },
+        "json_body": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Body"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "method",
+        "url"
+      ],
+      "title": "Probe",
+      "type": "object"
+    },
+    "ReportExport": {
+      "description": "An uploaded report and its ingest outcome (FR-01).",
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "finding_count": {
+          "title": "Finding Count",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "status",
+        "model",
+        "finding_count",
+        "created_at"
+      ],
+      "title": "ReportExport",
+      "type": "object"
+    },
+    "RunMetrics": {
+      "description": "Descriptive counts and timing over the exported run (FR-15 denominators).\n\nNeutral facts about the run, not correctness scores: the tool has no ground\ntruth, so grading (correct/wrong) is the evaluation harness's job (FR-15).\n``verdicts_by_status`` always carries every :class:`VerdictStatus` key so the\nshape is stable across runs.",
+      "properties": {
+        "findings": {
+          "title": "Findings",
+          "type": "integer"
+        },
+        "mean_elapsed_ms": {
+          "title": "Mean Elapsed Ms",
+          "type": "number"
+        },
+        "plans": {
+          "title": "Plans",
+          "type": "integer"
+        },
+        "reports": {
+          "title": "Reports",
+          "type": "integer"
+        },
+        "total_elapsed_ms": {
+          "title": "Total Elapsed Ms",
+          "type": "number"
+        },
+        "verdicts": {
+          "title": "Verdicts",
+          "type": "integer"
+        },
+        "verdicts_by_status": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Verdicts By Status",
+          "type": "object"
+        }
+      },
+      "required": [
+        "reports",
+        "findings",
+        "plans",
+        "verdicts",
+        "verdicts_by_status",
+        "total_elapsed_ms",
+        "mean_elapsed_ms"
+      ],
+      "title": "RunMetrics",
+      "type": "object"
+    },
+    "Severity": {
+      "description": "Normalized severity scale for findings.",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "Verdict": {
+      "description": "A retest outcome for a finding, bound to the evidence that justifies it.\n\nEnforces the FR-09 invariants at the type level: a verdict cannot be built\nwithout ``evidence`` (no verdict without linked evidence) and always carries\na machine-readable ``reason_code`` (required for inconclusive results).\n\nAttributes:\n    status: still-open / fixed / inconclusive.\n    reason_code: Machine-readable justification token\n        (e.g. ``sqli_auth_bypass_succeeded``, ``endpoint_changed``).\n    rationale: Human-readable explanation of the verdict.\n    matched_indicators: Indicator tokens observed in the evidence.\n    evidence: The request/response the verdict is derived from.",
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "matched_indicators": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Indicators",
+          "type": "array"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reason_code": {
+          "minLength": 1,
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/VerdictStatus"
+        }
+      },
+      "required": [
+        "status",
+        "reason_code",
+        "evidence"
+      ],
+      "title": "Verdict",
+      "type": "object"
+    },
+    "VerdictExport": {
+      "description": "A verdict with its evidence and audit stamps (FR-09/FR-10).",
+      "properties": {
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "finding_id": {
+          "title": "Finding Id",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Id"
+        },
+        "plan_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Plan Version"
+        },
+        "probe_kind": {
+          "title": "Probe Kind",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "finding_id",
+        "probe_kind",
+        "plan_id",
+        "plan_version",
+        "actor",
+        "created_at",
+        "verdict"
+      ],
+      "title": "VerdictExport",
+      "type": "object"
+    },
+    "VerdictStatus": {
+      "description": "Outcome of retesting a finding (FR-09).",
+      "enum": [
+        "still_open",
+        "fixed",
+        "inconclusive"
+      ],
+      "title": "VerdictStatus",
+      "type": "string"
+    }
+  },
+  "description": "A complete revalidation run as one versioned JSON document (FR-12).",
+  "properties": {
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/FindingExport"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "generator": {
+      "$ref": "#/$defs/Generator"
+    },
+    "metrics": {
+      "$ref": "#/$defs/RunMetrics"
+    },
+    "plans": {
+      "items": {
+        "$ref": "#/$defs/PlanExport"
+      },
+      "title": "Plans",
+      "type": "array"
+    },
+    "reports": {
+      "items": {
+        "$ref": "#/$defs/ReportExport"
+      },
+      "title": "Reports",
+      "type": "array"
+    },
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "verdicts": {
+      "items": {
+        "$ref": "#/$defs/VerdictExport"
+      },
+      "title": "Verdicts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "generator",
+    "reports",
+    "findings",
+    "plans",
+    "verdicts",
+    "metrics"
+  ],
+  "title": "RunExport",
+  "type": "object"
+}

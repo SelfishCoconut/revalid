@@ -103,7 +103,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall export a complete run (findings, plans, verdicts, evidence references, metrics) as a versioned JSON document; the evaluation harness consumes this format.
 - **Acceptance criteria**:
-  - [ ] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it.
+  - [x] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it. — `src/revalid/export.py` (ADR-0016): `RunExport` (reports/findings/plans/verdicts+evidence/metrics), versioned by `SCHEMA_VERSION`; schema generated from the model to `docs/reference/schemas/run-export.schema.json` (`make export-schema`, drift-tested); `GET /api/export` + `/api/export/schema`; `make demo-export` validates a run against the published schema.
 
 ### FR-13 — Pluggable LLM backends (Claude primary, local fallback)
 - **Priority**: Should · **Source**: interview 2026-06-11
