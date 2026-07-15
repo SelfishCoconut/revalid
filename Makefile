@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -54,6 +54,19 @@ demo-sanity:
 # alone, no re-execution — offline
 demo-audit:
 	uv run python scripts/demo/audit_rederive.py
+
+# FR-12 versioned run export (ADR-0016): build a run offline, export it as one
+# versioned JSON document, and validate it against the published JSON schema
+demo-export:
+	uv run python scripts/demo/results_export.py
+
+# Regenerate the published FR-12 JSON schema from the RunExport model. Run after
+# changing src/revalid/export.py; the drift test (test_export.py) enforces it.
+export-schema:
+	uv run python -c "import json; from revalid.export import export_schema; \
+p='docs/reference/schemas/run-export.schema.json'; \
+open(p,'w').write(json.dumps(export_schema(), indent=2, sort_keys=True)+'\n'); \
+print('wrote',p)"
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:
