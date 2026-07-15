@@ -19,6 +19,7 @@ from revalid.domain import (
     PlanStatus,
     Probe,
     RetestPlan,
+    Settings,
     Severity,
     Verdict,
     VerdictStatus,
@@ -205,6 +206,34 @@ class VerdictRecord(Base):
             matched_indicators=tuple(self.matched_indicators),
             evidence=Evidence(**self.evidence),
         )
+
+
+class SettingsRecord(Base):
+    """The single-row persisted model/provider setting (FR-13 / ADR-0021).
+
+    One row (``id == 1``) holds the runtime backend selection. The API key is
+    stored here in the gitignored SQLite file (ADR-0008) but is never returned
+    by the API (write-only, masked on read).
+    """
+
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str | None] = mapped_column(String(256), default=None)
+    api_key: Mapped[str | None] = mapped_column(String(256), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    @classmethod
+    def from_domain(cls, cfg: Settings) -> SettingsRecord:
+        """Build the singleton row from a domain settings object."""
+        return cls(model=cfg.model, base_url=cfg.base_url, api_key=cfg.api_key)
+
+    def to_domain(self) -> Settings:
+        """Convert this row back to a domain settings object."""
+        return Settings(model=self.model, base_url=self.base_url, api_key=self.api_key)
 
 
 def create_db_engine(path: str = "revalid.db") -> Engine:

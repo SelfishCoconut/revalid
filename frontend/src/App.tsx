@@ -7,6 +7,7 @@ import { useTheme } from "./lib/theme";
 import { FindingDetail } from "./routes/FindingDetail";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
+import Settings from "./routes/Settings";
 
 function MenuIcon() {
   return (
@@ -68,6 +69,7 @@ export function App() {
             <Route path="/" element={<ReportsOverview />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
             <Route path="/findings/:id" element={<FindingDetail />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
 

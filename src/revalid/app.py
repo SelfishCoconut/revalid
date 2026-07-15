@@ -11,15 +11,16 @@ authentication in TFG scope.
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 
 from revalid import __version__
 from revalid.allowlist import load_allowlist
@@ -44,15 +45,16 @@ from revalid.db import (
     create_db_engine,
     session_factory,
 )
-from revalid.domain import Finding, Probe, ReportStatus, Verdict
+from revalid.domain import Finding, Probe, ReportStatus, Settings, Verdict
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
 from revalid.ingest import IngestError, map_defectdojo_export
-from revalid.llm import agent_model_name
+from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
 from revalid.sanity import PlanDeviationError
+from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -157,6 +159,46 @@ class ReportOut(BaseModel):
         )
 
 
+class SettingsOut(BaseModel):
+    """Public view of the model/provider setting; the key is write-only (ADR-0021)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str
+    base_url: str | None
+    api_key_set: bool
+    api_key_hint: str | None
+
+    @classmethod
+    def from_domain(cls, cfg: Settings) -> "SettingsOut":
+        """Build the masked view: the key becomes a boolean + last-4 hint only."""
+        key = cfg.api_key or ""
+        return cls(
+            model=cfg.model,
+            base_url=cfg.base_url,
+            api_key_set=bool(key),
+            api_key_hint=key[-4:] if key else None,
+        )
+
+
+class SettingsUpdateIn(BaseModel):
+    """Settings update payload; a blank ``api_key`` keeps the stored one (ADR-0021)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key: str | None = None
+    clear_key: bool = False
+
+
+class ProbeIn(BaseModel):
+    """Probe request: which endpoint (and optional key) to discover models from."""
+
+    base_url: str | None = None
+    api_key: str | None = None
+
+
 def get_probe_client() -> Iterator[httpx.Client]:
     """Yield an allowlist-enforcing HTTP client for probes.
 
@@ -177,14 +219,24 @@ def get_browser_runner() -> BrowserRunner:
     return make_browser_runner(load_allowlist())
 
 
-def get_plan_agent() -> Agent[None, list[PlannedAction]]:
-    """Yield the FR-04 plan agent (overridden in tests with a stand-in model)."""
-    return build_plan_agent()
+def get_settings_dep(request: Request) -> Settings:
+    """Load the persisted model/provider setting, seeding a fresh DB (ADR-0021)."""
+    sessions = cast("sessionmaker[Session]", request.app.state.sessions)
+    with sessions() as session:
+        return load_or_seed(session)
 
 
-def get_extraction_agent() -> Agent[None, list[ExtractedFinding]]:
-    """Yield the FR-03 extraction agent (overridden in tests with a stand-in model)."""
-    return build_extraction_agent()
+SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
+
+
+def get_plan_agent(settings: SettingsDep) -> Agent[None, list[PlannedAction]]:
+    """Yield the FR-04 plan agent built from the persisted setting (ADR-0021)."""
+    return build_plan_agent(build_model(settings))
+
+
+def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFinding]]:
+    """Yield the FR-03 extraction agent built from the persisted setting (ADR-0021)."""
+    return build_extraction_agent(build_model(settings))
 
 
 # Both underlying dependencies (get_probe_client, get_plan_agent) are module-level
@@ -540,6 +592,38 @@ def _register_export_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return export_schema()
 
 
+def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the ADR-0021 model/provider settings routes."""
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.get("/settings", response_model=SettingsOut)
+    def read_settings(session: SessionDep) -> SettingsOut:
+        """Return the current model/provider setting (key masked)."""
+        return SettingsOut.from_domain(load_or_seed(session))
+
+    @router.put("/settings", response_model=SettingsOut)
+    def update_settings(body: SettingsUpdateIn, session: SessionDep) -> SettingsOut:
+        """Persist a new model/provider setting; takes effect on the next agent build."""
+        cfg = save(
+            session,
+            model=body.model,
+            base_url=body.base_url,
+            api_key=body.api_key,
+            clear_key=body.clear_key,
+        )
+        return SettingsOut.from_domain(cfg)
+
+    @router.post("/settings/probe", response_model=ProbeResult)
+    def probe_settings(body: ProbeIn) -> ProbeResult:
+        """Discover models / test reachability for a provider base URL (ADR-0021)."""
+        return probe_provider(body.base_url, body.api_key)
+
+
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
     """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
 
@@ -577,12 +661,14 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     db_engine = engine if engine is not None else create_db_engine(db_path)
     sessions = session_factory(db_engine)
     app = FastAPI(title="revalid", version=__version__)
+    app.state.sessions = sessions
 
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
     _register_report_routes(api, sessions)
     _register_plan_and_retest_routes(api, sessions)
     _register_export_routes(api, sessions)
+    _register_settings_routes(api, sessions)
     app.include_router(api)
     _mount_spa(app)
 
