@@ -110,6 +110,7 @@ non-lab targets, destructive exploitation.
 - **Description**: The LLM layer (Pydantic AI) shall be model-agnostic: Claude API as primary; a local model (Ollama) configurable as fallback and as comparison condition in the evaluation.
 - **Acceptance criteria**:
   - [ ] Switching backends is configuration-only (no code change); both run the extraction test suite.
+  - [x] The active backend is a **user-editable, DB-persisted setting** changeable at runtime (env vars seed a fresh DB; the stored row is then authoritative). Model discovery + a connection test surface in the SPA `/settings` view. (ADR-0021)
 
 ### FR-14 — Browser-based probes (Playwright)
 - **Priority**: Could · **Source**: interview 2026-06-11

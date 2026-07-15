@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton demo-settings lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -94,6 +94,11 @@ demo-browser-xss:
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:
 	uv run python scripts/demo/walking_skeleton.py
+
+# FR-13 enhancement demo (ADR-0021): the DB-persisted model/provider setting drives
+# the next agent build — seed default -> change -> build_model picks it up, offline
+demo-settings:
+	uv run python scripts/demo/settings.py
 
 # Retest lab (retest-lab skill) — intentionally vulnerable targets, localhost only
 lab-up:
