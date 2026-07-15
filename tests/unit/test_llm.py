@@ -10,9 +10,9 @@ from revalid.extract import build_extraction_agent
 from revalid.llm import DEFAULT_MODEL, MODEL_ENV, agent_model_name, resolve_model
 
 
-def test_defaults_to_claude_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_defaults_to_local_first_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(MODEL_ENV, raising=False)
-    assert resolve_model() == DEFAULT_MODEL == "anthropic:claude-sonnet-5"
+    assert resolve_model() == DEFAULT_MODEL == "ollama:qwen3.6:27b"
 
 
 def test_blank_value_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:

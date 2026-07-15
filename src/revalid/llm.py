@@ -1,11 +1,12 @@
-"""Model-agnostic LLM backend selection (FR-13, ADR-0010).
+"""Model-agnostic LLM backend selection (FR-13, ADR-0010, ADR-0021).
 
 One switch, ``REVALID_LLM_MODEL``, selects the backend for every LLM-using
 component: it holds a Pydantic AI model string (``provider:model``, e.g.
-``anthropic:claude-sonnet-5`` or ``ollama:llama3.2``) and defaults to Claude
-(ADR-0002). Switching backends is configuration-only — no code change. The
-Ollama backend additionally needs the provider's own ``OLLAMA_BASE_URL``
-variable; there is deliberately no default server address (ADR-0010).
+``ollama:qwen3.6:27b`` or ``anthropic:claude-sonnet-5``) and defaults to a
+local-first Ollama backend (ADR-0021) — no API key or network egress required
+out of the box. Switching backends is configuration-only — no code change.
+The Ollama backend additionally needs a base URL (``OLLAMA_BASE_URL``, falling
+back to :data:`DEFAULT_BASE_URL`) for its OpenAI-compatible endpoint.
 
 The string is resolved to a concrete model lazily, at the first model call
 (agents are built with ``defer_model_check=True``), so construction never
@@ -19,13 +20,19 @@ import os
 from typing import Any
 
 from pydantic_ai import Agent
-from pydantic_ai.models import KnownModelName
 
 MODEL_ENV = "REVALID_LLM_MODEL"
 """Environment variable that selects the Pydantic AI backend (ADR-0010)."""
 
-DEFAULT_MODEL: KnownModelName = "anthropic:claude-sonnet-5"
-"""Claude is the primary backend (ADR-0002); used when :data:`MODEL_ENV` is unset."""
+DEFAULT_MODEL = "ollama:qwen3.6:27b"
+"""Local-first default backend (ADR-0021); used when :data:`MODEL_ENV` is unset.
+
+Not a member of Pydantic AI's ``KnownModelName`` literal (Ollama models are
+open-ended, not a fixed catalog), so this is a plain ``str``.
+"""
+
+DEFAULT_BASE_URL = "http://localhost:11434/v1"
+"""Default OpenAI-compatible endpoint for the local-first Ollama backend (ADR-0021)."""
 
 
 def resolve_model() -> str:
