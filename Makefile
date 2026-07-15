@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -67,6 +67,18 @@ export-schema:
 p='docs/reference/schemas/run-export.schema.json'; \
 open(p,'w').write(json.dumps(export_schema(), indent=2, sort_keys=True)+'\n'); \
 print('wrote',p)"
+
+# FR-15 evaluation harness demo: score a synthetic run against ground truth and
+# print the verdict-reliability metrics table, fully offline
+demo-eval:
+	uv run python scripts/demo/evaluate_run.py
+
+# FR-15 evaluation harness (one command → metrics table from a run export).
+# Author ground truth from tests/data/eval/ground_truth.example.json; produce the
+# export via the app's GET /api/export (or `make demo-export`). Exits non-zero on
+# an NFR-01 miss. Usage: make eval EXPORT=run.json GROUND_TRUTH=gt.json
+eval:
+	uv run python scripts/evaluate.py --export "$(EXPORT)" --ground-truth "$(GROUND_TRUTH)"
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

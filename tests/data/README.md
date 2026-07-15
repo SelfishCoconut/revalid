@@ -36,3 +36,20 @@ REVALID_LLM_MODEL=ollama:<model> OLLAMA_BASE_URL=http://localhost:11434/v1 \
 
 All targets, IPs, and accounts in that report are OWASP Juice Shop lab
 artefacts (e.g. `admin@juice-sh.op`) — no client or engagement data (NFR-04).
+
+## Evaluation ground truth (`eval/`)
+
+The FR-15 harness (`src/revalid/eval.py`, ADR-0017) scores a run against a
+**ground-truth** file: one expected verdict per evaluation-set finding, matched
+to the run by finding title.
+
+- **`eval/ground_truth.example.json`** — a documented template (synthetic
+  placeholder findings). Copy it to author the real ground truth, keying each
+  entry's `finding` to the exact title as extracted in a real run export, setting
+  `expected` (`still_open` / `fixed` / `inconclusive`) and `ambiguous: true` for
+  findings whose only defensible verdict is *inconclusive* (the NFR-01
+  hard-constraint cases).
+
+Score a run with `make eval EXPORT=<run-export.json> GROUND_TRUTH=<gt.json>`
+(produce the export from the app's `GET /api/export`), or see the offline
+walkthrough with `make demo-eval`.

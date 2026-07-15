@@ -1,0 +1,24 @@
+{
+  "target": "OWASP Juice Shop <pin the evaluated version, e.g. v17.1.1>",
+  "source_report": "Nozipho Mthimunye — Juice Shop Pentest Report (external, kept local)",
+  "findings": [
+    {
+      "finding": "SQL injection auth bypass in login",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "Example only. Login-bypass SQLi is present in the pinned vulnerable Juice Shop, so the correct verdict is still_open."
+    },
+    {
+      "finding": "Missing security headers",
+      "expected": "fixed",
+      "ambiguous": false,
+      "note": "Example only. Replace with a finding whose fix you can actually confirm from evidence."
+    },
+    {
+      "finding": "Sensitive data exposure via verbose error",
+      "expected": "inconclusive",
+      "ambiguous": true,
+      "note": "Example only of an NFR-01 hard-constraint case: the only defensible verdict is inconclusive; a confident verdict here fails NFR-01."
+    }
+  ]
+}

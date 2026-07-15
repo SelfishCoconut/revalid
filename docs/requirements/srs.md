@@ -121,7 +121,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall include a harness that runs the evaluation set (author's Juice Shop report vs a deliberately vulnerable instance) against ground truth and computes verdict-reliability metrics (per NFR-01) for the thesis Results chapter.
 - **Acceptance criteria**:
-  - [ ] One command produces the metrics table (correct / wrong / inconclusive per finding, totals, timing) from a run export.
+  - [~] One command produces the metrics table (correct / wrong / inconclusive per finding, totals, timing) from a run export. — harness shipped: `src/revalid/eval.py` (ADR-0017), `make eval EXPORT=… GROUND_TRUTH=…` (exit-code gated on NFR-01), `make demo-eval` offline. Matches an FR-12 export to a title-keyed ground truth and buckets each finding conservatively (an over-cautious *inconclusive* is a safe miss, not *wrong*). Pending FR-15 completion: Álvaro's real ground truth + a live-lab run for the reported figure.
 
 ## 3. Non-functional requirements
 
