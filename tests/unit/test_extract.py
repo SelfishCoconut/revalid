@@ -17,7 +17,7 @@ from revalid.extract import (
     build_extraction_agent,
     extract_report,
 )
-from revalid.llm import agent_model_name
+from revalid.llm import DEFAULT_MODEL, agent_model_name
 from revalid.pdf import PdfPage, PdfReport
 
 _VALID: dict[str, Any] = {
@@ -115,10 +115,10 @@ def test_extracted_finding_schema_requires_title() -> None:
         )
 
 
-def test_default_agent_targets_claude(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Model-agnostic build, Claude default (ADR-0002); constructs offline.
+def test_default_agent_targets_local_first_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Model-agnostic build, local-first default (ADR-0021); constructs offline.
     monkeypatch.delenv("REVALID_LLM_MODEL", raising=False)
     agent = build_extraction_agent()
-    assert agent.model == "anthropic:claude-sonnet-5"
+    assert agent.model == DEFAULT_MODEL
     # NFR-02: the model name recorded in lineage is the configured string.
-    assert agent_model_name(agent) == "anthropic:claude-sonnet-5"
+    assert agent_model_name(agent) == DEFAULT_MODEL

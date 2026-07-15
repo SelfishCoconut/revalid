@@ -8,6 +8,7 @@ import { FindingDetail } from "./routes/FindingDetail";
 import { NewReport } from "./routes/NewReport";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
+import Settings from "./routes/Settings";
 
 function MenuIcon() {
   return (
@@ -70,6 +71,7 @@ export function App() {
             <Route path="/new" element={<NewReport />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
             <Route path="/findings/:id" element={<FindingDetail />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
 

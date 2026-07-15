@@ -24,3 +24,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0018](0018-browser-driven-probes-playwright.md) | Browser-driven probes via Playwright (optional extra), as a swapped executor under the unchanged FR-08 guard | proposed | 2026-07-15 |
 | [0019](0019-retest-technique-registry.md) | Extensible retest-technique registry: kind-keyed assessors + command rendering, FR-04 kind tagging (scope stays human-validated) | proposed | 2026-07-15 |
 | [0020](0020-manual-report-entry.md) | Manual report entry: human ingestion (form + JSON upload) bypassing the LLM | proposed | 2026-07-15 |
+| [0021](0021-user-configurable-model-provider-setting.md) | User-configurable model/provider setting: DB-persisted, runtime-switchable, env-seeded | proposed | 2026-07-15 |

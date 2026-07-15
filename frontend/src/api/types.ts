@@ -103,3 +103,28 @@ export interface Verdict {
   matched_indicators: string[];
   evidence: Evidence;
 }
+
+export interface Settings {
+  model: string;
+  base_url: string | null;
+  api_key_set: boolean;
+  api_key_hint: string | null;
+}
+
+export interface SettingsUpdate {
+  model: string;
+  base_url: string | null;
+  api_key?: string | null;
+  clear_key?: boolean;
+}
+
+export interface ProbeInput {
+  base_url: string | null;
+  api_key?: string | null;
+}
+
+export interface ProbeResult {
+  reachable: boolean;
+  models: string[];
+  error: string | null;
+}

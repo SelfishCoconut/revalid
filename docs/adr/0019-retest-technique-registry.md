@@ -25,7 +25,7 @@ this the next decision:
    the lab, not the host printed in the source report.
 
 3. **Product direction: human is the final arbiter** (2026-07-15). The machine
-   verdict and (forthcoming) LLM summary are *advisory*; Álvaro
+   verdict and (forthcoming, ADR-0020) LLM summary are *advisory*; Álvaro
    confirms closed/open. So assessors must be **conservative** (never confidently
    wrong) more than they must be complete — a mis-read should land on
    `inconclusive`, never on a wrong confident verdict. Álvaro also asked that the
@@ -52,7 +52,7 @@ A **retest technique** is one thing keyed by a stable `kind` slug, bundling:
 
 - an **assessor**: `Evidence -> Verdict`, pure (FR-10);
 - a **command renderer**: `Probe -> list[str]`, the human-readable rendering
-  shown for approval and quoted in the LLM summary (a later ADR);
+  shown for approval and quoted in the summary (ADR-0020);
 - an **executor class**: `http` (FR-07, httpx) or `browser` (FR-14, Playwright)
   — the routing `is_browser_probe` already performs.
 
@@ -129,7 +129,7 @@ the model copying the report's host is *correct*, and silently rewriting it woul
 be wrong (Álvaro's call). The general fix is therefore **human scope validation**,
 not a heuristic: the authorized scope (base URL + allowlist) and the resolved and
 dropped targets are surfaced for the user to confirm or correct before execution —
-designed in a later human-in-the-loop ADR (scope validation). FR-04 keeps only the
+designed in ADR-0020 (the human-in-the-loop control surface). FR-04 keeps only the
 low-risk robustness aids that are unambiguously safe — raised output retries and
 instructions to prefer relative paths — but the host decision belongs to the
 human, never to a silent gate rewrite.
@@ -160,21 +160,21 @@ human, never to a silent gate rewrite.
   Rejected (Álvaro): the lab-host mismatch is an *evaluation artifact*; in
   production the report's hosts *are* the retest targets, so silently rewriting
   them would be wrong. Mis-targeting is corrected by **human scope validation**
-  (a later ADR), which keeps the human the arbiter of scope and does not touch the
+  (ADR-0020), which keeps the human the arbiter of scope and does not touch the
   FR-06 boundary.
 
 ## Consequences
 
 - **Easier:** real-report retests now yield conclusive *advisory* verdicts for the
-  common web classes; FR-15 produces a real number; the LLM summary (a later ADR)
-  has something to summarize; weak-model plans survive the gate far more often;
+  common web classes; FR-15 produces a real number; the ADR-0020 summary has
+  something to summarize; weak-model plans survive the gate far more often;
   adding a web-testing technique is a one-entry change.
 - **Harder / accepted:** a 200 on an `access-control` probe is read as
   still-open, so a *benign* public endpoint mis-targeted by the planner would be a
   false still-open — a **planning** error, surfaced to the human arbiter, not an
   assessor bug. The FR-06 boundary is **unchanged** (no rehosting); a target the
   gate drops for being off-scope is fixed by the human via scope validation
-  (a later ADR), so weak-model host-copying is a review step, not a silent rewrite.
+  (ADR-0020), so weak-model host-copying is a review step, not a silent rewrite.
 - **Re-derivability preserved:** assessors stay pure over `(kind, evidence)`; new
   reason codes are additive; existing stored verdicts re-derive unchanged (their
   kinds are untouched). `assess_evidence` remains the stable seam `audit.py` uses.
@@ -184,4 +184,4 @@ human, never to a silent gate rewrite.
 - **Status `proposed`:** the registry design, the seed taxonomy, and the
   model-hints/code-normalizes kind assignment are Álvaro's to ratify in async
   review. The FR-06 boundary is intentionally left untouched — scope correction
-  is human-validated (a later ADR).
+  is human-validated (ADR-0020).

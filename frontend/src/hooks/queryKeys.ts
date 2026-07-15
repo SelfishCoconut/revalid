@@ -6,4 +6,5 @@ export const queryKeys = {
   findings: (reportId?: number) => ["findings", reportId ?? "all"] as const,
   plans: (findingId: number) => ["plans", findingId] as const,
   verdicts: ["verdicts"] as const,
+  settings: ["settings"] as const,
 };
