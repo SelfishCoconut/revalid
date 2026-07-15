@@ -4,7 +4,12 @@ Parses pentest reports, extracts findings and reproduction steps, and
 re-executes them against authorized lab targets to verify applied fixes.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+
+# Single source of truth: the version declared in pyproject.toml, read from the
+# installed package metadata — so a release bump never drifts from the code
+# (and the FR-12 export / NFR-02 lineage report the real version).
+__version__ = version("revalid")
 
 
 def health() -> str:
