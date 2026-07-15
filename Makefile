@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -112,6 +112,15 @@ lab-down:
 # `make build-ui` has produced frontend/dist; the /api backend either way.
 run:
 	uv run uvicorn --factory revalid.app:create_app --host 127.0.0.1 --port 8000
+
+# Drop the local SQLite DB so the next `make run` recreates it with the current
+# schema. Needed after a model change adds a column: there are no migrations
+# (ADR-0002/0008), so a pre-existing dev DB fails with e.g.
+# "table verdicts has no column named actor" (ADR-0015). Safe: the DB is
+# gitignored local state, never a source of truth.
+reset-db:
+	rm -f revalid.db revalid.db-journal revalid.db-wal revalid.db-shm
+	@echo "local DB removed; the next 'make run' recreates it fresh"
 
 # --- Frontend (React SPA, FR-11) ---
 # Reproducible install of the SPA toolchain
