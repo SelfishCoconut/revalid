@@ -59,7 +59,8 @@ def probe_provider(
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         response = client.get(f"{base_url.rstrip('/')}/models", headers=headers)
         response.raise_for_status()
-        data = response.json().get("data", [])
+        payload = response.json()
+        data = payload.get("data", []) if isinstance(payload, dict) else []
         models = tuple(str(item["id"]) for item in data if isinstance(item, dict) and "id" in item)
         return ProbeResult(reachable=True, models=models)
     except (httpx.HTTPError, ValueError, KeyError) as exc:
