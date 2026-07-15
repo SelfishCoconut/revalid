@@ -67,6 +67,11 @@ Uploading a PDF, extracting findings, and running a real retest needs:
   Since ADR-0021 these env vars only **seed a fresh DB** on first run — they no
   longer override an already-configured setting. To change model, provider, or
   server address at runtime (no restart), use the SPA `/settings` view instead.
+  Note on in-place upgrade: an existing install that relied on the old
+  Claude default (via `ANTHROPIC_API_KEY`, no `REVALID_LLM_MODEL`) will seed the
+  new local-first `ollama:qwen3.6:27b` default on first startup after upgrade —
+  set the backend in `/settings` (or export `REVALID_LLM_MODEL` before that
+  first run) to keep Claude.
 
 `make demo-ui` = `build-ui` + `run` is the FR-11 acceptance target: the full
 upload → approve plan → retest → verdicts flow, operable from the browser alone.

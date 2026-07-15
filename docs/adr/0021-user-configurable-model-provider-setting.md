@@ -118,6 +118,15 @@ design of record.
 - **Runtime semantics:** a change takes effect on the next agent build; an in-flight
   ingest/retest keeps the model it started with. Acceptable — jobs are short and
   lineage records the model actually used (NFR-02, via `ReportRecord.model`).
+- **Lineage naming (accepted):** for a model built with an explicit provider — both
+  the base-URL path (Ollama/OpenAI-compatible) and native Anthropic with a *stored*
+  key — `agent_model_name` records the concrete model name with the `provider:`
+  prefix stripped (e.g. `qwen3.6:27b`, `claude-sonnet-5`); only the bare-string
+  (env-key) path records the full `provider:model`. This is honest (it is the name
+  the backend actually used) and NFR-02 lineage still holds, but the same logical
+  backend can record differently depending on whether its key lives in the DB or the
+  environment. Normalizing to `provider:model` in `build_model` is a possible
+  follow-up if uniform lineage strings become important.
 - **Schema:** a new `settings` table is added to the existing `create_all` metadata,
   consistent with the project's "`rm revalid.db` on schema change" development
   practice (no formal migrations yet).
