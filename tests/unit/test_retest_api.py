@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
@@ -135,3 +136,68 @@ def test_audit_endpoint_rederives_all_verdicts() -> None:
         assert audit["reproduced"] == audit["total"]
         assert audit["ok"] is True
         assert audit["discrepancies"] == []
+
+
+def _app_with_browser_plan() -> FastAPI:
+    """Build an app whose shared engine holds an approved browser-XSS plan (FR-14)."""
+    from revalid.approval import approve_plan, save_generated_plan
+    from revalid.browser import stored_xss_probe
+    from revalid.db import FindingRecord, session_factory
+    from revalid.domain import Finding, RetestPlan, Severity
+    from revalid.plan import PlanResult
+
+    engine = create_db_engine(IN_MEMORY)
+    session = session_factory(engine)()
+    session.add(FindingRecord.from_domain(Finding(title="DOM XSS", severity=Severity.HIGH)))
+    session.commit()
+    probe = stored_xss_probe("http://localhost:3000")
+    plan = RetestPlan(finding_title="DOM XSS", actions=(probe,), raw={"finding_title": "DOM XSS"})
+    save_generated_plan(session, 1, PlanResult(plan=plan))
+    approve_plan(session, 1)
+    session.close()
+    return create_app(engine=engine)
+
+
+def _executed_xss_evidence(probe: Probe) -> object:
+    from revalid.domain import Evidence
+
+    return Evidence(
+        request_method="GET",
+        request_url=probe.url,
+        response_status=200,
+        response_body_excerpt=(
+            '{"xss_executed": true, "payload_reflected": true, '
+            '"dialog_message": "revalid-xss-probe", "final_url": "x"}'
+        ),
+    )
+
+
+def test_retest_routes_browser_probe_via_injected_runner() -> None:
+    """FR-14: a browser-kind probe runs via the injected runner and yields a verdict."""
+    from revalid.app import get_browser_runner
+
+    app = _app_with_browser_plan()
+    app.dependency_overrides[get_browser_runner] = lambda: _executed_xss_evidence
+    with TestClient(app) as client:
+        verdicts = client.post("/api/findings/1/retest").json()
+    assert verdicts[0]["probe_kind"] == "browser-xss"
+    assert verdicts[0]["status"] == "still_open"  # observed execution -> still open
+
+
+def test_retest_browser_probe_returns_501_when_unavailable() -> None:
+    """FR-14: an approved browser probe without the Playwright extra surfaces as 501."""
+    from revalid.app import get_browser_runner
+    from revalid.browser import BrowserProbeUnavailableError
+
+    def _raising() -> Callable[[Probe], object]:
+        def run(_probe: Probe) -> object:
+            raise BrowserProbeUnavailableError()
+
+        return run
+
+    app = _app_with_browser_plan()
+    app.dependency_overrides[get_browser_runner] = _raising
+    with TestClient(app) as client:
+        response = client.post("/api/findings/1/retest")
+    assert response.status_code == 501
+    assert "browser" in response.json()["detail"].lower()

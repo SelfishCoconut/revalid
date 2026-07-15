@@ -115,7 +115,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Could · **Source**: interview 2026-06-11
 - **Description**: For findings not verifiable at HTTP level (DOM/JS-dependent), the executor may support Playwright-driven browser probes under the same approval, allowlist, and audit constraints.
 - **Acceptance criteria**:
-  - [ ] At least one stored-XSS-class Juice Shop finding verifiable only in-browser gets a correct verdict.
+  - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser gets a correct verdict. — `src/revalid/browser.py` (ADR-0018): a `browser-xss` Playwright probe (optional `browser` extra) verifies Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` is executor-agnostic; browser verdicts re-derive via the shared `assess_evidence`). Pipeline + assessor unit-tested with a canned runner; the live-lab still-open verdict is asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`). Exemplar is DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalizes.
 
 ### FR-15 — Evaluation harness
 - **Priority**: Must · **Source**: interview 2026-06-11

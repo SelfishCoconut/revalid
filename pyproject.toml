@@ -18,6 +18,11 @@ dependencies = [
     "uvicorn>=0.32",
 ]
 
+[project.optional-dependencies]
+# FR-14 browser-driven probes (ADR-0018). Optional: HTTP-only paths never import
+# it. Enable with `uv sync --extra browser && uv run playwright install chromium`.
+browser = ["playwright>=1.48"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.8",
@@ -96,6 +101,13 @@ pretty = true
 # dependency used by the fixture generator. Silence missing-import errors.
 [[tool.mypy.overrides]]
 module = ["pdfplumber.*", "reportlab.*"]
+ignore_missing_imports = true
+
+# playwright is the optional `browser` extra — not installed in the lint/unit CI
+# job, and imported lazily inside revalid.browser. Silence the missing import
+# there; the browser probe path is exercised by the system-marked test.
+[[tool.mypy.overrides]]
+module = ["playwright.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest

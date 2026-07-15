@@ -8,7 +8,6 @@ The two acceptance criteria:
 
 import logging
 
-import httpx
 import pytest
 
 from revalid.domain import Evidence, Probe, Verdict, VerdictStatus
@@ -64,16 +63,15 @@ def test_off_plan_probe_is_blocked_and_logged(caplog: pytest.LogCaptureFixture) 
 
 
 def test_guarded_run_blocks_off_plan_before_any_request() -> None:
-    calls: list[httpx.Request] = []
+    calls: list[Probe] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200)
+    def execute(probe: Probe) -> Verdict:
+        calls.append(probe)
+        return _verdict(VerdictStatus.STILL_OPEN, 200)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(PlanDeviationError):
-        guarded_run(client, _probe(url="http://localhost:3000/rest/admin"), (_probe(),))
-    assert calls == []  # AC1: no socket opened for an off-plan probe
+        guarded_run(_probe(url="http://localhost:3000/rest/admin"), (_probe(),), execute)
+    assert calls == []  # AC1: the executor is never called for an off-plan probe
 
 
 def test_in_plan_probe_passes() -> None:
@@ -133,12 +131,14 @@ def test_review_is_idempotent() -> None:
 
 
 def test_guarded_run_downgrades_a_fixed_on_404_end_to_end() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404)
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
     probe = _probe()  # in-plan
-    verdict = guarded_run(client, probe, (probe,))
-    # The generic assessor calls a 404 inconclusive already; the guard guarantees
-    # no fixed can survive an absent endpoint regardless of the assessor.
+
+    # An executor that (wrongly) returns fixed on a 404: the guard must still
+    # downgrade it, proving no fixed survives an absent endpoint regardless of the
+    # executor or probe kind.
+    def execute(_probe: Probe) -> Verdict:
+        return _verdict(VerdictStatus.FIXED, 404, reason_code="login_rejected")
+
+    verdict = guarded_run(probe, (probe,), execute)
     assert verdict.status is VerdictStatus.INCONCLUSIVE
+    assert verdict.reason_code == "endpoint_changed"
