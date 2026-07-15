@@ -1,7 +1,7 @@
 # 0015. Audit trail: verdicts re-derivable from stored evidence via a shared pure assessment
 
 Date: 2026-07-14
-Status: proposed
+Status: accepted
 
 ## Context
 

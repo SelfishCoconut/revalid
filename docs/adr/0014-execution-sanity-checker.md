@@ -1,7 +1,7 @@
 # 0014. Execution sanity checker: an independent verifier over the approved-plan execution boundary
 
 Date: 2026-07-14
-Status: proposed
+Status: accepted
 
 ## Context
 
