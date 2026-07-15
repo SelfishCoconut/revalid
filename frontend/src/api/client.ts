@@ -7,7 +7,11 @@ import type {
   Finding,
   Plan,
   PlannedAction,
+  ProbeInput,
+  ProbeResult,
   Report,
+  Settings,
+  SettingsUpdate,
   Verdict,
 } from "./types";
 
@@ -114,4 +118,18 @@ export function retest(findingId: number): Promise<Verdict[]> {
 
 export function listVerdicts(): Promise<Verdict[]> {
   return request<Verdict[]>("/verdicts");
+}
+
+// --- Settings --------------------------------------------------------------
+
+export function getSettings(): Promise<Settings> {
+  return request<Settings>("/settings");
+}
+
+export function updateSettings(body: SettingsUpdate): Promise<Settings> {
+  return request<Settings>("/settings", jsonInit("PUT", body));
+}
+
+export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
+  return request<ProbeResult>("/settings/probe", jsonInit("POST", body));
 }
