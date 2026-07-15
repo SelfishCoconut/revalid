@@ -29,7 +29,11 @@ Add `src/revalid/eval.py`, a pure scorer over an FR-12 `RunExport`, plus
 - **Ground truth** (`GroundTruth`): `target`, `source_report`, and one
   `GroundTruthEntry` per finding — `finding` (title), `expected` verdict, an
   `ambiguous` flag, and a free-text `note`. Authored by Álvaro; a committed
-  `tests/data/eval/ground_truth.example.json` documents the shape.
+  `tests/data/eval/ground_truth.example.json` documents the shape, and
+  `make ground-truth-skeleton` (`scripts/make_ground_truth.py`) emits a
+  pre-keyed, fill-in-the-blanks skeleton from a real export — every finding title
+  already aligned to the run, `expected` left as an intentionally-invalid `TODO`
+  sentinel so an unfilled skeleton is fail-closed (won't load).
 - **Matching by normalized title** (lowercased, whitespace-collapsed). Finding
   row ids are per-run and unstable; the title is the stable natural key, and
   Álvaro authors the ground truth from a real export so the keys align. Findings

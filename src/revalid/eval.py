@@ -25,6 +25,7 @@ import enum
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -35,13 +36,18 @@ from revalid.export import RunExport, VerdictExport
 # correct verdict.
 NFR01_MIN_CORRECT = 0.70
 
+# Sentinel written for `expected` in a generated ground-truth skeleton. Invalid as
+# a VerdictStatus on purpose: an unfilled skeleton fails to load, so no run is ever
+# scored against a placeholder (fail-closed authoring).
+GROUND_TRUTH_TODO = "TODO"
+
 
 class GroundTruthEntry(BaseModel):
     """The expected verdict for one evaluation-set finding (FR-15 ground truth).
 
     Attributes:
         finding: The finding title, matched to the export case-insensitively and
-            whitespace-normalized (see :func:`_norm`).
+            whitespace-normalized (see :func:`normalize_title`).
         expected: The verdict a correct system should return. For an
             ``ambiguous`` finding this must be ``inconclusive``.
         ambiguous: Whether this finding's only defensible outcome is
@@ -214,8 +220,13 @@ def classify(
     return Classification.WRONG
 
 
-def _norm(title: str) -> str:
-    """Normalize a finding title to a match key (lowercased, whitespace-collapsed)."""
+def normalize_title(title: str) -> str:
+    """Normalize a finding title to its match key (lowercased, whitespace-collapsed).
+
+    The single key both scoring (:func:`evaluate`) and the ground-truth authoring
+    aid (:func:`ground_truth_skeleton`) use to line findings up, so they can never
+    disagree on what counts as the same finding.
+    """
     return " ".join(title.lower().split())
 
 
@@ -245,14 +256,14 @@ def evaluate(export: RunExport, ground_truth: GroundTruth) -> EvalReport:
     Returns:
         The scored :class:`EvalReport`.
     """
-    findings_by_key = {_norm(f.finding.title): f for f in export.findings}
+    findings_by_key = {normalize_title(f.finding.title): f for f in export.findings}
     latest = latest_verdict_by_finding(export)
     matched_keys: set[str] = set()
     rows: list[EvalRow] = []
     unmatched_gt: list[str] = []
 
     for entry in ground_truth.findings:
-        key = _norm(entry.finding)
+        key = normalize_title(entry.finding)
         finding = findings_by_key.get(key)
         if finding is None:
             unmatched_gt.append(entry.finding)
@@ -289,6 +300,44 @@ def load_ground_truth(path: Path) -> GroundTruth:
 def load_export(path: Path) -> RunExport:
     """Load and validate an FR-12 run export from disk."""
     return RunExport.model_validate(json.loads(path.read_text()))
+
+
+def ground_truth_skeleton(export: RunExport) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Build a fill-in-the-blanks ground-truth skeleton from a run export (FR-15 aid).
+
+    Emits one entry per export finding, its ``finding`` title already keyed so it
+    matches the run exactly, with ``expected`` set to :data:`GROUND_TRUTH_TODO` for
+    the author to replace. Because that sentinel is not a valid verdict, an
+    unfilled skeleton won't load — the author cannot accidentally score a run
+    against placeholders.
+
+    Args:
+        export: The FR-12 run export to seed the ground truth from.
+
+    Returns:
+        A ``(skeleton, duplicate_titles)`` pair. ``skeleton`` is JSON-serializable
+        and shaped like :class:`GroundTruth`; ``duplicate_titles`` lists finding
+        titles that collapse to the same match key (they would collide in scoring,
+        so the author must disambiguate them).
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    entries: list[dict[str, Any]] = []
+    for finding in export.findings:
+        title = finding.finding.title
+        key = normalize_title(title)
+        if key in seen:
+            duplicates.append(title)
+        seen.add(key)
+        entries.append(
+            {"finding": title, "expected": GROUND_TRUTH_TODO, "ambiguous": False, "note": ""}
+        )
+    skeleton = {
+        "target": "<pin the evaluated target, e.g. OWASP Juice Shop v17.1.1>",
+        "source_report": export.reports[0].filename if export.reports else "<pentest report>",
+        "findings": entries,
+    }
+    return skeleton, tuple(duplicates)
 
 
 _STATUS_LABEL = {

@@ -50,6 +50,18 @@ to the run by finding title.
   findings whose only defensible verdict is *inconclusive* (the NFR-01
   hard-constraint cases).
 
+Rather than transcribe titles by hand, **generate a pre-keyed skeleton** from a
+real export and just fill in the verdicts:
+
+```sh
+make ground-truth-skeleton EXPORT=<run-export.json> OUT=tests/data/eval/ground_truth.json
+```
+
+Every finding is emitted with its title already keyed and `expected` set to the
+`TODO` sentinel; the generator warns about any titles that collide after
+normalization. Because `TODO` is not a valid verdict, an unfilled skeleton won't
+load — you can't score a run against placeholders by accident.
+
 Score a run with `make eval EXPORT=<run-export.json> GROUND_TRUTH=<gt.json>`
 (produce the export from the app's `GET /api/export`), or see the offline
 walkthrough with `make demo-eval`.
