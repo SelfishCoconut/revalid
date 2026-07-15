@@ -42,3 +42,10 @@ def test_put_updates_model_and_masks_stored_key(client: TestClient) -> None:
 
 def test_put_rejects_empty_model(client: TestClient) -> None:
     assert client.put("/api/settings", json={"model": "", "base_url": None}).status_code == 422
+
+
+def test_probe_endpoint_reports_unreachable_localhost(client: TestClient) -> None:
+    # No Ollama in CI: the probe must return a structured "unreachable", never 500.
+    body = client.post("/api/settings/probe", json={"base_url": "http://127.0.0.1:1/v1"}).json()
+    assert body["reachable"] is False
+    assert body["error"]

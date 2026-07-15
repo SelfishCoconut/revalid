@@ -54,7 +54,7 @@ from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
 from revalid.sanity import PlanDeviationError
-from revalid.settings import load_or_seed, save
+from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -190,6 +190,13 @@ class SettingsUpdateIn(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     clear_key: bool = False
+
+
+class ProbeIn(BaseModel):
+    """Probe request: which endpoint (and optional key) to discover models from."""
+
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 def get_probe_client() -> Iterator[httpx.Client]:
@@ -610,6 +617,11 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
             clear_key=body.clear_key,
         )
         return SettingsOut.from_domain(cfg)
+
+    @router.post("/settings/probe", response_model=ProbeResult)
+    def probe_settings(body: ProbeIn) -> ProbeResult:
+        """Discover models / test reachability for a provider base URL (ADR-0021)."""
+        return probe_provider(body.base_url, body.api_key)
 
 
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
