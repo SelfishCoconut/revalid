@@ -2,8 +2,9 @@
 
 import pytest
 
-from revalid.app import create_app, get_settings_dep
+from revalid.app import create_app, get_extraction_agent, get_plan_agent, get_settings_dep
 from revalid.db import create_db_engine, session_factory
+from revalid.llm import agent_model_name
 from revalid.settings import save
 
 pytestmark = pytest.mark.integration
@@ -23,3 +24,11 @@ def test_di_builds_agent_from_stored_setting() -> None:
     cfg = get_settings_dep(_Req(app))  # type: ignore[arg-type]
     assert cfg.model == "ollama:llama3.2"
     assert cfg.base_url == "http://h:11434/v1"
+
+    # ADR-0021 runtime semantics: the rewired factories must build agents FROM
+    # the stored setting. build_model strips the ollama:/openai: prefix, so the
+    # built model_name is "llama3.2". Reverting the factory rewrite fails here.
+    extraction_agent = get_extraction_agent(cfg)
+    plan_agent = get_plan_agent(cfg)
+    assert agent_model_name(extraction_agent) == "llama3.2"
+    assert agent_model_name(plan_agent) == "llama3.2"
