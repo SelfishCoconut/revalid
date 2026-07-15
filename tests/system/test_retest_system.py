@@ -48,9 +48,10 @@ def test_approved_plan_retest_still_open_via_api() -> None:
     """Rewired chokepoint end-to-end: seed+approve a login-SQLi plan, retest via API (FR-05).
 
     Approval/execution is LLM-free, so the plan is seeded with the real
-    ``sqli-login-bypass`` probe (kind that ``assess`` understands) rather than
-    generated — a *generated* ``planned-http`` probe would assess as inconclusive.
-    The default probe client hits the live lab through the FR-06 transport.
+    ``sqli-login-bypass`` probe directly rather than generated. (Since ADR-0019 a
+    generated action for a login-SQLi finding also classifies to that kind; here we
+    seed it to keep the system test independent of the planner.) The default probe
+    client hits the live lab through the FR-06 transport.
     """
     from fastapi.testclient import TestClient
 

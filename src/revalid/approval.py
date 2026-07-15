@@ -21,7 +21,7 @@ from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, is_brow
 from revalid.db import PlanRecord, VerdictRecord
 from revalid.domain import PlanStatus, Probe, RetestPlan, Verdict
 from revalid.plan import PlannedAction, PlanResult, RejectedAction, gate_actions
-from revalid.retest import assess_evidence, run_probe
+from revalid.retest import assess_evidence, classify_kind_from_text, run_probe
 from revalid.sanity import guarded_run
 
 _ACTOR = "user"
@@ -123,7 +123,9 @@ def edit_plan(
     Raises:
         AllActionsRejectedError: If no submitted action survives the gate.
     """
-    probes, rejected = gate_actions(actions, guard, base_url)
+    probes, rejected = gate_actions(
+        actions, guard, base_url, classify_kind_from_text(finding_title)
+    )
     if not probes:
         raise AllActionsRejectedError(finding_id, rejected)
     plan = RetestPlan(
