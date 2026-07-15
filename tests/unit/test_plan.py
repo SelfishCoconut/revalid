@@ -13,6 +13,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from revalid.allowlist import TargetGuard
 from revalid.domain import Finding, Severity
+from revalid.llm import DEFAULT_MODEL
 from revalid.plan import build_plan_agent, generate_plan
 
 _BASE_URL = "http://localhost:3000"
@@ -139,7 +140,7 @@ def test_lineage_records_model_and_base_url() -> None:
 def test_default_agent_uses_configured_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REVALID_LLM_MODEL", raising=False)
     agent = build_plan_agent()
-    assert agent.model == "anthropic:claude-sonnet-5"
+    assert agent.model == DEFAULT_MODEL
 
 
 def test_gate_actions_splits_survivors_from_rejects() -> None:

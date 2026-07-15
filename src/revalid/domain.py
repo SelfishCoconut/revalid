@@ -22,6 +22,23 @@ class Severity(enum.StrEnum):
     CRITICAL = "critical"
 
 
+class Settings(BaseModel):
+    """User-configurable LLM backend selection (FR-13 / ADR-0021).
+
+    Attributes:
+        model: A Pydantic AI ``provider:model`` string (e.g. ``ollama:qwen3.6:27b``).
+        base_url: Provider base URL for OpenAI-compatible backends (Ollama and
+            friends); ``None`` for native providers configured from the environment.
+        api_key: Provider API key, or ``None`` when supplied via the environment.
+    """
+
+    model_config = ConfigDict(frozen=True, protected_namespaces=())
+
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key: str | None = None
+
+
 class Finding(BaseModel):
     """A single pentest finding in the internal model (FR-02/FR-03).
 
