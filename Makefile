@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -79,6 +79,12 @@ demo-eval:
 # an NFR-01 miss. Usage: make eval EXPORT=run.json GROUND_TRUTH=gt.json
 eval:
 	uv run python scripts/evaluate.py --export "$(EXPORT)" --ground-truth "$(GROUND_TRUTH)"
+
+# FR-15 authoring aid: emit a fill-in-the-blanks ground-truth skeleton (one entry
+# per finding, titles pre-keyed) from a run export. OUT is optional (stdout if
+# unset). Usage: make ground-truth-skeleton EXPORT=run.json OUT=tests/data/eval/ground_truth.json
+ground-truth-skeleton:
+	uv run python scripts/make_ground_truth.py --export "$(EXPORT)" $(if $(OUT),--out "$(OUT)",)
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

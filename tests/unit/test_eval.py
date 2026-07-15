@@ -6,20 +6,31 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from revalid.domain import Evidence, Finding, Severity, Verdict, VerdictStatus
 from revalid.eval import (
+    GROUND_TRUTH_TODO,
     Classification,
     GroundTruth,
     GroundTruthEntry,
     classify,
     evaluate,
     format_table,
+    ground_truth_skeleton,
     latest_verdict_by_finding,
     load_export,
     load_ground_truth,
+    normalize_title,
 )
-from revalid.export import FindingExport, Generator, RunExport, RunMetrics, VerdictExport
+from revalid.export import (
+    FindingExport,
+    Generator,
+    ReportExport,
+    RunExport,
+    RunMetrics,
+    VerdictExport,
+)
 
 _NOW = datetime(2026, 7, 15, tzinfo=UTC)
 _EXAMPLE_GT = Path(__file__).resolve().parents[2] / "tests/data/eval/ground_truth.example.json"
@@ -217,3 +228,59 @@ def test_example_ground_truth_file_is_valid() -> None:
     # The example includes an ambiguous hard-constraint case with expected=inconclusive.
     ambiguous = [f for f in gt.findings if f.ambiguous]
     assert ambiguous and all(f.expected is VerdictStatus.INCONCLUSIVE for f in ambiguous)
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [("  SQL  Injection ", "sql injection"), ("Fixed", "fixed"), ("A\tB\nC", "a b c")],
+)
+def test_normalize_title(raw: str, want: str) -> None:
+    assert normalize_title(raw) == want
+
+
+def _export_with_reports(
+    findings: tuple[FindingExport, ...], reports: tuple[ReportExport, ...]
+) -> RunExport:
+    export = _export(findings, ())
+    return export.model_copy(update={"reports": reports})
+
+
+def test_ground_truth_skeleton_one_todo_entry_per_finding() -> None:
+    findings = (_finding(1, "SQLi login"), _finding(2, "Broken access control"))
+    skeleton, duplicates = ground_truth_skeleton(_export(findings, ()))
+
+    assert duplicates == ()
+    assert [e["finding"] for e in skeleton["findings"]] == ["SQLi login", "Broken access control"]
+    assert all(e["expected"] == GROUND_TRUTH_TODO for e in skeleton["findings"])
+    assert all(e["ambiguous"] is False for e in skeleton["findings"])
+    assert skeleton["source_report"] == "<pentest report>"  # no report in the export
+
+
+def test_ground_truth_skeleton_pulls_source_report_from_first_report() -> None:
+    report = ReportExport(
+        id=1,
+        filename="pentest.pdf",
+        status="ready",
+        model="ollama:x",
+        finding_count=1,
+        created_at=_NOW,
+    )
+    skeleton, _ = ground_truth_skeleton(_export_with_reports((_finding(1, "a"),), (report,)))
+    assert skeleton["source_report"] == "pentest.pdf"
+
+
+def test_ground_truth_skeleton_flags_colliding_titles() -> None:
+    findings = (_finding(1, "SQLi Login"), _finding(2, "sqli  login"), _finding(3, "Other"))
+    _, duplicates = ground_truth_skeleton(_export(findings, ()))
+    assert duplicates == ("sqli  login",)
+
+
+def test_unfilled_skeleton_does_not_validate_but_filled_one_does() -> None:
+    skeleton, _ = ground_truth_skeleton(_export((_finding(1, "SQLi login"),), ()))
+    # Fail-closed: the TODO sentinel is not a valid verdict, so an unfilled
+    # skeleton cannot be loaded and scored by accident.
+    with pytest.raises(ValidationError):
+        GroundTruth.model_validate(skeleton)
+    # Once the author fills in a real verdict, it validates.
+    skeleton["findings"][0]["expected"] = "still_open"
+    assert GroundTruth.model_validate(skeleton).findings[0].expected is VerdictStatus.STILL_OPEN
