@@ -14,22 +14,25 @@ that no single probe assessor can guarantee on its own:
    a positive rejection; the verifier only ever downgrades, never inventing
    confidence (NFR-01).
 
-:func:`guarded_run` composes both around :func:`revalid.retest.run_probe` and is
-the only path the FR-05 chokepoint uses to execute a probe.
+:func:`guarded_run` composes both around a caller-supplied probe executor and is
+the only path the FR-05 chokepoint uses to execute a probe — so the guarantees
+hold identically whether the executor speaks HTTP (FR-07) or drives a browser
+(FR-14). It stays agnostic to *how* a probe runs; the caller picks the executor.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
-
-import httpx
+from collections.abc import Callable, Iterable
 
 from revalid.domain import Probe, Verdict, VerdictStatus
-from revalid.retest import run_probe
 
 _log = logging.getLogger(__name__)
+
+# A probe executor: runs one probe and returns its (pre-review) verdict. The
+# caller binds the transport (an httpx client, a browser runner) behind it.
+ProbeExecutor = Callable[[Probe], Verdict]
 
 # Statuses that make a *fixed* verdict untrustworthy: the endpoint is absent
 # (moved/removed — a fix is indistinguishable from relocation). A 3xx redirect is
@@ -104,15 +107,17 @@ def review_verdict(verdict: Verdict) -> Verdict:
     return verdict
 
 
-def guarded_run(client: httpx.Client, probe: Probe, approved: Iterable[Probe]) -> Verdict:
+def guarded_run(probe: Probe, approved: Iterable[Probe], execute: ProbeExecutor) -> Verdict:
     """Execute ``probe`` under the FR-08 guarantees; the sole execution primitive.
 
-    Blocks an off-plan probe (AC1) before any request, runs it, then reviews the
-    resulting verdict for an over-confident *fixed* (AC2). ``approved`` must be a
-    re-iterable collection (the caller passes the approved plan's probes).
+    Blocks an off-plan probe (AC1) before any request, runs it through
+    ``execute``, then reviews the resulting verdict for an over-confident *fixed*
+    (AC2). ``execute`` is the transport-bound runner the caller chose (HTTP or
+    browser), so the guard is identical for every probe kind. ``approved`` must be
+    a re-iterable collection (the caller passes the approved plan's probes).
     """
     assert_in_plan(probe, approved)
-    return review_verdict(run_probe(client, probe))
+    return review_verdict(execute(probe))
 
 
 def _downgrade(verdict: Verdict, reason_code: str, rationale: str) -> Verdict:

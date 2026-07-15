@@ -14,7 +14,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --extra browser
+      - name: Install Playwright browser (FR-14)
+        run: uv run playwright install --with-deps chromium
       - name: Start lab targets
         run: |
           if [ -f lab/docker-compose.yml ]; then

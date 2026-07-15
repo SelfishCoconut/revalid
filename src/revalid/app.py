@@ -35,6 +35,7 @@ from revalid.approval import (
     save_generated_plan,
 )
 from revalid.audit import rederive_run
+from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, make_browser_runner
 from revalid.db import (
     FindingRecord,
     PlanRecord,
@@ -167,6 +168,15 @@ def get_probe_client() -> Iterator[httpx.Client]:
         yield client
 
 
+def get_browser_runner() -> BrowserRunner:
+    """Yield the FR-14 browser probe runner, bound to the allowlist guard.
+
+    Overridable in tests with a stand-in runner that returns canned evidence, so
+    the browser-probe execution path is tested without launching a real browser.
+    """
+    return make_browser_runner(load_allowlist())
+
+
 def get_plan_agent() -> Agent[None, list[PlannedAction]]:
     """Yield the FR-04 plan agent (overridden in tests with a stand-in model)."""
     return build_plan_agent()
@@ -181,6 +191,7 @@ def get_extraction_agent() -> Agent[None, list[ExtractedFinding]]:
 # functions with no per-app-instance state, so these aliases can live here too —
 # unlike SessionDep, which closes over each app's own session factory.
 ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]
+BrowserRunnerDep = Annotated[BrowserRunner, Depends(get_browser_runner)]
 PlanAgentDep = Annotated[Agent[None, list[PlannedAction]], Depends(get_plan_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 
@@ -293,11 +304,16 @@ def _list_plans(session: Session, finding_id: int) -> list[PlanOut]:
     return [PlanOut.from_record(record) for record in list_plans(session, finding_id)]
 
 
-def _retest_finding(session: Session, client: httpx.Client, finding_id: int) -> list[VerdictOut]:
-    """Execute the finding's APPROVED plan and persist the verdicts (FR-05/FR-07/FR-09)."""
+def _retest_finding(
+    session: Session,
+    client: httpx.Client,
+    finding_id: int,
+    browser_runner: BrowserRunner,
+) -> list[VerdictOut]:
+    """Execute the finding's APPROVED plan and persist the verdicts (FR-05/FR-07/FR-09/FR-14)."""
     _get_finding_or_404(session, finding_id)
     try:
-        records = execute_approved_plan(session, client, finding_id)
+        records = execute_approved_plan(session, client, finding_id, browser_runner=browser_runner)
     except PlanNotApprovedError as exc:
         raise HTTPException(
             status_code=409, detail="no approved plan; approve one before retesting"
@@ -306,6 +322,8 @@ def _retest_finding(session: Session, client: httpx.Client, finding_id: int) -> 
         raise HTTPException(
             status_code=409, detail="execution blocked: probe deviates from the approved plan"
         ) from exc
+    except BrowserProbeUnavailableError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
     return [
         VerdictOut(
             id=r.id,
@@ -454,10 +472,13 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
 
     @router.post("/findings/{finding_id}/retest", response_model=list[VerdictOut])
     def retest_finding(
-        finding_id: int, session: SessionDep, client: ProbeClientDep
+        finding_id: int,
+        session: SessionDep,
+        client: ProbeClientDep,
+        browser_runner: BrowserRunnerDep,
     ) -> list[VerdictOut]:
-        """Execute the finding's APPROVED plan and persist the verdicts (FR-05/FR-07/FR-09)."""
-        return _retest_finding(session, client, finding_id)
+        """Execute the finding's approved plan; persist the verdicts (FR-05/07/09/14)."""
+        return _retest_finding(session, client, finding_id, browser_runner)
 
     @router.get("/verdicts", response_model=list[VerdictOut])
     def list_verdicts(session: SessionDep) -> list[VerdictOut]:

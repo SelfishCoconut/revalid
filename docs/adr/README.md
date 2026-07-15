@@ -21,3 +21,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0015](0015-audit-trail-verdict-rederivation.md) | Audit trail: verdicts re-derivable from stored evidence via a shared pure assessment | accepted | 2026-07-15 |
 | [0016](0016-versioned-run-export.md) | Versioned run export: Pydantic-generated JSON document + published, drift-tested JSON schema | accepted | 2026-07-15 |
 | [0017](0017-evaluation-harness-nfr01-scoring.md) | Evaluation harness: score an FR-12 export against title-keyed ground truth with conservative NFR-01 buckets | proposed | 2026-07-15 |
+| [0018](0018-browser-driven-probes-playwright.md) | Browser-driven probes via Playwright (optional extra), as a swapped executor under the unchanged FR-08 guard | proposed | 2026-07-15 |

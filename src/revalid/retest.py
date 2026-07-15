@@ -18,6 +18,7 @@ from collections.abc import Callable
 import httpx
 
 from revalid.allowlist import AllowlistTransport, TargetGuard
+from revalid.browser import BROWSER_XSS_KIND, decode_observation
 from revalid.domain import Evidence, Probe, Verdict, VerdictStatus
 
 _LAB_ENV = "REVALID_LAB_BASE_URL"
@@ -173,8 +174,54 @@ def assess_generic(evidence: Evidence) -> Verdict:
     )
 
 
+def assess_browser_xss(evidence: Evidence) -> Verdict:
+    """Map a browser XSS probe's stored observation to a verdict (FR-14/FR-09).
+
+    Pure over the evidence the browser recorded (:func:`revalid.browser.decode_observation`),
+    so a browser verdict re-derives offline like any other (FR-10). still-open: the
+    payload executed (a dialog carrying the marker fired). fixed: it neither
+    executed nor survived in the DOM. inconclusive: reflected but not proven to
+    execute (ambiguous — never guessed as fixed), or a malformed observation.
+    """
+    observation = decode_observation(evidence.response_body_excerpt)
+    if observation is None:
+        return Verdict(
+            status=VerdictStatus.INCONCLUSIVE,
+            reason_code="browser_probe_malformed",
+            rationale="Browser probe evidence carried no readable observation; manual review.",
+            matched_indicators=("no_observation",),
+            evidence=evidence,
+        )
+    if observation["xss_executed"]:
+        return Verdict(
+            status=VerdictStatus.STILL_OPEN,
+            reason_code="browser_xss_executed",
+            rationale="Injected payload executed in the browser (dialog fired) — XSS still open.",
+            matched_indicators=("xss_executed",),
+            evidence=evidence,
+        )
+    if not observation.get("payload_reflected"):
+        return Verdict(
+            status=VerdictStatus.FIXED,
+            reason_code="xss_sanitized",
+            rationale="Payload neither executed nor survived in the DOM — sanitized.",
+            matched_indicators=("no_execution", "not_reflected"),
+            evidence=evidence,
+        )
+    return Verdict(
+        status=VerdictStatus.INCONCLUSIVE,
+        reason_code="xss_reflected_not_executed",
+        rationale="Payload appears in the DOM but was not observed to execute; manual review.",
+        matched_indicators=("reflected", "no_execution"),
+        evidence=evidence,
+    )
+
+
 # Assessors keyed by probe kind; unknown kinds fall back to assess_generic.
-_ASSESSORS: dict[str, Callable[[Evidence], Verdict]] = {"sqli-login-bypass": assess}
+_ASSESSORS: dict[str, Callable[[Evidence], Verdict]] = {
+    "sqli-login-bypass": assess,
+    BROWSER_XSS_KIND: assess_browser_xss,
+}
 
 
 def _has_auth_token(body: str) -> bool:

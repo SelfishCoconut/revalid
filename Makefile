@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-browser-xss demo-walking-skeleton lab-up lab-down run ui-install ui-lint ui-test build-ui dev-ui demo-ui
 
 lint:
 	uv run ruff check src tests
@@ -85,6 +85,11 @@ eval:
 # unset). Usage: make ground-truth-skeleton EXPORT=run.json OUT=tests/data/eval/ground_truth.json
 ground-truth-skeleton:
 	uv run python scripts/make_ground_truth.py --export "$(EXPORT)" $(if $(OUT),--out "$(OUT)",)
+
+# FR-14 browser-probe demo (ADR-0018): run a browser-XSS probe through the FR-05
+# gate + FR-08 guard with a canned runner (no real browser), fully offline
+demo-browser-xss:
+	uv run python scripts/demo/browser_xss.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

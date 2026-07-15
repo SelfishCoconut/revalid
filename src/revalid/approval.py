@@ -17,9 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from revalid.allowlist import TargetGuard
+from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, is_browser_probe
 from revalid.db import PlanRecord, VerdictRecord
-from revalid.domain import PlanStatus, RetestPlan
+from revalid.domain import PlanStatus, Probe, RetestPlan, Verdict
 from revalid.plan import PlannedAction, PlanResult, RejectedAction, gate_actions
+from revalid.retest import assess_evidence, run_probe
 from revalid.sanity import guarded_run
 
 _ACTOR = "user"
@@ -199,27 +201,54 @@ def list_plans(session: Session, finding_id: int) -> list[PlanRecord]:
     )
 
 
+def _probe_verdict(
+    probe: Probe, client: httpx.Client, browser_runner: BrowserRunner | None
+) -> Verdict:
+    """Run one probe through the transport its kind requires (FR-07 HTTP / FR-14 browser).
+
+    Both paths converge on the shared :func:`~revalid.retest.assess_evidence`, so a
+    browser verdict is assessed and re-derived (FR-10) exactly like an HTTP one.
+
+    Raises:
+        BrowserProbeUnavailableError: If a browser probe runs without the extra.
+    """
+    if is_browser_probe(probe):
+        if browser_runner is None:
+            raise BrowserProbeUnavailableError()
+        return assess_evidence(probe.kind, browser_runner(probe))
+    return run_probe(client, probe)
+
+
 def execute_approved_plan(
-    session: Session, client: httpx.Client, finding_id: int
+    session: Session,
+    client: httpx.Client,
+    finding_id: int,
+    *,
+    browser_runner: BrowserRunner | None = None,
 ) -> list[VerdictRecord]:
     """Run the approved plan's probes; the ONLY path from storage to the network.
 
     Each probe runs through the FR-08 :func:`~revalid.sanity.guarded_run` verifier
     (ADR-0014): an off-plan probe is blocked before any request, and an
-    over-confident *fixed* verdict is downgraded to *inconclusive*.
+    over-confident *fixed* verdict is downgraded to *inconclusive*. Browser-kind
+    probes (FR-14) run via ``browser_runner`` under the identical guard; HTTP
+    probes use ``client``.
 
     Raises:
         PlanNotApprovedError: If the finding has no approved plan version (AC1).
         PlanDeviationError: If a probe not in the approved plan reaches execution
             (FR-08 AC1) — fail-closed; the run aborts.
+        BrowserProbeUnavailableError: If a browser probe is approved but the
+            Playwright extra is not installed.
     """
     plan = approved_plan(session, finding_id)
     if plan is None:
         raise PlanNotApprovedError(finding_id)
     approved = plan.probes()
+    execute = lambda probe: _probe_verdict(probe, client, browser_runner)  # noqa: E731
     records: list[VerdictRecord] = []
     for probe in approved:
-        verdict = guarded_run(client, probe, approved)
+        verdict = guarded_run(probe, approved, execute)
         records.append(
             VerdictRecord.from_domain(
                 finding_id, probe.kind, verdict, plan_id=plan.id, plan_version=plan.version
