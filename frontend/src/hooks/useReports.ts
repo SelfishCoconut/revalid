@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getReport, listReports, uploadReport } from "../api/client";
-import type { Report } from "../api/types";
+import {
+  createManualReport,
+  getReport,
+  listReports,
+  uploadReport,
+} from "../api/client";
+import type { ManualReportInput, Report } from "../api/types";
 import { queryKeys } from "./queryKeys";
 
 /** All reports (the overview table sorts newest-first at render time). */
@@ -28,6 +33,17 @@ export function useUploadReport() {
   const client = useQueryClient();
   return useMutation<Report, Error, File>({
     mutationFn: uploadReport,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reports });
+    },
+  });
+}
+
+/** Create a report by hand (form or JSON); on success refresh the reports list. */
+export function useCreateManualReport() {
+  const client = useQueryClient();
+  return useMutation<Report, Error, ManualReportInput>({
+    mutationFn: createManualReport,
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.reports });
     },

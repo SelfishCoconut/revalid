@@ -5,6 +5,7 @@
 
 import type {
   Finding,
+  ManualReportInput,
   Plan,
   PlannedAction,
   Report,
@@ -74,6 +75,15 @@ export function uploadReport(file: File): Promise<Report> {
   const form = new FormData();
   form.append("file", file);
   return request<Report>("/reports", { method: "POST", body: form });
+}
+
+/**
+ * Create a report and its findings directly, bypassing LLM extraction — the
+ * human-entry escape hatch (form or JSON upload). Backend replies 201 with a
+ * `ready` report.
+ */
+export function createManualReport(input: ManualReportInput): Promise<Report> {
+  return request<Report>("/reports/manual", jsonInit("POST", input));
 }
 
 // --- Findings ------------------------------------------------------------

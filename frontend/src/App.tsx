@@ -5,6 +5,7 @@ import { BrandMark } from "./components/BrandMark";
 import { SidebarContent } from "./components/Sidebar";
 import { useTheme } from "./lib/theme";
 import { FindingDetail } from "./routes/FindingDetail";
+import { NewReport } from "./routes/NewReport";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
 
@@ -66,6 +67,7 @@ export function App() {
         <main className="mx-auto w-full min-w-0 max-w-[64rem] flex-1 px-5 py-8">
           <Routes>
             <Route path="/" element={<ReportsOverview />} />
+            <Route path="/new" element={<NewReport />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
             <Route path="/findings/:id" element={<FindingDetail />} />
           </Routes>

@@ -50,7 +50,15 @@ export function ReportsOverview() {
       <Hero />
 
       <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-        <UploadReport />
+        <div className="space-y-3">
+          <UploadReport />
+          <Link
+            to="/new"
+            className="flex items-center justify-center gap-2 rounded-lg border border-line bg-panel/60 px-4 py-3 font-mono text-[13px] font-semibold text-dim transition-colors hover:border-iris/50 hover:text-fg"
+          >
+            + Create a report manually
+          </Link>
+        </div>
 
         <Panel>
           <PanelHeader

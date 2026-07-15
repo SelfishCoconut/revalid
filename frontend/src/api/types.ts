@@ -28,6 +28,21 @@ export interface Finding {
   raw: Record<string, unknown>;
 }
 
+/** One finding as entered manually / via JSON upload (bypasses LLM ingestion). */
+export interface ManualFindingInput {
+  title: string;
+  severity: Severity;
+  description?: string;
+  endpoints?: string[];
+  steps_to_reproduce?: string;
+}
+
+/** Payload for creating a report by hand — POST /api/reports/manual. */
+export interface ManualReportInput {
+  label: string;
+  findings: ManualFindingInput[];
+}
+
 export interface PlannedAction {
   method: string;
   target: string;

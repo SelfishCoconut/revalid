@@ -419,6 +419,40 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         background.add_task(run_extraction, sessions, report.id, data, agent)
         return ReportOut.from_record(report)
 
+    @router.post("/reports/manual", response_model=ReportOut, status_code=201)
+    def create_manual_report(payload: dict[str, Any], session: SessionDep) -> ReportOut:
+        """Create a report and its findings directly, bypassing LLM extraction.
+
+        The human-entry escape hatch (no FR-03): when a model cannot reliably
+        ingest a report — e.g. a large report on a small local backend — a person
+        supplies the findings by form or JSON upload. Reuses the FR-02 DefectDojo
+        mapping per finding, then lands the report ``ready`` with its findings
+        attached, so the FR-04/FR-05 plan→approve→retest flow is identical to an
+        extracted report's. ``payload`` is ``{"label": str, "findings": [...]}``.
+        """
+        try:
+            findings = map_defectdojo_export(payload)
+        except IngestError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not findings:
+            raise HTTPException(
+                status_code=422, detail="a manual report needs at least one finding"
+            )
+        label = str(payload.get("label") or "").strip() or "Manual report"
+        report = ReportRecord(
+            filename=label,
+            status=ReportStatus.READY.value,
+            model="manual",
+            finding_count=len(findings),
+        )
+        session.add(report)
+        session.commit()
+        session.refresh(report)
+        session.add_all(FindingRecord.from_domain(f, report_id=report.id) for f in findings)
+        session.commit()
+        session.refresh(report)
+        return ReportOut.from_record(report)
+
     @router.get("/reports", response_model=list[ReportOut])
     def list_reports(session: SessionDep) -> list[ReportOut]:
         """List uploaded reports, newest first (FR-11 overview)."""
