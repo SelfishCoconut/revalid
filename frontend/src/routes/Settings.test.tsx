@@ -56,9 +56,13 @@ describe("Settings", () => {
   });
 
   it("tests the connection and populates discovered models", async () => {
+    // Deliberately NOT in KNOWN_MODELS: if these ids show up in the datalist
+    // it can only be because the discoveredModels/modelOptions merge (and the
+    // looksLikeOllama ":11434" prefixing) actually ran — reusing a
+    // KNOWN_MODELS id here would let a broken merge pass unnoticed.
     const probeResult: ProbeResult = {
       reachable: true,
-      models: ["qwen3.6:27b", "qwen3:14b"],
+      models: ["llama3.2:3b", "mistral:7b"],
       error: null,
     };
     vi.mocked(client.probeProvider).mockResolvedValue(probeResult);
@@ -74,6 +78,16 @@ describe("Settings", () => {
     expect(client.probeProvider).toHaveBeenCalled();
     const [probePayload] = vi.mocked(client.probeProvider).mock.calls[0];
     expect(probePayload).toEqual({ base_url: "http://localhost:11434/v1", api_key: null });
+
+    // The base URL looks like Ollama, so discovered ids must be re-prefixed
+    // with "ollama:" before landing in the model datalist.
+    await waitFor(() => {
+      const options = Array.from(
+        document.querySelectorAll<HTMLOptionElement>("datalist#settings-model-options option"),
+      ).map((option) => option.value);
+      expect(options).toContain("ollama:llama3.2:3b");
+      expect(options).toContain("ollama:mistral:7b");
+    });
   });
 
   it("surfaces an unreachable probe result", async () => {
