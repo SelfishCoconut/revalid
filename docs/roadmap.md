@@ -49,9 +49,9 @@ Thin end-to-end slice proving the architecture. Scope deliberately minimal:
 - **Done when**: re-derivation reproduces all verdicts from stored data; release `v0.4.0`. **Met — M4 complete and released as `v0.4.0` (2026-07-15).** All three items landed (FR-08 ✅, FR-10 ✅, FR-12 ✅); the pre-release `codebase-sanity` audit returned **GO** (all mechanical gates green: xenon `--max-absolute C` / radon avg A / vulture / pylint 9.98; **180 unit @ 97% coverage + 22 integration**; mypy `--strict` / ruff clean; `sanity.py`/`audit.py`/`export.py` all 100%), its one flagged gap (stale M4 C4 diagrams) fixed in #62, and ADRs **0014/0015/0016 accepted** (ratified 2026-07-15).
 
 ### M5 — Evaluation  ·  FR-15 #20, (FR-14 #19 Could)
-- [ ] Ground truth: deliberately vulnerable Juice Shop version pinned in lab; expected verdict per finding
-- [ ] Evaluation harness: metrics table (correct/wrong/inconclusive, timing) from a run export (FR-15)
-- [ ] NFR-01 measured: ≥70% correct verdicts, zero confidently-wrong on ambiguity
+- [ ] Ground truth: deliberately vulnerable Juice Shop version pinned in lab; expected verdict per finding — **Álvaro's design input** (the harness matches it by finding title; template + schema shipped at `tests/data/eval/ground_truth.example.json`).
+- [x] Evaluation harness: metrics table (correct/wrong/inconclusive, timing) from a run export (FR-15) — **scaffold done** (`src/revalid/eval.py`, ADR-0017, proposed): pure scorer over an FR-12 `RunExport` + a title-keyed ground truth; picks each finding's latest verdict and buckets it **correct / inconclusive (safe hedge) / wrong (confidently wrong, ×2)**, surfacing unmatched findings on both sides. `scripts/evaluate.py` (`make eval EXPORT=… GROUND_TRUTH=…`) is the one-command entry (exit-code gated on NFR-01); `make demo-eval` proves all buckets offline. `eval.py` 100% covered. **Remaining for FR-15 done:** author the real ground truth + run a live-lab retest → FR-12 export → `make eval` for the real figure.
+- [ ] NFR-01 measured: ≥70% correct verdicts, zero confidently-wrong on ambiguity — harness computes the pass (`correct_pct ≥ 0.70` AND `wrong_on_ambiguous == 0`) + `confidently_wrong`/`weighted_error`; **the measured number awaits the real run**.
 - [ ] If time allows: Playwright probes for one DOM-dependent finding (FR-14)
 - **Done when**: Results-chapter numbers exist and are reproducible; release `v1.0.0`.
 
