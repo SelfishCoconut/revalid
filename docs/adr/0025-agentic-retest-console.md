@@ -245,10 +245,46 @@ via the FR-04→FR-09 plan wizard or via the new `/retest-session` console.
   extended as each subsequent slice lands, mirroring how FR-16 accumulated
   its criteria across its PRs.
 
+## Update (2026-07-16): chat-centric layout + revised slice order
+
+Álvaro's design call after Slice 0 shipped: the console should read as **a chat
+with the model**, not a terminal with an approval card bolted underneath. This
+does not change the architecture this ADR records (sandbox, gated exec, agent
+loop, transcript audit, agent-determined verdict) — it is a **presentation
+decision** about the console's information architecture, plus a re-ordering of
+the unbuilt slices. Recorded here rather than in a new ADR because nothing about
+the accepted mechanisms changes.
+
+**Layout (authoritative):** the **center column is the chat** — the agent's
+voice: rationale → each gated command as a chat card with **inline
+approve/reject** → the verdict, as one scrolling conversation (`agent_message`
+events, already in the domain enum, are reserved for future agent prose; the
+human's own messages join the same stream from the chat-input slice). The
+**terminal docks to the bottom** as a collapsible, read-only panel showing only
+*executed*-command output. This supersedes Slice 0's terminal-on-top / card-
+beneath arrangement (a purely presentational change to `RetestSession.tsx`; the
+`/api` + WebSocket contract is untouched).
+
+**Revised slice order (authoritative — supersedes the numbering used in the
+sections above, which predate this update):**
+
+| Slice | Adds |
+|------:|------|
+| 0 (shipped) | skeleton — read-only terminal + approval card + verdict |
+| **1** | **chat-centric console shell** (this decision) — chat center + docked collapsible terminal; presentation only, steering stays approve/reject |
+| 2 | shared interactive PTY — human types into the docked terminal; agent observes |
+| 3 | plan panel — initial + gated plan updates |
+| 4 | chat **input** / steering & Q&A — human messages the agent in the center chat |
+| 5 | free-launch mode + session controls + step/wall-clock budget UI |
+| 6 | verdict adjudication + FR-09/FR-10/FR-12 integration; retire the old batch path |
+
+The old batch-plan path stays fully operational until **Slice 6** (was Slice 5).
+Slice 1 issue: [#90](https://github.com/SelfishCoconut/revalid/issues/90).
+
 ## References
 
 - Design spec: `docs/superpowers/specs/2026-07-16-agentic-retest-console-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-07-16-agentic-retest-console-slice-0.md`
 - Epic: [#87](https://github.com/SelfishCoconut/revalid/issues/87); Slice 0 issue: [#88](https://github.com/SelfishCoconut/revalid/issues/88)
 - SRS: FR-17 (`docs/requirements/srs.md`)
-- Superseded-over-time: ADR-0011 (retest-plan generation), ADR-0012 (server-side plan approval gate), ADR-0014 (execution sanity checker), ADR-0019 (retest-technique registry) — all stay accepted and operational until Slice 5
+- Superseded-over-time: ADR-0011 (retest-plan generation), ADR-0012 (server-side plan approval gate), ADR-0014 (execution sanity checker), ADR-0019 (retest-technique registry) — all stay accepted and operational until Slice 6
