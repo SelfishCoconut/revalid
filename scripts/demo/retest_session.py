@@ -2,7 +2,7 @@
 
 Usage::
 
-    uv run python scripts/demo/retest_session.py
+    make demo-retest-session
 
 Runs fully offline — no Docker, no lab, no LLM — with a :class:`~revalid.sandbox.FakeSandbox`
 standing in for the live ``DockerSandbox`` and a Pydantic AI ``FunctionModel`` standing in for

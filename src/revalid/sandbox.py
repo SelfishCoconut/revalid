@@ -142,6 +142,17 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         ``start()`` for the same ``session_id`` would otherwise hit a 409
         conflict on ``networks.create`` forever. Self-heal instead: disconnect
         any leftover endpoints and remove the stale network first.
+
+        Safety assumption (ADR-0008, single trusted user): this targets a
+        leftover from a *prior, crashed* session of the *same* ``session_id`` —
+        it does not distinguish that from a network belonging to another,
+        currently-live session that happens to share the same id. That's safe
+        here only because ``session_id`` is a unique DB row id and sessions run
+        sequentially (never concurrently) under the single-user model. It would
+        be unsafe to run two sandboxes with the same ``session_id`` concurrently
+        (e.g. the system test's fixed sentinel id 9999 must never be run
+        concurrently with itself) — doing so would let one instance's
+        ``start()`` tear down the other's live network.
         """
         import docker
 
@@ -177,15 +188,20 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
     def stop(self) -> None:
         """Remove the container and tear down the egress-locked network (best-effort).
 
-        Each step is independently tolerant of "already gone": ``disconnect``
+        Each step is independently tolerant of "already gone": the container may
+        have vanished already (crash, an external ``docker rm``, a daemon restart)
+        raising ``NotFound``/``APIError`` on ``.remove()``, and ``disconnect``
         raises a non-``NotFound`` ``APIError`` when the lab container was never
-        actually connected (e.g. ``start()`` failed before ``network.connect``),
-        which must not prevent the subsequent ``network.remove()`` from running.
+        actually connected (e.g. ``start()`` failed before ``network.connect``).
+        Neither must prevent the remaining teardown steps from running.
         """
         import docker
 
         if self._container is not None:
-            self._container.remove(force=True)
+            try:
+                self._container.remove(force=True)
+            except docker.errors.APIError:
+                pass
             self._container = None
         client = docker.from_env()
         try:
