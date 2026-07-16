@@ -1,0 +1,113 @@
+import { Link, Outlet, useLocation, useParams } from "react-router-dom";
+
+import { useFindings } from "../hooks/useFindings";
+import type { FindingStageContext } from "../hooks/useFindingStage";
+import { usePlans } from "../hooks/usePlans";
+import { useVerdicts } from "../hooks/useVerdicts";
+import { errorMessage } from "../lib/format";
+import { currentPlan, pipelineReach } from "../lib/selectors";
+import { PipelineTrack, type Stage } from "./PipelineTrack";
+import { SeverityBadge } from "./SeverityBadge";
+import { Spinner } from "./Spinner";
+import { Panel } from "./ui/Panel";
+
+const STAGES: readonly Stage[] = ["extract", "plan", "approve", "retest", "verdict"];
+
+function isStage(value: string | undefined): value is Stage {
+  return value != null && (STAGES as readonly string[]).includes(value);
+}
+
+/**
+ * Persistent chrome for the finding stage wizard (ADR-0024): the identity header
+ * and the {@link PipelineTrack} stepper stay put while only the stage panel below
+ * (the `<Outlet/>`) swaps as the operator walks extract → … → verdict. It loads
+ * the finding, its plans, and its verdicts once and shares them via Outlet
+ * context so each stage page reads from one cache.
+ */
+export function FindingLayout() {
+  const { id } = useParams();
+  const findingId = Number(id);
+  const location = useLocation();
+
+  const findings = useFindings();
+  const plans = usePlans(findingId);
+  const verdicts = useVerdicts();
+
+  if (findings.isPending) {
+    return <Spinner label="Loading finding" />;
+  }
+  if (findings.isError) {
+    return (
+      <p role="alert" className="text-sm text-danger-fg">
+        {errorMessage(findings.error)}
+      </p>
+    );
+  }
+
+  const finding = findings.data.find((item) => item.id === findingId);
+  if (!finding) {
+    return <p className="text-sm text-faint">Finding not found.</p>;
+  }
+
+  const planList = plans.data ?? [];
+  const current = currentPlan(planList);
+  const hasPlan = planList.some(
+    (plan) => plan.status !== "generating" && plan.status !== "failed",
+  );
+  const findingVerdicts = (verdicts.data ?? [])
+    .filter((verdict) => verdict.finding_id === findingId)
+    .sort((a, b) => b.id - a.id);
+  const approved = planList.some((plan) => plan.status === "approved") || findingVerdicts.length > 0;
+  const retested = findingVerdicts.length > 0;
+
+  const reach = pipelineReach({ planned: hasPlan, approved, retested });
+  const currentStage = STAGES[reach.current];
+  const segment = location.pathname.split("/").pop();
+  const activeStage = isStage(segment) ? segment : currentStage;
+
+  const context: FindingStageContext = {
+    finding,
+    findingId,
+    plans: planList,
+    currentPlan: current,
+    hasPlan,
+    approved,
+    retested,
+    verdicts: findingVerdicts,
+    currentStage,
+  };
+
+  const backLink = finding.report_id != null ? `/reports/${String(finding.report_id)}` : "/";
+
+  return (
+    <div className="rev-rise space-y-6">
+      <Link
+        to={backLink}
+        className="inline-flex items-center gap-1.5 font-mono text-[12px] text-faint transition-colors hover:text-dim"
+      >
+        <span aria-hidden="true">←</span>
+        Back to report
+      </Link>
+
+      <Panel className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 p-5">
+          <SeverityBadge severity={finding.severity} />
+          <h1 className="text-xl font-semibold tracking-tight text-fg">{finding.title}</h1>
+          <span className="font-mono text-[11px] text-faint">v{finding.version}</span>
+        </div>
+        <div className="border-t border-line bg-panel-2/30 px-4 py-4">
+          <PipelineTrack
+            planned={hasPlan}
+            approved={approved}
+            retested={retested}
+            verdict={findingVerdicts[0]?.status}
+            findingId={findingId}
+            activeStage={activeStage}
+          />
+        </div>
+      </Panel>
+
+      <Outlet context={context} />
+    </div>
+  );
+}

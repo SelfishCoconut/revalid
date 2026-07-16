@@ -18,6 +18,8 @@ export type Severity = "info" | "low" | "medium" | "high" | "critical";
 export interface Finding {
   id: number;
   report_id: number | null;
+  /** Current version number of the finding's content (extraction = 1). */
+  version: number;
   title: string;
   severity: Severity;
   description: string;
@@ -26,6 +28,54 @@ export interface Finding {
   affected_endpoints: string[];
   reproduction_steps: string[];
   raw: Record<string, unknown>;
+}
+
+/** The five pipeline stages a note can be tagged with, plus `general` (FR-16). */
+export type FindingStage =
+  | "extract"
+  | "plan"
+  | "approve"
+  | "retest"
+  | "verdict"
+  | "general";
+
+/** One immutable version of a finding's content (FR-16 revision history). */
+export interface FindingVersion {
+  version: number;
+  origin: "extraction" | "edit";
+  edited_by: string | null;
+  reason: string;
+  created_at: string;
+  title: string;
+  severity: Severity;
+  description: string;
+  impact: string;
+  attack_vector: string;
+  affected_endpoints: string[];
+  reproduction_steps: string[];
+  raw: Record<string, unknown>;
+}
+
+/** Operator edit of a finding's content — POST /api/findings/{id} (FR-16). */
+export interface FindingEdit {
+  title: string;
+  severity: Severity;
+  description: string;
+  impact: string;
+  attack_vector: string;
+  affected_endpoints: string[];
+  reproduction_steps: string[];
+  reason: string;
+}
+
+/** One append-only, stage-tagged operator note on a finding (FR-16). */
+export interface Note {
+  id: number;
+  finding_id: number;
+  stage: FindingStage;
+  body: string;
+  author: string;
+  created_at: string;
 }
 
 /** One finding as entered manually / via JSON upload (bypasses LLM ingestion). */

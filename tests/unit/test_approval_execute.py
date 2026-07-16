@@ -12,8 +12,9 @@ from revalid.approval import (
     execute_approved_plan,
     save_generated_plan,
 )
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Finding, Probe, RetestPlan, Severity, VerdictStatus
+from revalid.findings import create_finding
 from revalid.plan import PlanResult
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -21,7 +22,7 @@ Handler = Callable[[httpx.Request], httpx.Response]
 
 def _session() -> Session:
     session = session_factory(create_db_engine(IN_MEMORY))()
-    session.add(FindingRecord.from_domain(Finding(title="F", severity=Severity.HIGH)))
+    create_finding(session, Finding(title="F", severity=Severity.HIGH))
     session.commit()
     return session
 

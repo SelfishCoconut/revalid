@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from revalid.app import create_app
-from revalid.db import FindingRecord, create_db_engine, session_factory
+from revalid.db import create_db_engine, session_factory
+from revalid.findings import create_finding, current_version
 from revalid.ingest import load_defectdojo_export
 
 SAMPLE = Path(__file__).parent.parent / "data" / "defectdojo_sample.json"
@@ -20,7 +21,8 @@ def test_sample_export_persists_and_serves(tmp_path: Path) -> None:
     db_path = tmp_path / "revalid.db"
     engine = create_db_engine(str(db_path))
     with session_factory(engine)() as session:
-        session.add_all(FindingRecord.from_domain(f) for f in findings)
+        for finding in findings:
+            create_finding(session, finding)
         session.commit()
 
     # A fresh app instance over the same file sees the data (durability).
@@ -38,9 +40,9 @@ def test_orm_roundtrip_preserves_domain_model(tmp_path: Path) -> None:
     engine = create_db_engine(str(tmp_path / "roundtrip.db"))
     factory = session_factory(engine)
     with factory() as session:
-        session.add(FindingRecord.from_domain(first))
+        create_finding(session, first)
         session.commit()
     with factory() as session:
-        stored = session.get(FindingRecord, 1)
+        stored = current_version(session, 1)
         assert stored is not None
         assert stored.to_domain() == first

@@ -68,6 +68,34 @@ class Finding(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class FindingOrigin(enum.StrEnum):
+    """How a finding version came to be (FR-16, ADR-0024).
+
+    Extraction is version 1 — the finding as the LLM/import first produced it;
+    every later version is an operator ``EDIT``. The distinction is audit
+    lineage: which content the machine proposed vs. what a human corrected.
+    """
+
+    EXTRACTION = "extraction"
+    EDIT = "edit"
+
+
+class FindingStage(enum.StrEnum):
+    """The pipeline stage a note was written on (FR-16, ADR-0024).
+
+    The five stages mirror the finding's lifecycle track
+    (extract → plan → approve → retest → verdict); ``GENERAL`` tags a note left
+    from the finding overview rather than a specific stage.
+    """
+
+    EXTRACT = "extract"
+    PLAN = "plan"
+    APPROVE = "approve"
+    RETEST = "retest"
+    VERDICT = "verdict"
+    GENERAL = "general"
+
+
 class Probe(BaseModel):
     """A single verification-only HTTP action used to retest a finding (FR-07).
 

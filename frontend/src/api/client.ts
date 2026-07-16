@@ -5,7 +5,11 @@
 
 import type {
   Finding,
+  FindingEdit,
+  FindingStage,
+  FindingVersion,
   ManualReportInput,
+  Note,
   Plan,
   PlannedAction,
   ProbeInput,
@@ -95,6 +99,26 @@ export function createManualReport(input: ManualReportInput): Promise<Report> {
 export function listFindings(reportId?: number): Promise<Finding[]> {
   const query = reportId != null ? `?report_id=${String(reportId)}` : "";
   return request<Finding[]>(`/findings${query}`);
+}
+
+/** Record an operator edit as a new immutable finding version (FR-16). */
+export function editFinding(findingId: number, body: FindingEdit): Promise<Finding> {
+  return request<Finding>(`/findings/${String(findingId)}`, jsonInit("POST", body));
+}
+
+/** Every version of a finding, oldest first (extraction = v1) — FR-16 history. */
+export function listFindingVersions(findingId: number): Promise<FindingVersion[]> {
+  return request<FindingVersion[]>(`/findings/${String(findingId)}/versions`);
+}
+
+/** Append a stage-tagged note to a finding's log (FR-16). */
+export function addNote(findingId: number, stage: FindingStage, body: string): Promise<Note> {
+  return request<Note>(`/findings/${String(findingId)}/notes`, jsonInit("POST", { stage, body }));
+}
+
+/** A finding's notes, newest first (FR-16). */
+export function listNotes(findingId: number): Promise<Note[]> {
+  return request<Note[]>(`/findings/${String(findingId)}/notes`);
 }
 
 // --- Plans ---------------------------------------------------------------

@@ -11,8 +11,9 @@ import httpx
 import pytest
 
 from revalid.allowlist import AllowlistTransport, TargetGuard, TargetNotAllowedError
-from revalid.db import FindingRecord, VerdictRecord, create_db_engine, session_factory
+from revalid.db import VerdictRecord, create_db_engine, session_factory
 from revalid.domain import Finding, Severity, VerdictStatus
+from revalid.findings import create_finding
 from revalid.retest import execute, login_sqli_probe, run_probe
 
 _ALLOWLIST = frozenset({"http://localhost:3000/*"})
@@ -53,10 +54,9 @@ def test_allowlisted_probe_reaches_target_and_verdicts_still_open() -> None:
 def test_verdict_persists_and_reloads(tmp_path: Path) -> None:
     factory = session_factory(create_db_engine(str(tmp_path / "verdicts.db")))
     with factory() as session:
-        session.add(
-            FindingRecord.from_domain(
-                Finding(title="SQL injection auth bypass in login", severity=Severity.CRITICAL)
-            )
+        create_finding(
+            session,
+            Finding(title="SQL injection auth bypass in login", severity=Severity.CRITICAL),
         )
         session.commit()
 

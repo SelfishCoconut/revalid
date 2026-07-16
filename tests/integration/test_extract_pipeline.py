@@ -15,9 +15,10 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, User
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy import select
 
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, FindingVersionRecord, create_db_engine, session_factory
 from revalid.domain import Severity
 from revalid.extract import build_extraction_agent, extract_report
+from revalid.findings import create_finding
 from revalid.pdf import read_pdf
 
 pytestmark = pytest.mark.integration
@@ -90,11 +91,14 @@ def test_extracted_findings_survive_persistence() -> None:
     engine = create_db_engine(IN_MEMORY)
     factory = session_factory(engine)
     with factory() as session:
-        session.add_all(FindingRecord.from_domain(f) for f in findings)
+        for finding in findings:
+            create_finding(session, finding)
         session.commit()
 
     with factory() as session:
-        rows = list(session.scalars(select(FindingRecord).order_by(FindingRecord.id)))
+        rows = list(
+            session.scalars(select(FindingVersionRecord).order_by(FindingVersionRecord.finding_id))
+        )
     assert len(rows) == 4
     first = rows[0].to_domain()
     assert first.impact == "Attacker-controlled outcome as described."

@@ -17,9 +17,10 @@ from jsonschema.protocols import Validator
 from sqlalchemy.orm import Session
 
 from revalid.approval import approve_plan, execute_approved_plan, save_generated_plan
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
-from revalid.domain import Finding, Probe, RetestPlan, Severity
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
+from revalid.domain import Finding, FindingStage, Probe, RetestPlan, Severity
 from revalid.export import SCHEMA_VERSION, build_export, export_schema
+from revalid.findings import add_note, add_version, create_finding
 from revalid.plan import PlanResult
 
 _PUBLISHED_SCHEMA = (
@@ -43,7 +44,7 @@ def _plan() -> PlanResult:
 def _session_with_verdict() -> Session:
     """Build an in-memory run: finding -> approved plan -> one stored verdict."""
     session = session_factory(create_db_engine(IN_MEMORY))()
-    session.add(FindingRecord.from_domain(Finding(title="SQLi login", severity=Severity.CRITICAL)))
+    create_finding(session, Finding(title="SQLi login", severity=Severity.CRITICAL))
     session.commit()
     save_generated_plan(session, 1, _plan())
     approve_plan(session, 1)
@@ -109,6 +110,34 @@ def test_export_assembles_run_and_metrics() -> None:
     assert export.metrics.verdicts_by_status["still_open"] == 1
     assert export.metrics.total_elapsed_ms == verdict.verdict.evidence.elapsed_ms
     assert export.metrics.mean_elapsed_ms == export.metrics.total_elapsed_ms
+
+
+def test_export_carries_finding_versions_and_notes() -> None:
+    """FR-16: the export carries each finding's version history and stage-tagged notes."""
+    session = session_factory(create_db_engine(IN_MEMORY))()
+    record = create_finding(session, Finding(title="SQLi login", severity=Severity.HIGH))
+    session.commit()
+    add_version(
+        session,
+        record.id,
+        Finding(title="SQLi login", severity=Severity.CRITICAL, description="edited"),
+        edited_by="user",
+        reason="raise severity",
+    )
+    add_note(session, record.id, FindingStage.PLAN, "check /admin too")
+
+    export = build_export(session, generated_at=datetime(2026, 7, 15, tzinfo=UTC))
+    finding = export.findings[0]
+    assert finding.version == 2
+    # ``finding`` is the current version's content.
+    assert finding.finding.severity.value == "critical"
+    assert [v.version for v in finding.versions] == [1, 2]
+    assert finding.versions[0].origin == "extraction"
+    assert finding.versions[1].origin == "edit"
+    assert finding.versions[1].reason == "raise severity"
+    assert [n.body for n in finding.notes] == ["check /admin too"]
+    assert finding.notes[0].stage == "plan"
+    validate(instance=export.model_dump(mode="json"), schema=export_schema())
 
 
 def test_export_includes_reports() -> None:

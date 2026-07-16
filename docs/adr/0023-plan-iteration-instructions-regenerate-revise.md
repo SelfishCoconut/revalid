@@ -79,6 +79,11 @@ keep all history.
   (a stray click must not throw work away); `retest`/`verdict` and not-yet-reached
   stages stay inert (recorded outcomes can't be un-happened — history is kept). The
   buttons drive the exact same operations above, so no new backend surface.
+  **Superseded by [ADR-0024](0024-finding-revision-annotation-stage-wizard.md):**
+  the confirm-on-click affordance is retired — the circles become plain
+  navigation to focused stage pages, and the mutating operations move onto those
+  pages as explicit buttons. The regenerate/revise/instructions operations
+  themselves (the rest of this ADR) are unchanged.
 
 This is scoped as an **enhancement to FR-04/FR-05** (with the clickable-track
 affordance under FR-11), not a new SRS requirement; this ADR is the design of

@@ -26,10 +26,11 @@ from sqlalchemy.orm import Session
 from revalid import __version__
 from revalid.db import FindingRecord, PlanRecord, ReportRecord, VerdictRecord
 from revalid.domain import Finding, Probe, Verdict, VerdictStatus
+from revalid.findings import list_notes, list_versions
 
 # Export-format version (independent of the tool's release version). Bump on any
 # breaking change to the RunExport shape; the JSON Schema carries the same value.
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 class Generator(BaseModel):
@@ -54,14 +55,52 @@ class ReportExport(BaseModel):
     created_at: datetime
 
 
+class NoteExport(BaseModel):
+    """One stage-tagged operator note on a finding (FR-16)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    stage: str
+    body: str
+    author: str
+    created_at: datetime
+
+
+class FindingVersionExport(BaseModel):
+    """One immutable version of a finding's content (FR-16).
+
+    ``origin`` is ``extraction`` for version 1 and ``edit`` for operator
+    revisions; ``edited_by``/``reason`` carry the edit lineage.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    version: int
+    origin: str
+    edited_by: str | None
+    reason: str
+    created_at: datetime
+    finding: Finding
+
+
 class FindingExport(BaseModel):
-    """A persisted finding with its row id and originating report (FR-02/FR-03)."""
+    """A persisted finding: current content plus full version history and notes (FR-02/03/16).
+
+    ``finding`` is the *current* version's content (the field pre-FR-16 consumers
+    read); ``version`` names which version that is; ``versions`` is the complete
+    append-only history (oldest first, extraction = v1) and ``notes`` the
+    stage-tagged annotation log (chronological) — the audit-grade record (FR-10).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     id: int
     report_id: int | None
+    version: int
     finding: Finding
+    versions: tuple[FindingVersionExport, ...]
+    notes: tuple[NoteExport, ...]
 
 
 class PlanExport(BaseModel):
@@ -141,8 +180,35 @@ def _report_export(record: ReportRecord) -> ReportExport:
     )
 
 
-def _finding_export(record: FindingRecord) -> FindingExport:
-    return FindingExport(id=record.id, report_id=record.report_id, finding=record.to_domain())
+def _finding_export(session: Session, record: FindingRecord) -> FindingExport | None:
+    """Assemble a finding's export: current content + full version history + notes (FR-16)."""
+    versions = list_versions(session, record.id)
+    if not versions:  # pragma: no cover - a finding always has >=1 version
+        return None
+    current = versions[-1]
+    return FindingExport(
+        id=record.id,
+        report_id=record.report_id,
+        version=current.version,
+        finding=current.to_domain(),
+        versions=tuple(
+            FindingVersionExport(
+                version=v.version,
+                origin=v.origin,
+                edited_by=v.edited_by,
+                reason=v.reason,
+                created_at=v.created_at,
+                finding=v.to_domain(),
+            )
+            for v in versions
+        ),
+        notes=tuple(
+            NoteExport(
+                id=n.id, stage=n.stage, body=n.body, author=n.author, created_at=n.created_at
+            )
+            for n in sorted(list_notes(session, record.id), key=lambda note: note.id)
+        ),
+    )
 
 
 def _plan_export(record: PlanRecord) -> PlanExport:
@@ -212,8 +278,9 @@ def build_export(session: Session, *, generated_at: datetime | None = None) -> R
         _report_export(r) for r in session.scalars(select(ReportRecord).order_by(ReportRecord.id))
     )
     findings = tuple(
-        _finding_export(r)
+        export
         for r in session.scalars(select(FindingRecord).order_by(FindingRecord.id))
+        if (export := _finding_export(session, r)) is not None
     )
     plans = tuple(
         _plan_export(r) for r in session.scalars(select(PlanRecord).order_by(PlanRecord.id))

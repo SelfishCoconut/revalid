@@ -8,7 +8,7 @@ The app must only ever bind to 127.0.0.1 (NFR-03); there is no
 authentication in TFG scope.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -40,16 +40,35 @@ from revalid.approval import (
 from revalid.audit import rederive_run
 from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, make_browser_runner
 from revalid.db import (
+    FindingNoteRecord,
     FindingRecord,
+    FindingVersionRecord,
     PlanRecord,
     ReportRecord,
     VerdictRecord,
     create_db_engine,
     session_factory,
 )
-from revalid.domain import Finding, Probe, ReportStatus, RetestPlan, Settings, Verdict
+from revalid.domain import (
+    Finding,
+    FindingStage,
+    Probe,
+    ReportStatus,
+    RetestPlan,
+    Settings,
+    Severity,
+    Verdict,
+)
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
+from revalid.findings import (
+    add_note,
+    add_version,
+    create_finding,
+    current_version,
+    list_notes,
+    list_versions,
+)
 from revalid.ingest import IngestError, map_defectdojo_export
 from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
@@ -64,10 +83,98 @@ _SPA_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 class FindingOut(Finding):
-    """A persisted finding as returned by the API (domain model + row id)."""
+    """A persisted finding as returned by the API — the *current* version's content.
+
+    ``version`` is the current version number (extraction = 1); it bumps on every
+    operator edit (FR-16). ``id`` is the stable finding identity plans/verdicts
+    reference.
+    """
 
     id: int
     report_id: int | None = None
+    version: int = 1
+
+
+class FindingVersionOut(Finding):
+    """One immutable finding version as returned by the API (FR-16)."""
+
+    version: int
+    origin: str
+    edited_by: str | None = None
+    reason: str = ""
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: FindingVersionRecord) -> "FindingVersionOut":
+        """Build the API view from a persisted finding-version row."""
+        return cls(
+            version=record.version,
+            origin=record.origin,
+            edited_by=record.edited_by,
+            reason=record.reason,
+            created_at=record.created_at,
+            **record.to_domain().model_dump(),
+        )
+
+
+class FindingEditIn(BaseModel):
+    """An operator edit of a finding's content → a new immutable version (FR-16)."""
+
+    title: str = Field(min_length=1)
+    severity: Severity
+    description: str = ""
+    impact: str = ""
+    attack_vector: str = ""
+    affected_endpoints: tuple[str, ...] = ()
+    reproduction_steps: tuple[str, ...] = ()
+    reason: str = ""
+
+    def to_finding(self, base_raw: dict[str, Any]) -> Finding:
+        """Build the domain finding for this edit, carrying forward prior lineage.
+
+        ``base_raw`` is the current version's ``raw`` (extraction lineage), kept so
+        editing never discards how the finding was originally produced (FR-10).
+        """
+        return Finding(
+            title=self.title,
+            severity=self.severity,
+            description=self.description,
+            impact=self.impact,
+            attack_vector=self.attack_vector,
+            affected_endpoints=self.affected_endpoints,
+            reproduction_steps=self.reproduction_steps,
+            raw=base_raw,
+        )
+
+
+class NoteIn(BaseModel):
+    """An operator note on a finding, tagged with the stage it was written on (FR-16)."""
+
+    stage: FindingStage = FindingStage.GENERAL
+    body: str = Field(min_length=1)
+
+
+class NoteOut(BaseModel):
+    """A persisted finding note as returned by the API (FR-16)."""
+
+    id: int
+    finding_id: int
+    stage: str
+    body: str
+    author: str
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: FindingNoteRecord) -> "NoteOut":
+        """Build the API view from a persisted note row."""
+        return cls(
+            id=record.id,
+            finding_id=record.finding_id,
+            stage=record.stage,
+            body=record.body,
+            author=record.author,
+            created_at=record.created_at,
+        )
 
 
 class VerdictOut(Verdict):
@@ -293,18 +400,52 @@ def run_extraction(
             report.status, report.error = ReportStatus.FAILED.value, f"extraction failed: {exc}"
             session.commit()
             return
-        session.add_all(FindingRecord.from_domain(f, report_id=report_id) for f in result.findings)
+        _persist_findings(session, result.findings, report_id=report_id)
         report.status = ReportStatus.READY.value
         report.finding_count = len(result.findings)
         session.commit()
 
 
 def _get_finding_or_404(session: Session, finding_id: int) -> FindingRecord:
-    """Return the finding row, or raise the shared 404 (FR-05 endpoints)."""
+    """Return the finding identity row, or raise the shared 404 (FR-05 endpoints)."""
     finding = session.get(FindingRecord, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return finding
+
+
+def _current_or_404(session: Session, finding_id: int) -> FindingVersionRecord:
+    """Return the finding's current version, or raise the shared 404 (FR-16).
+
+    A finding always has a version (created together), so a missing current
+    version means the finding itself is absent.
+    """
+    version = current_version(session, finding_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="finding not found")
+    return version
+
+
+def _finding_out(identity: FindingRecord, version: FindingVersionRecord) -> FindingOut:
+    """Assemble the API finding view from its identity + current version (FR-16)."""
+    return FindingOut(
+        id=identity.id,
+        report_id=identity.report_id,
+        version=version.version,
+        **version.to_domain().model_dump(),
+    )
+
+
+def _persist_findings(
+    session: Session, findings: Iterable[Finding], report_id: int | None = None
+) -> None:
+    """Create identity + version-1 rows for a batch of newly ingested findings (FR-16).
+
+    Shared by extraction, FR-02 import, and manual entry — each lands every finding
+    as its ``extraction`` version 1 (ADR-0024). The caller owns the ``commit``.
+    """
+    for finding in findings:
+        create_finding(session, finding, report_id=report_id)
 
 
 def run_plan_generation(
@@ -330,16 +471,16 @@ def run_plan_generation(
         instructions: Optional operator guidance for this generation (ADR-0023).
     """
     with sessions() as session:
-        finding = session.get(FindingRecord, finding_id)
-        if finding is None:  # pragma: no cover - the row was just committed
+        version = current_version(session, finding_id)
+        if version is None:  # pragma: no cover - the row was just committed
             return
         try:
             result = generate_plan(
-                agent, finding.to_domain(), load_allowlist(), lab_base_url(), instructions
+                agent, version.to_domain(), load_allowlist(), lab_base_url(), instructions
             )
         except Exception as exc:
             result = PlanResult(
-                plan=RetestPlan(finding_title=finding.title),
+                plan=RetestPlan(finding_title=version.title),
                 error=f"plan generation failed: {exc}",
             )
         finish_plan_generation(session, plan_id, result)
@@ -347,7 +488,7 @@ def run_plan_generation(
 
 def _edit_plan(session: Session, finding_id: int, actions: list[PlannedAction]) -> PlanOut:
     """Replace the plan with edited actions as a new proposed version (FR-05)."""
-    finding = _get_finding_or_404(session, finding_id)
+    finding = _current_or_404(session, finding_id)
     try:
         record, _ = edit_plan(
             session,
@@ -385,7 +526,7 @@ def _reject_plan(session: Session, finding_id: int) -> PlanOut:
 
 def _revise_plan(session: Session, finding_id: int) -> PlanOut:
     """Un-approve the approved plan back into an editable proposed copy (ADR-0023)."""
-    finding = _get_finding_or_404(session, finding_id)
+    finding = _current_or_404(session, finding_id)
     try:
         return PlanOut.from_record(revise_plan(session, finding_id, finding_title=finding.title))
     except PlanNotApprovedError as exc:
@@ -459,21 +600,65 @@ def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) ->
             findings = map_defectdojo_export(payload)
         except IngestError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        session.add_all(FindingRecord.from_domain(f) for f in findings)
+        _persist_findings(session, findings)
         session.commit()
         return ImportResult(imported=len(findings))
 
     @router.get("/findings", response_model=list[FindingOut])
     def list_findings(session: SessionDep, report_id: int | None = None) -> list[FindingOut]:
-        """List persisted findings, optionally filtered to one report (FR-11)."""
+        """List persisted findings (current version each), optionally by report (FR-11)."""
         stmt = select(FindingRecord).order_by(FindingRecord.id)
         if report_id is not None:
             stmt = stmt.where(FindingRecord.report_id == report_id)
-        records = session.scalars(stmt)
-        return [
-            FindingOut(id=r.id, report_id=r.report_id, **r.to_domain().model_dump())
-            for r in records
-        ]
+        out: list[FindingOut] = []
+        for identity in session.scalars(stmt):
+            version = current_version(session, identity.id)
+            if version is None:  # pragma: no cover - a finding always has >=1 version
+                continue
+            out.append(_finding_out(identity, version))
+        return out
+
+
+def _register_finding_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-16 finding-revision (versioned edit) and annotation routes.
+
+    Split from :func:`_register_core_routes` to keep each registration function's
+    nested-route count under the mccabe gate (see that function's note). Editing a
+    finding appends an immutable version; notes are an append-only, stage-tagged
+    log — nothing here mutates or deletes prior history (ADR-0024).
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/findings/{finding_id}", response_model=FindingOut)
+    def edit_finding(finding_id: int, body: FindingEditIn, session: SessionDep) -> FindingOut:
+        """Record an operator edit as a new immutable finding version (FR-16)."""
+        current = _current_or_404(session, finding_id)
+        identity = _get_finding_or_404(session, finding_id)
+        version = add_version(session, finding_id, body.to_finding(current.raw), reason=body.reason)
+        return _finding_out(identity, version)
+
+    @router.get("/findings/{finding_id}/versions", response_model=list[FindingVersionOut])
+    def get_finding_versions(finding_id: int, session: SessionDep) -> list[FindingVersionOut]:
+        """List every version of a finding, oldest first — extraction = v1 (FR-16)."""
+        _current_or_404(session, finding_id)
+        return [FindingVersionOut.from_record(r) for r in list_versions(session, finding_id)]
+
+    @router.post("/findings/{finding_id}/notes", response_model=NoteOut, status_code=201)
+    def add_finding_note(finding_id: int, body: NoteIn, session: SessionDep) -> NoteOut:
+        """Append a stage-tagged note to the finding's log (FR-16)."""
+        _get_finding_or_404(session, finding_id)
+        return NoteOut.from_record(add_note(session, finding_id, body.stage, body.body))
+
+    @router.get("/findings/{finding_id}/notes", response_model=list[NoteOut])
+    def get_finding_notes(finding_id: int, session: SessionDep) -> list[NoteOut]:
+        """List a finding's notes, newest first (FR-16)."""
+        _get_finding_or_404(session, finding_id)
+        return [NoteOut.from_record(r) for r in list_notes(session, finding_id)]
 
 
 def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -542,7 +727,7 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         session.add(report)
         session.commit()
         session.refresh(report)
-        session.add_all(FindingRecord.from_domain(f, report_id=report.id) for f in findings)
+        _persist_findings(session, findings, report_id=report.id)
         session.commit()
         session.refresh(report)
         return ReportOut.from_record(report)
@@ -780,6 +965,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
 
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
+    _register_finding_routes(api, sessions)
     _register_report_routes(api, sessions)
     _register_plan_routes(api, sessions)
     _register_retest_routes(api, sessions)
