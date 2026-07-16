@@ -95,6 +95,23 @@ describe("RetestStage", () => {
       expect(client.retest).toHaveBeenCalledWith(7);
     });
   });
+
+  it("starts an agentic retest session (FR-17)", async () => {
+    vi.mocked(client.startRetestSession).mockResolvedValue({
+      id: 42,
+      finding_id: 7,
+      status: "starting",
+      model: "claude",
+      verdict_status: null,
+      verdict_rationale: null,
+      events: [],
+    });
+    renderStage(<RetestStage />, stageContext({ approved: true }));
+    await userEvent.click(screen.getByRole("button", { name: /start agentic retest session/i }));
+    await waitFor(() => {
+      expect(client.startRetestSession).toHaveBeenCalledWith(7);
+    });
+  });
 });
 
 describe("ApproveStage", () => {

@@ -1,9 +1,11 @@
-import { Link } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useFindingStage } from "../../hooks/useFindingStage";
 import { NotesThread } from "../../components/NotesThread";
 import { Button } from "../../components/ui/Button";
 import { Panel, PanelHeader } from "../../components/ui/Panel";
+import { startRetestSession } from "../../api/client";
 import { useRetest } from "../../hooks/usePlans";
 import { errorMessage } from "../../lib/format";
 
@@ -11,6 +13,16 @@ import { errorMessage } from "../../lib/format";
 export function RetestStage() {
   const { findingId, approved, verdicts } = useFindingStage();
   const runRetest = useRetest(findingId);
+  const navigate = useNavigate();
+  // The agentic session (FR-17) is a separate, additive entry point — the
+  // batch "Run retest" flow above stays the primary path and keeps working
+  // unchanged.
+  const startSession = useMutation({
+    mutationFn: () => startRetestSession(findingId),
+    onSuccess: (session) => {
+      navigate(`/retest-sessions/${String(session.id)}`);
+    },
+  });
 
   return (
     <div className="space-y-6">
@@ -59,6 +71,27 @@ export function RetestStage() {
               {runRetest.isError && (
                 <p role="alert" className="text-sm text-danger-fg">
                   {errorMessage(runRetest.error)}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-3 border-t border-line pt-3">
+                <Button
+                  variant="ghost"
+                  disabled={startSession.isPending}
+                  onClick={() => {
+                    startSession.mutate();
+                  }}
+                >
+                  {startSession.isPending
+                    ? "Starting session…"
+                    : "Start agentic retest session"}
+                </Button>
+                <p className="font-mono text-[11px] text-faint">
+                  Watch the agent propose and run commands live, with a gate on each one.
+                </p>
+              </div>
+              {startSession.isError && (
+                <p role="alert" className="text-sm text-danger-fg">
+                  {errorMessage(startSession.error)}
                 </p>
               )}
             </>

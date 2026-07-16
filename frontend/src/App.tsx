@@ -8,6 +8,7 @@ import { useTheme } from "./lib/theme";
 import { NewReport } from "./routes/NewReport";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
+import { RetestSession } from "./routes/RetestSession";
 import Settings from "./routes/Settings";
 import { ApproveStage } from "./routes/stages/ApproveStage";
 import { ExtractStage } from "./routes/stages/ExtractStage";
@@ -84,6 +85,7 @@ export function App() {
               <Route path="retest" element={<RetestStage />} />
               <Route path="verdict" element={<VerdictStage />} />
             </Route>
+            <Route path="/retest-sessions/:id" element={<RetestSession />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
