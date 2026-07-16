@@ -44,6 +44,11 @@ def test_internal_network_name_is_session_scoped() -> None:
 
 
 def test_egress_probe_command_targets_a_host() -> None:
-    cmd = egress_probe_command("example.com")
-    assert "example.com" in cmd
-    assert "curl" in cmd
+    host = "example.com"
+    cmd = egress_probe_command(host)
+    # Assert the whole command contract (bounded timeout, silent, body discarded,
+    # https to the host) rather than a bare-hostname substring check — the latter
+    # trips CodeQL's incomplete-url-substring-sanitization heuristic and is a
+    # weaker test anyway. The host is interpolated, so no host string literal is
+    # compared.
+    assert cmd == f"curl --max-time 5 --silent --show-error --output /dev/null https://{host}"

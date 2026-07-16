@@ -55,7 +55,15 @@ def _run_scripted_session(
     start_and_step(
         session, registry, record.id, agent, box, "Retest the SQLi login-bypass finding."
     )
-    apply_decision(session, registry, record.id, approved=True)
+    # The proposed command's ``tool_call_id`` is the ``cid`` the UI approves against
+    # (from the ``command_proposed`` transcript event); resolve it the same way here.
+    proposed = next(
+        event
+        for event in load_events_after(session, record.id, after_seq=0)
+        if event["kind"] == "command_proposed"
+    )
+    command_id = str(proposed["payload"]["tool_call_id"])
+    apply_decision(session, registry, record.id, approved=True, command_id=command_id)
     session.refresh(record)
     return record
 
