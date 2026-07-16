@@ -16,6 +16,7 @@ never stops proposing commands.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -113,16 +114,25 @@ def set_status(session: Session, session_id: int, status: RetestSessionStatus) -
 def record_verdict(
     session: Session, session_id: int, status: VerdictStatus, rationale: str
 ) -> None:
-    """Persist the agent verdict on the session row + a ``verdict`` transcript event.
+    """Persist the agent verdict on the session row + its transcript events.
 
-    Appends the ``VERDICT`` event BEFORE committing the terminal ``concluded``
-    row (event-before-terminal-status invariant, cf. ``_fail`` which already
-    appends its ``ERROR`` event before ``set_status``). The WS stream handler
-    closes on ``terminal AND no new events``, polling concurrently with this
-    function on a separate DB session; without this ordering a poll landing
-    between the two commits could observe the terminal status with the
-    verdict event not yet visible, and close the stream without ever sending
-    the verdict frame.
+    Appends the ``VERDICT`` event, then a ``STATE_CHANGE`` event to
+    ``concluded``, BOTH before committing the terminal row (event-before-
+    terminal-status invariant, cf. ``_fail`` which already appends its
+    ``ERROR`` event before ``set_status``). The WS stream handler closes on
+    ``terminal AND no new events``, polling concurrently with this function on
+    a separate DB session; without this ordering a poll landing between the
+    event appends and the row commit could observe the terminal status with
+    one of the events not yet visible, and close the stream without ever
+    sending it.
+
+    The ``STATE_CHANGE`` event is required because the frontend derives the
+    session's displayed status only from the latest such event, not from
+    polling the row directly — without it, a normal conclude would leave the
+    UI showing the pre-verdict status forever. The budget-exhaustion caller
+    (``apply_decision``) calls this and then ``_mark_given_up``, which appends
+    its own ``STATE_CHANGE`` to ``given_up`` right after; the latest one wins,
+    so that path correctly ends up ``given_up`` rather than ``concluded``.
     """
     record = session.get(RetestSessionRecord, session_id)
     if record is None:
@@ -132,6 +142,12 @@ def record_verdict(
         session_id,
         SessionEventKind.VERDICT,
         {"status": status.value, "rationale": rationale},
+    )
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.STATE_CHANGE,
+        {"to": RetestSessionStatus.CONCLUDED.value},
     )
     record.status = RetestSessionStatus.CONCLUDED.value
     record.verdict_status = status.value
@@ -162,6 +178,10 @@ class LiveSession:
         step_count: Number of commands approved (and run) so far.
         max_steps: The maximum number of commands the agent may run before
             the session is force-concluded ``inconclusive`` (budget backstop).
+        lock: Guards the compare-and-swap on ``pending_call_id`` in
+            ``apply_decision`` so two concurrent decisions (e.g. a double-click
+            on Approve before the REST 202 re-enables the button) can't both
+            observe the same pending call and both resume the agent run.
     """
 
     agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
@@ -170,6 +190,7 @@ class LiveSession:
     pending_call_id: str | None = None
     step_count: int = 0
     max_steps: int = 8
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class SessionRegistry:
@@ -307,37 +328,53 @@ def _step_budget_exhausted(live: LiveSession) -> bool:
     return live.step_count > live.max_steps
 
 
-def apply_decision(
+def _consume_pending_call(live: LiveSession, command_id: str) -> str | None:
+    """Atomically validate and consume ``live.pending_call_id`` under its lock.
+
+    This is the compare-and-swap that makes two concurrent decisions on the
+    same session safe (e.g. a double-click on Approve: the REST endpoint
+    returns 202 immediately and re-enables the frontend button while the
+    background ``run_decision`` task is still resuming the agent). Only the
+    call that observes a matching ``pending_call_id`` consumes it (sets it to
+    ``None``) and proceeds; every other caller — a duplicate, a decision on a
+    stale/already-superseded command, or one referencing a mismatched
+    ``cid`` — sees ``pending_call_id`` as already ``None`` (or non-matching)
+    and no-ops. The lock is held only for this compare-and-swap, never across
+    the subsequent LLM resume call.
+
+    Args:
+        live: The live session state to check/consume against.
+        command_id: The ``cid`` the caller believes is pending (from the
+            approve/reject URL).
+
+    Returns:
+        The consumed ``tool_call_id`` if it matched, or ``None`` if there was
+        nothing pending or ``command_id`` didn't match it.
+    """
+    with live.lock:
+        if live.pending_call_id is None or command_id != live.pending_call_id:
+            return None
+        call_id = live.pending_call_id
+        live.pending_call_id = None
+        return call_id
+
+
+def _resume_with_decision(
     session: Session,
     registry: SessionRegistry,
     session_id: int,
+    live: LiveSession,
+    call_id: str,
     *,
     approved: bool,
-    reason: str = "",
+    reason: str,
 ) -> None:
-    """Resume a paused run with a human decision on the pending command.
+    """Resume the agent run with the human decision on ``call_id`` (post-lock).
 
-    Each *approval* counts against ``live.max_steps``; exceeding it force-
-    concludes the session ``inconclusive`` and tears the sandbox down WITHOUT
-    running the over-budget command (the budget backstop bounds an
-    always-proposing agent). Rejections never run a command, so they never
-    count against the budget.
-
-    Args:
-        session: Active DB session for this call — always freshly obtained by
-            the caller, never held across separate orchestration calls.
-        registry: The live-session registry.
-        session_id: The retest session to resume.
-        approved: Whether the pending command was approved.
-        reason: Optional human-supplied reason, recorded and (on rejection)
-            surfaced back to the model as the tool's denial message.
+    Split out of :func:`apply_decision` so the lock-holding compare-and-swap
+    stays a small, easily-audited critical section; everything here — the
+    budget check, the LLM resume call — runs AFTER the lock has been released.
     """
-    live = registry.get(session_id)
-    if live is None or live.pending_call_id is None:
-        return
-    kind = SessionEventKind.COMMAND_APPROVED if approved else SessionEventKind.COMMAND_REJECTED
-    append_event(session, session_id, kind, {"reason": reason} if reason else {})
-
     if approved and _step_budget_exhausted(live):
         record_verdict(session, session_id, VerdictStatus.INCONCLUSIVE, "budget exhausted")
         _mark_given_up(session, session_id)
@@ -346,8 +383,7 @@ def apply_decision(
 
     set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
     results = DeferredToolResults()
-    results.approvals[live.pending_call_id] = ToolApproved() if approved else ToolDenied(reason)
-    live.pending_call_id = None
+    results.approvals[call_id] = ToolApproved() if approved else ToolDenied(reason)
     deps = _make_deps(session, session_id, live.sandbox)
     try:
         result = live.agent.run_sync(
@@ -359,13 +395,72 @@ def apply_decision(
     _dispatch_output(session, registry, session_id, result)
 
 
+def apply_decision(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    *,
+    approved: bool,
+    reason: str = "",
+    command_id: str,
+) -> None:
+    """Resume a paused run with a human decision on the pending command.
+
+    Each *approval* counts against ``live.max_steps``; exceeding it force-
+    concludes the session ``inconclusive`` and tears the sandbox down WITHOUT
+    running the over-budget command (the budget backstop bounds an
+    always-proposing agent). Rejections never run a command, so they never
+    count against the budget.
+
+    ``command_id`` must match the session's currently pending ``tool_call_id``
+    (validated + consumed atomically under ``live.lock``, see
+    ``_consume_pending_call``); a stale, duplicate, or mismatched decision is a
+    silent no-op. This closes a double-approve race: without it, two
+    concurrent decisions on the same command could both pass the guard, both
+    resume the agent (running the approved command twice in the sandbox) and
+    both append transcript events under colliding ``seq`` numbers.
+
+    Args:
+        session: Active DB session for this call — always freshly obtained by
+            the caller, never held across separate orchestration calls.
+        registry: The live-session registry.
+        session_id: The retest session to resume.
+        approved: Whether the pending command was approved.
+        reason: Optional human-supplied reason, recorded and (on rejection)
+            surfaced back to the model as the tool's denial message.
+        command_id: The ``cid`` from the approve/reject URL; must match the
+            session's pending ``tool_call_id`` or the call no-ops.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    call_id = _consume_pending_call(live, command_id)
+    if call_id is None:
+        return  # stale, duplicate, or mismatched decision: no-op
+
+    kind = SessionEventKind.COMMAND_APPROVED if approved else SessionEventKind.COMMAND_REJECTED
+    append_event(session, session_id, kind, {"reason": reason} if reason else {})
+    _resume_with_decision(
+        session, registry, session_id, live, call_id, approved=approved, reason=reason
+    )
+
+
 def end_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
-    """Operator-initiated end: tear down and mark ``ended`` (no-op if already terminal)."""
+    """Operator-initiated end: tear down and mark ``ended`` (no-op if already terminal).
+
+    Acquires ``live.lock`` around the teardown for consistency with
+    ``apply_decision``'s registry-mutating critical section, even though
+    ``end_session`` doesn't touch ``pending_call_id`` itself.
+    """
     record = session.get(RetestSessionRecord, session_id)
     if record is None or RetestSessionStatus(record.status) in _TERMINAL:
         return
     set_status(session, session_id, RetestSessionStatus.ENDED)
-    _teardown(registry, session_id)
+    live = registry.get(session_id)
+    if live is None:
+        return
+    with live.lock:
+        _teardown(registry, session_id)
 
 
 def _mark_given_up(session: Session, session_id: int) -> None:

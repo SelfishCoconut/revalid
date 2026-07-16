@@ -51,21 +51,30 @@ def _client() -> TestClient:
 
 
 def test_ws_streams_proposed_output_and_verdict() -> None:
-    """The socket replays the transcript and tails it to a terminal verdict."""
+    """The socket replays the transcript and tails it to a terminal verdict.
+
+    Approves using the real ``tool_call_id`` off the ``command_proposed`` event
+    (not a placeholder cid): since the final-review Fix 1, ``apply_decision``
+    validates the URL ``cid`` against the session's pending call and no-ops on
+    a mismatch, so a wrong id here would silently never approve and the
+    "verdict" wait below would hang.
+    """
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
 
         with client.websocket_connect(f"/api/retest-sessions/{sid}/stream") as ws:
-            kinds: list[str] = []
-            kinds.append(ws.receive_json()["kind"])
-            while "command_proposed" not in kinds:
-                kinds.append(ws.receive_json()["kind"])
-            client.post(f"/api/retest-sessions/{sid}/commands/0/approve")
-            while "verdict" not in kinds:
-                kinds.append(ws.receive_json()["kind"])
+            events: list[dict[str, Any]] = [ws.receive_json()]
+            while not any(e["kind"] == "command_proposed" for e in events):
+                events.append(ws.receive_json())
+            proposed = next(e for e in events if e["kind"] == "command_proposed")
+            cid = proposed["payload"]["tool_call_id"]
+            client.post(f"/api/retest-sessions/{sid}/commands/{cid}/approve")
+            while not any(e["kind"] == "verdict" for e in events):
+                events.append(ws.receive_json())
 
-    assert {"command_proposed", "command_output", "verdict"} <= set(kinds)
+    kinds = {e["kind"] for e in events}
+    assert {"command_proposed", "command_output", "verdict"} <= kinds
 
 
 def test_ws_closes_with_policy_violation_for_unknown_session() -> None:

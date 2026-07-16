@@ -619,6 +619,7 @@ def run_decision(
     session_id: int,
     approved: bool,
     reason: str,
+    command_id: str,
 ) -> None:
     """Resume a paused session with the operator's decision (FR-17 background task).
 
@@ -628,9 +629,14 @@ def run_decision(
         session_id: The retest session to resume.
         approved: Whether the pending command was approved.
         reason: Optional operator reason (surfaced to the model on rejection).
+        command_id: The ``cid`` path param from the approve/reject URL; must
+            match the session's pending ``tool_call_id`` or the decision is a
+            no-op (guards against a double-click resuming the run twice).
     """
     with sessions() as session:
-        apply_decision(session, registry, session_id, approved=approved, reason=reason)
+        apply_decision(
+            session, registry, session_id, approved=approved, reason=reason, command_id=command_id
+        )
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1108,7 +1114,7 @@ def _register_session_routes(
     @router.post("/retest-sessions/{session_id}/commands/{cid}/approve", status_code=202)
     def approve_command(session_id: int, cid: str, background: BackgroundTasks) -> dict[str, str]:
         """Approve the pending command; resume the run in the background (FR-17)."""
-        background.add_task(run_decision, sessions, registry, session_id, True, "")
+        background.add_task(run_decision, sessions, registry, session_id, True, "", cid)
         return {"status": "approved"}
 
     @router.post("/retest-sessions/{session_id}/commands/{cid}/reject", status_code=202)
@@ -1120,7 +1126,7 @@ def _register_session_routes(
     ) -> dict[str, str]:
         """Reject the pending command with an optional reason; resume the run (FR-17)."""
         reason = body.reason if body else ""
-        background.add_task(run_decision, sessions, registry, session_id, False, reason)
+        background.add_task(run_decision, sessions, registry, session_id, False, reason, cid)
         return {"status": "rejected"}
 
     @router.post("/retest-sessions/{session_id}/end", status_code=202)

@@ -49,6 +49,14 @@ def _seed_finding(session: Session) -> int:
     return record.id
 
 
+def _pending_cid(registry: SessionRegistry, session_id: int) -> str:
+    """Return the session's currently pending ``tool_call_id`` (must be live+pending)."""
+    live = registry.get(session_id)
+    assert live is not None
+    assert live.pending_call_id is not None
+    return live.pending_call_id
+
+
 def test_create_session_starts_in_starting_status() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     with sessions() as session:
@@ -118,11 +126,27 @@ def test_record_verdict_writes_row_fields() -> None:
     assert s.verdict_status == "still_open"
     assert s.verdict_rationale == "auth still bypassable"
     assert s.ended_at is not None
-    assert events[-1]["kind"] == "verdict"
-    assert events[-1]["payload"] == {
+    assert events[-2]["kind"] == "verdict"
+    assert events[-2]["payload"] == {
         "status": "still_open",
         "rationale": "auth still bypassable",
     }
+
+
+def test_record_verdict_appends_concluded_state_change_event() -> None:
+    """The frontend derives session status only from the latest state_change event
+
+    (Fix 2, final-review): without this, the UI would never see a transition out
+    of the pre-verdict status after a normal conclude.
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.record_verdict(session, s.id, VerdictStatus.FIXED, "patched")
+        events = rs.load_events_after(session, s.id, after_seq=0)
+    assert events[-1]["kind"] == "state_change"
+    assert events[-1]["payload"] == {"to": "concluded"}
 
 
 def test_record_verdict_on_unknown_session_is_a_noop() -> None:
@@ -147,11 +171,47 @@ def test_full_cycle_proposes_runs_and_concludes() -> None:
         kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
         assert "command_proposed" in kinds
 
-        apply_decision(session, registry, s.id, approved=True)
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
         session.refresh(s)
         assert s.status == RetestSessionStatus.CONCLUDED.value
         assert s.verdict_status == "still_open"
         assert box.commands and box.stopped  # ran once, torn down
+
+        events_before = rs.load_events_after(session, s.id, 0)
+        # A repeat decision with the same (now-consumed) cid must no-op: the live
+        # session was already torn down on conclude, so no command runs twice and
+        # no extra transcript event is appended (final-review Fix 1).
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
+        session.refresh(s)
+        events_after = rs.load_events_after(session, s.id, 0)
+    assert len(box.commands) == 1  # still exactly one execution, not two
+    assert events_after == events_before
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+
+
+def test_apply_decision_wrong_command_id_is_a_noop() -> None:
+    """A decision whose ``command_id`` doesn't match the pending call is a no-op.
+
+    Guards against a stale or mismatched ``cid`` acting on the wrong command
+    (final-review Fix 1): the sandbox must never run anything and the session
+    must stay exactly where it was (``awaiting_command``).
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([])  # nothing scripted: must never be called
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        apply_decision(session, registry, s.id, approved=True, command_id="not-the-pending-id")
+        session.refresh(s)
+    assert box.commands == []
+    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
+    live = registry.get(s.id)
+    assert live is not None and live.pending_call_id is not None  # still pending, untouched
 
 
 def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
@@ -165,7 +225,10 @@ def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
         agent = build_retest_agent(FunctionModel(script_run_then_conclude))
 
         start_and_step(session, registry, s.id, agent, box, "Retest.")
-        apply_decision(session, registry, s.id, approved=False, reason="out of scope host")
+        cid = _pending_cid(registry, s.id)
+        apply_decision(
+            session, registry, s.id, approved=False, reason="out of scope host", command_id=cid
+        )
         session.refresh(s)
         kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
     assert "command_rejected" in kinds
@@ -191,10 +254,12 @@ def test_budget_exhaustion_gives_up() -> None:
         agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
 
         start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=1)
-        apply_decision(session, registry, s.id, approved=True)  # uses the one allowed step
+        cid1 = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid1)  # the allowed step
         assert len(box.commands) == 1
 
-        apply_decision(session, registry, s.id, approved=True)  # exceeds the 1-step budget
+        cid2 = _pending_cid(registry, s.id)  # a fresh proposal after the first ran
+        apply_decision(session, registry, s.id, approved=True, command_id=cid2)  # over budget
         session.refresh(s)
     assert s.status == RetestSessionStatus.GIVEN_UP.value
     assert s.verdict_status == "inconclusive"
@@ -216,7 +281,7 @@ def test_apply_decision_on_unknown_session_is_a_noop() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
-        apply_decision(session, registry, 999, approved=True)  # must not raise
+        apply_decision(session, registry, 999, approved=True, command_id="x")  # must not raise
 
 
 def test_end_session_tears_down_and_marks_ended() -> None:
@@ -280,7 +345,8 @@ def test_apply_decision_agent_error_on_resume_sets_error_status_and_tears_down()
         agent = build_retest_agent(FunctionModel(_propose_then_boom))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
 
-        apply_decision(session, registry, s.id, approved=True)
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
         session.refresh(s)
         kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
     assert s.status == RetestSessionStatus.ERROR.value
