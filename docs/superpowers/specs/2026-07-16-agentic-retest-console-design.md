@@ -31,6 +31,10 @@ Per finding, an interactive session:
 
 Three steering channels: **chat** (tell it), **approve/edit** (vet it), **type** (show it).
 
+### Layout — chat-centric console (decided 2026-07-16)
+
+The console reads as **a chat with the model**, not a terminal with controls bolted on. The **center column is the chat** — the agent's voice: its rationale, each gated command rendered as a chat card with **inline approve/reject**, and the verdict, as one scrolling conversation (`agent_message` events are reserved for future agent prose; from the chat-input slice the human's own messages join the same stream). The **terminal docks to the bottom** as a collapsible, read-only panel showing only *executed*-command output. This **supersedes Slice 0's terminal-centric arrangement** (read-only terminal on top, approval card + verdict stacked beneath). The shared *interactive* PTY (the "one shared terminal" bullet above) still lands in a later slice — the human types into this same docked terminal then; the reorientation itself is presentation-only (no API/orchestrator/sandbox change). This decision is carried into the slice order below and recorded as an update note in ADR-0025.
+
 ### Reproducibility (NFR-02) — an explicit shift
 
 Today a verdict is a pure function of one request's evidence, so it re-derives offline. Under the agentic model the verdict is a **human-adjudicated agent judgment**, and reproducibility means an **append-only session transcript** — plan versions, every command + stdout/stderr/exit/timing, every human decision, and the agent's reasoning — that is **replayable and inspectable**, not a deterministic recomputation. This is a **stronger human-in-the-loop contribution** but a **weaker deterministic-reproducibility claim** than the current model; it will be stated plainly in the thesis (Design + Evaluation chapters), not papered over.
@@ -39,16 +43,21 @@ Today a verdict is a pure function of one request's evidence, so it re-derives o
 
 Walking-skeleton-first (mirrors how M1 was built). Each slice is its own issue → plan → PR.
 
+Revised 2026-07-16 to insert the chat-centric console shell (§2 Layout) as Slice 1;
+the capability slices shift down one, and the former "chat steering / Q&A" is
+reframed as the chat **input** slice (the chat *view* now arrives in Slice 1).
+
 | Slice | Adds |
 |------:|------|
-| **0** (this spec) | skeleton: egress-locked container + Pydantic-AI agent with one gated `run_command` + live **read-only** terminal + one approval card → agent proposes a verdict |
-| 1 | shared interactive PTY — human types into the same shell; agent observes it |
-| 2 | plan panel — initial plan + gated plan updates |
-| 3 | chat steering / Q&A |
-| 4 | free-launch mode + session controls + step/time budget + give-up |
-| 5 | verdict adjudication + FR-10 audit / FR-12 export integration; retire the old batch path |
+| **0** (shipped) | skeleton: egress-locked container + Pydantic-AI agent with one gated `run_command` + live **read-only** terminal + one approval card → agent proposes a verdict |
+| **1** | **chat-centric console shell** — chat becomes the center column (agent rationale → gated command card with inline approve/reject → verdict); the terminal docks to the bottom as a collapsible read-only output panel. Presentation only; steering stays approve/reject. |
+| 2 | shared interactive PTY — human types into the docked terminal; agent observes it |
+| 3 | plan panel — initial plan + gated plan updates |
+| 4 | chat **input** / steering & Q&A — human types messages into the center chat to redirect the agent or ask about what it observed |
+| 5 | free-launch mode + session controls + step/time budget + give-up |
+| 6 | verdict adjudication + FR-10 audit / FR-12 export integration; retire the old batch path |
 
-The old structured-plan path (`plan.py` / `approval.py` / `retest.py`) **stays fully operational** until Slice 5 — no big-bang removal.
+The old structured-plan path (`plan.py` / `approval.py` / `retest.py`) **stays fully operational** until Slice 6 — no big-bang removal.
 
 ---
 
@@ -58,9 +67,9 @@ The old structured-plan path (`plan.py` / `approval.py` / `retest.py`) **stays f
 
 **In scope:** sandbox runtime; session orchestrator + state machine + append-only transcript; agent with `run_command` (gated) + `conclude`; WebSocket streaming + REST approve/reject/end; a minimal UI (read-only terminal + approval card + verdict banner); tests (unit + integration with fakes, one nightly system test).
 
-**Deferred (minimal placeholders only):** human terminal input (Slice 1), plan panel (2), chat (3), free-launch + budget UI (4), verdict adjudication + FR-09/10/12 integration (5). **Command *editing* before approval is also deferred** — Slice 0 is approve/reject only; the human refines by rejecting (with a reason) or, from Slice 1, by typing their own command.
+**Deferred (minimal placeholders only):** chat-centric layout (Slice 1), human terminal input / shared PTY (Slice 2), plan panel (3), chat input (4), free-launch + budget UI (5), verdict adjudication + FR-09/10/12 integration (6). **Command *editing* before approval is also deferred** — Slice 0 is approve/reject only; the human refines by rejecting (with a reason) or, from Slice 2, by typing their own command.
 
-**Non-goals for Slice 0:** replacing the old plan path; multi-session concurrency tuning; a full pentest toolset image; reshaping the `Verdict`/`Evidence` domain model (Slice 5).
+**Non-goals for Slice 0:** replacing the old plan path; multi-session concurrency tuning; a full pentest toolset image; reshaping the `Verdict`/`Evidence` domain model (Slice 6).
 
 ---
 
@@ -105,7 +114,7 @@ sequenceDiagram
 - **`retest_sessions`**: `id`, `finding_id` (FK → finding *identity*, FR-16), `status` (enum), `model` (resolved LLM string), `verdict_status` (nullable), `verdict_rationale` (nullable), `created_at`, `ended_at`.
 - **`session_events`** (append-only transcript / audit): `id`, `session_id`, `seq`, `kind` (`agent_message` \| `command_proposed` \| `command_approved` \| `command_rejected` \| `command_output` \| `state_change` \| `verdict` \| `error`), `payload` (JSON), `created_at`.
 
-**Verdict linkage — deferred on purpose.** The existing `Verdict`/`Evidence` domain model is request/response-shaped and cannot represent a multi-command shell conclusion. Slice 0 records the verdict **inside the session** (`retest_sessions.verdict_status/rationale` + a `verdict` event whose payload cites the commands). Wiring the agentic verdict into the FR-09 `verdicts` table / FR-10 audit / FR-12 export — including any `Evidence` reshaping — is **Slice 5**.
+**Verdict linkage — deferred on purpose.** The existing `Verdict`/`Evidence` domain model is request/response-shaped and cannot represent a multi-command shell conclusion. Slice 0 records the verdict **inside the session** (`retest_sessions.verdict_status/rationale` + a `verdict` event whose payload cites the commands). Wiring the agentic verdict into the FR-09 `verdicts` table / FR-10 audit / FR-12 export — including any `Evidence` reshaping — is **Slice 6**.
 
 ## 7. Safety & invariants
 
@@ -146,12 +155,12 @@ Pydantic AI `Agent`, deps = the sandbox handle + session context. **System promp
 - **Milestone M6 — Agentic interactive retest** (created).
 - **FR-17** (umbrella) added to `docs/requirements/srs.md`; per-slice acceptance criteria filled in as slices land.
 - **ADR-0025** (`proposed`) records the architecture: sandboxed HITL agentic retest, shared terminal, agent-determined verdict + transcript audit; notes it supersedes the FR-04/05/07-09 execution model over time.
-- Per the brainstorm checkpoint, **ADR-0025 + FR-17 + the M6 roadmap note land in the Slice 0 implementation PR**, pointing at this spec. The old batch path stays until Slice 5.
+- Per the brainstorm checkpoint, **ADR-0025 + FR-17 + the M6 roadmap note land in the Slice 0 implementation PR**, pointing at this spec. The old batch path stays until Slice 6.
 
 ## 12. Open questions / risks
 
 1. **Pydantic AI HITL gate** ergonomics (§9) — validated first in Slice 0; documented fallback.
 2. **Docker in CI** for the system test — the lab is already dockerized in `system-tests.yml`, so the sandbox + `--internal` network fit the same job.
 3. **WebSocket lifecycle** in a single-user local app — keep it minimal (127.0.0.1, no auth, reconnect via the `GET` poll fallback).
-4. **Verdict/Evidence reshaping** — deliberately deferred to Slice 5; Slice 0 keeps the verdict inside the session.
+4. **Verdict/Evidence reshaping** — deliberately deferred to Slice 6; Slice 0 keeps the verdict inside the session.
 5. **Egress-lock verification** — a concrete test that the sandbox cannot reach a non-lab host is part of Slice 0's definition of done.

@@ -173,4 +173,65 @@ describe("RetestSession", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   });
+
+  it("renders an agent_message as a chat turn", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "agent_message", payload: { text: "checking the login flow first" } }],
+      status: "thinking",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByText(/checking the login flow first/)).toBeInTheDocument();
+  });
+
+  it("renders a rejected-command marker with its reason", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "command_proposed",
+          payload: { command: "rm -rf /", rationale: "cleanup", tool_call_id: "xyz" },
+        },
+        { seq: 2, kind: "command_rejected", payload: { reason: "too destructive" } },
+      ],
+      status: "thinking",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByText(/command rejected: too destructive/)).toBeInTheDocument();
+    // A rejected command never ran, so it does not carry an approve control.
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("counts executed-command output in the terminal header and collapses it", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "command_output",
+          payload: { command: "curl -s http://lab/rest", stdout: '{"ok":true}', stderr: "", exit_code: 0 },
+        },
+      ],
+      status: "thinking",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    // `$ curl …` + one stdout line = 2 terminal lines; the docked terminal body renders.
+    expect(screen.getByText(/2 lines/)).toBeInTheDocument();
+    expect(screen.getByTestId("retest-terminal")).toBeInTheDocument();
+
+    // The header doubles as the collapse toggle: hides the terminal body, keeps the count.
+    await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
+    expect(screen.queryByTestId("retest-terminal")).not.toBeInTheDocument();
+    expect(screen.getByText(/2 lines/)).toBeInTheDocument();
+  });
 });
