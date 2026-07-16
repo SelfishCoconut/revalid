@@ -27,6 +27,7 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 
 ## Workflow (Kanban — see docs/development-plan.md §9)
 
+- **Issue first — non-negotiable.** BEFORE writing code for any feature/fix, open a GitHub issue (use the `feature-request` skill, or `gh issue create` with a `req:FR-xx`/`infra`/`thesis` label + milestone) so it lands on the board. Enhancements to an existing FR reuse its `req:FR-xx` label — no new FR needed. The PR body MUST contain `Closes #<n>` so `board.yml` advances the card. Never open a feature PR without a linked issue. (A PreToolUse hook, `.claude/hooks/remind-board-issue.sh`, reminds on branch/PR creation.)
 - Card (GitHub issue) → feature branch → PR → `Verify` (required CI green + automated review) → auto-merge (squash) → `Validate` = Álvaro's async review (revert if needed).
 - Every PR MUST fill the "How to validate" section: exact commands, expected output, acceptance criteria checkboxes. If the feature isn't directly runnable, ship `scripts/demo/<feature>.py` or a `make demo-<feature>` target.
 - Conventional Commits (enforced by commit-msg hook): `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`.
