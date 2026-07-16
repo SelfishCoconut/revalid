@@ -71,9 +71,19 @@ keep all history.
   plan history; **verdicts are never deleted** — a retest after re-planning appends
   new verdicts stamped with the new plan version (FR-10 unchanged).
 
-This is scoped as an **enhancement to FR-04/FR-05**, not a new SRS requirement;
-this ADR is the design of record. It traces to issues #73 (instructions) and #74
-(regenerate/revise).
+- **The pipeline circles are the go-back control (FR-11, #78).** The status track
+  (extract → plan → approve → retest → verdict) that a finding already reads as
+  "where am I" doubles as a stepper: a *reached, earlier* stage becomes a clickable
+  button that steps back to it — `extract` opens the report, `plan` discards &
+  regenerates, `approve` un-approves (revise). Each mutating step confirms first
+  (a stray click must not throw work away); `retest`/`verdict` and not-yet-reached
+  stages stay inert (recorded outcomes can't be un-happened — history is kept). The
+  buttons drive the exact same operations above, so no new backend surface.
+
+This is scoped as an **enhancement to FR-04/FR-05** (with the clickable-track
+affordance under FR-11), not a new SRS requirement; this ADR is the design of
+record. It traces to issues #73 (instructions), #74 (regenerate/revise), and #78
+(clickable pipeline stages).
 
 ## Alternatives considered
 

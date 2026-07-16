@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from "react";
 
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { InstructionsField } from "../components/InstructionsField";
-import { PipelineTrack } from "../components/PipelineTrack";
+import { PipelineTrack, type StageBackActions } from "../components/PipelineTrack";
 import { PlanEditor } from "../components/PlanEditor";
 import { PlanHistory } from "../components/PlanHistory";
 import { SeverityBadge } from "../components/SeverityBadge";
@@ -12,7 +12,7 @@ import { VerdictCard } from "../components/VerdictCard";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { useFindings } from "../hooks/useFindings";
-import { useGeneratePlan, usePlans } from "../hooks/usePlans";
+import { useGeneratePlan, usePlans, useRevisePlan } from "../hooks/usePlans";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
 import { currentPlan } from "../lib/selectors";
@@ -102,6 +102,9 @@ export function FindingDetail() {
   const findings = useFindings();
   const plans = usePlans(findingId);
   const verdicts = useVerdicts();
+  const navigate = useNavigate();
+  const regenerate = useGeneratePlan(findingId);
+  const revise = useRevisePlan(findingId);
 
   if (findings.isPending) {
     return <Spinner label="Loading finding" />;
@@ -133,6 +136,34 @@ export function FindingDetail() {
 
   const backLink =
     finding.report_id != null ? `/reports/${String(finding.report_id)}` : "/";
+
+  // The pipeline circles double as a "go back" stepper (ADR-0023): a reached,
+  // earlier stage with an action here becomes clickable. Mutating steps confirm
+  // first so a stray click can't throw away work; nothing is ever deleted.
+  const reportId = finding.report_id;
+  const onStageBack: StageBackActions = {};
+  if (reportId != null) {
+    onStageBack.extract = () => {
+      navigate(`/reports/${String(reportId)}`);
+    };
+  }
+  if (hasPlan && current?.status !== "generating") {
+    onStageBack.plan = () => {
+      if (window.confirm("Discard the current plan and generate a new one?")) {
+        regenerate.mutate("");
+      }
+    };
+  }
+  if (planList.some((plan) => plan.status === "approved")) {
+    onStageBack.approve = () => {
+      const ok = window.confirm(
+        "Un-approve this plan so you can edit it? Nothing runs until you re-approve.",
+      );
+      if (ok) {
+        revise.mutate();
+      }
+    };
+  }
 
   return (
     <div className="rev-rise space-y-6">
@@ -191,6 +222,7 @@ export function FindingDetail() {
             }
             retested={findingVerdicts.length > 0}
             verdict={findingVerdicts[0]?.status}
+            onStageBack={onStageBack}
           />
         </div>
       </Panel>
