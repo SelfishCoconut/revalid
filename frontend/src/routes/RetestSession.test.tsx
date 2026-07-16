@@ -252,9 +252,27 @@ describe("RetestSession", () => {
     expect(client.submitHumanCommand).toHaveBeenCalledWith(1, "whoami");
   });
 
-  it("treats non-! text as chat (hinted), not a command", async () => {
+  it("sends non-! text to the agent as a chat message", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
+
+    renderAt(1);
+
+    await userEvent.type(screen.getByLabelText(/operator console input/i), "focus on login");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(client.submitMessage).toHaveBeenCalledWith(1, "focus on login");
+    expect(client.submitHumanCommand).not.toHaveBeenCalled();
+  });
+
+  it("renders a human_message as an operator turn", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "human_message", payload: { text: "focus on login" } }],
       status: "awaiting_command",
       verdict: null,
       connected: true,
@@ -262,10 +280,20 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    await userEvent.type(screen.getByLabelText(/operator console input/i), "focus on login");
-    expect(screen.getByRole("button", { name: /run/i })).toBeDisabled();
-    expect(screen.getByText(/arrives in a later slice/i)).toBeInTheDocument();
-    expect(client.submitHumanCommand).not.toHaveBeenCalled();
+    expect(screen.getByText("focus on login")).toBeInTheDocument();
+  });
+
+  it("disables the input once the session is over", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "concluded",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByLabelText(/operator console input/i)).toBeDisabled();
   });
 
   it("shows operator commands in the docked terminal, marked apart from the agent's", () => {

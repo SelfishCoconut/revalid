@@ -242,6 +242,18 @@ export function submitHumanCommand(id: number, command: string): Promise<{ statu
 }
 
 /**
+ * Send a free-text chat message to the retest agent (FR-17 Slice 4). Queued
+ * server-side and delivered to the agent as a user turn on its next
+ * approve/reject (pure-queue steering).
+ */
+export function submitMessage(id: number, text: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/message`,
+    jsonInit("POST", { text }),
+  );
+}
+
+/**
  * Build the absolute WS(S) URL for a session's live transcript stream.
  * WebSocket has no relative-URL form, so this resolves against the current
  * page's origin/protocol the way `fetch`'s relative `API_BASE` paths do

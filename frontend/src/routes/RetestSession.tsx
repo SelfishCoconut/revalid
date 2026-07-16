@@ -8,6 +8,7 @@ import {
   endRetestSession,
   rejectCommand,
   submitHumanCommand,
+  submitMessage,
   type SessionEvent,
 } from "../api/client";
 import { RetestTerminal } from "../components/RetestTerminal";
@@ -105,6 +106,32 @@ function AgentTurn({ children }: { children: ReactNode }) {
   );
 }
 
+/** One operator chat message: a right-aligned, iris-tinted bubble in the center chat. */
+function HumanTurn({ text, queued }: { text: string; queued: boolean }) {
+  return (
+    <div className="flex justify-end">
+      <div className="min-w-0 max-w-[85%] rounded-lg border border-iris/40 bg-iris/10 px-4 py-3">
+        <p className="whitespace-pre-wrap text-sm text-fg">{text}</p>
+        {queued && (
+          <p className="mt-1 text-[11px] text-faint">queued — sent on your next approve/reject</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Seq of the latest approve/reject; a human_message after it hasn't been delivered yet. */
+function lastDecisionSeq(events: SessionEvent[]): number {
+  const decisions = new Set([
+    "command_approved",
+    "command_rejected",
+    "plan_approved",
+    "plan_rejected",
+  ]);
+  const latest = [...events].reverse().find((event) => decisions.has(event.kind));
+  return latest ? latest.seq : 0;
+}
+
 /**
  * The agentic retest console (FR-17, Slice 1): a chat with the model in the
  * center — the agent's rationale, each gated command as a card with inline
@@ -138,9 +165,15 @@ export function RetestSession() {
   const humanCommandMutation = useMutation({
     mutationFn: (command: string) => submitHumanCommand(id, command),
   });
+  // Plain-text chat to the agent (FR-17 Slice 4); queued server-side and read on
+  // the agent's next turn. Separate mutation so its state is independent.
+  const messageMutation = useMutation({
+    mutationFn: (text: string) => submitMessage(id, text),
+  });
 
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);
+  const decisionSeq = lastDecisionSeq(events);
   // A pending approval is for either a command or a plan change; both gate on the
   // same tool_call_id, so they share the approve/reject mutations below.
   const latestProposal = [...events]
@@ -186,13 +219,14 @@ export function RetestSession() {
     </div>
   );
 
-  // `!<command>` runs a manual command in the sandbox; anything else is reserved
-  // for chat-to-agent steering (a later slice), so it's only hinted here.
   const trimmed = input.trim();
   const isCommand = trimmed.startsWith("!");
   const commandBody = isCommand ? trimmed.slice(1).trim() : "";
   const sessionOver = OVER_STATUSES.has(status);
-  const canRun = commandBody.length > 0 && !sessionOver;
+  // `!command` runs in the sandbox (Slice 2); plain text is a chat message to the
+  // agent (Slice 4). Both need non-empty content and a live session.
+  const hasContent = isCommand ? commandBody.length > 0 : trimmed.length > 0;
+  const canSubmit = hasContent && !sessionOver;
 
   // Keep the newest turn in view as the transcript streams in. `scrollTop`
   // assignment is a no-op under jsdom, so tests need no scroll polyfill.
@@ -207,6 +241,15 @@ export function RetestSession() {
         <AgentTurn key={event.seq}>
           <p className="whitespace-pre-wrap text-sm text-fg">{String(event.payload.text ?? "")}</p>
         </AgentTurn>,
+      ];
+    }
+    if (event.kind === "human_message") {
+      return [
+        <HumanTurn
+          key={event.seq}
+          text={String(event.payload.text ?? "")}
+          queued={event.seq > decisionSeq && !sessionOver}
+        />,
       ];
     }
     if (event.kind === "command_proposed") {
@@ -342,12 +385,13 @@ export function RetestSession() {
         )}
       </Panel>
 
-      {/* Operator console: `!<command>` runs it in the sandbox (Claude-Code-style). */}
+      {/* Operator console: plain text messages the agent; `!<command>` runs it. */}
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!canRun) return;
-          humanCommandMutation.mutate(commandBody);
+          if (!canSubmit) return;
+          if (isCommand) humanCommandMutation.mutate(commandBody);
+          else messageMutation.mutate(trimmed);
           setInput("");
         }}
         className="shrink-0"
@@ -358,24 +402,32 @@ export function RetestSession() {
             onChange={(event) => {
               setInput(event.target.value);
             }}
-            placeholder="!command runs it in the sandbox — e.g. !curl -s http://revalid-juice-shop:3000/rest/products"
+            placeholder="Message the agent — or !command to run it in the sandbox"
             disabled={sessionOver}
             aria-label="Operator console input"
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
           />
-          <Button type="submit" variant="ghost" disabled={!canRun}>
-            Run
+          <Button type="submit" variant="ghost" disabled={!canSubmit}>
+            {isCommand ? "Run" : "Send"}
           </Button>
         </div>
-        {trimmed.length > 0 && !isCommand && (
+        {!sessionOver && (
           <p className="mt-1 px-1 text-[11px] text-faint">
-            Prefix with <span className="font-mono text-dim">!</span> to run a command in the
-            sandbox. Chatting to the agent arrives in a later slice.
+            {isCommand ? (
+              <>Runs once in the egress-locked sandbox.</>
+            ) : (
+              <>Messages are read on the agent&apos;s next turn — approve or reject a pending step to deliver now.</>
+            )}
           </p>
         )}
         {humanCommandMutation.isError && (
           <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
             {errorMessage(humanCommandMutation.error)}
+          </p>
+        )}
+        {messageMutation.isError && (
+          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
+            {errorMessage(messageMutation.error)}
           </p>
         )}
       </form>
