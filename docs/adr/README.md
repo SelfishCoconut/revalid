@@ -26,3 +26,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0020](0020-manual-report-entry.md) | Manual report entry: human ingestion (form + JSON upload) bypassing the LLM | proposed | 2026-07-15 |
 | [0021](0021-user-configurable-model-provider-setting.md) | User-configurable model/provider setting: DB-persisted, runtime-switchable, env-seeded | proposed | 2026-07-15 |
 | [0022](0022-async-plan-generation.md) | Asynchronous plan generation: a persisted `generating` version settled by a background job | proposed | 2026-07-16 |
+| [0023](0023-plan-iteration-instructions-regenerate-revise.md) | Plan iteration: operator instructions + regenerate / revise (go back a step) | proposed | 2026-07-16 |

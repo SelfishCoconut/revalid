@@ -71,4 +71,47 @@ describe("PlanEditor", () => {
       expect(client.approvePlan).toHaveBeenCalledWith(42);
     });
   });
+
+  it("regenerates with the entered guidance (ADR-0023)", async () => {
+    vi.mocked(client.generatePlan).mockResolvedValue({
+      ...proposedPlan,
+      status: "generating",
+    });
+    renderWithProviders(<PlanEditor findingId={42} plan={proposedPlan} />);
+
+    await userEvent.type(screen.getByLabelText(/extra guidance/i), "check /admin");
+    await userEvent.click(screen.getByRole("button", { name: /discard & regenerate/i }));
+
+    await waitFor(() => {
+      expect(client.generatePlan).toHaveBeenCalledWith(42, "check /admin");
+    });
+  });
+
+  it("does not offer Revise for a proposed plan", () => {
+    renderWithProviders(<PlanEditor findingId={42} plan={proposedPlan} />);
+    expect(screen.queryByRole("button", { name: "Revise" })).not.toBeInTheDocument();
+  });
+
+  it("un-approves an approved plan via Revise", async () => {
+    vi.mocked(client.revisePlan).mockResolvedValue({ ...proposedPlan, version: 2 });
+    renderWithProviders(
+      <PlanEditor findingId={42} plan={{ ...proposedPlan, status: "approved" }} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Revise" }));
+
+    await waitFor(() => {
+      expect(client.revisePlan).toHaveBeenCalledWith(42);
+    });
+  });
+
+  it("surfaces the guidance a plan was generated with", () => {
+    renderWithProviders(
+      <PlanEditor
+        findingId={42}
+        plan={{ ...proposedPlan, raw: { instructions: "check /admin for IDOR" } }}
+      />,
+    );
+    expect(screen.getByText("check /admin for IDOR")).toBeInTheDocument();
+  });
 });

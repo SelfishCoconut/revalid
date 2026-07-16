@@ -70,13 +70,26 @@ def _proposed_rows(session: Session, finding_id: int) -> list[PlanRecord]:
     )
 
 
-def _live_proposal_rows(session: Session, finding_id: int) -> list[PlanRecord]:
-    """Rows a new proposal supersedes: the in-flight or still-proposed versions."""
+_LIVE_STATUSES = (
+    PlanStatus.GENERATING.value,
+    PlanStatus.PROPOSED.value,
+    PlanStatus.APPROVED.value,
+)
+
+
+def _live_rows(session: Session, finding_id: int) -> list[PlanRecord]:
+    """The finding's live versions: in-flight, still-proposed, or approved.
+
+    These are what a *regenerate* (ADR-0023) supersedes — including an already
+    ``approved`` version, so that after a regenerate :func:`approved_plan` returns
+    ``None`` and nothing can run until the fresh plan is re-approved (the FR-05
+    gate is never left pointing at a plan the operator has walked away from).
+    """
     return list(
         session.scalars(
             select(PlanRecord).where(
                 PlanRecord.finding_id == finding_id,
-                PlanRecord.status.in_((PlanStatus.GENERATING.value, PlanStatus.PROPOSED.value)),
+                PlanRecord.status.in_(_LIVE_STATUSES),
             )
         )
     )
@@ -118,14 +131,20 @@ def save_generated_plan(session: Session, finding_id: int, result: PlanResult) -
     return _persist_proposed(session, finding_id, result.plan, "generated", list(result.rejected))
 
 
-def start_plan_generation(session: Session, finding_id: int) -> PlanRecord:
-    """Insert an in-flight ``generating`` version and supersede any live proposal (ADR-0022).
+def start_plan_generation(session: Session, finding_id: int, instructions: str = "") -> PlanRecord:
+    """Insert an in-flight ``generating`` version and supersede any live one (ADR-0022/0023).
 
     The synchronous half of async FR-04 generation: it reserves the version the
     background task will fill (:func:`finish_plan_generation`) so the API can
-    return immediately and a reload always shows the real in-progress state.
+    return immediately and a reload always shows the real in-progress state. It
+    is also the *regenerate* path — it supersedes any live version (proposed or
+    approved), so generating anew from any point starts a clean version.
+
+    ``instructions`` (optional operator guidance for this generation) is stored on
+    the reserved row so it survives in the audit trail even if generation fails
+    (:func:`finish_plan_generation` only rewrites ``raw`` on success).
     """
-    for row in _live_proposal_rows(session, finding_id):
+    for row in _live_rows(session, finding_id):
         row.status = PlanStatus.SUPERSEDED.value
     record = PlanRecord(
         finding_id=finding_id,
@@ -134,7 +153,7 @@ def start_plan_generation(session: Session, finding_id: int) -> PlanRecord:
         origin="generated",
         actions=[],
         rejected_actions=[],
-        raw={},
+        raw={"instructions": instructions} if instructions.strip() else {},
     )
     session.add(record)
     session.commit()
@@ -233,6 +252,34 @@ def reject_plan(session: Session, finding_id: int, actor: str = _ACTOR) -> PlanR
     session.commit()
     session.refresh(proposed)
     return proposed
+
+
+def revise_plan(session: Session, finding_id: int, *, finding_title: str) -> PlanRecord:
+    """Un-approve the approved plan back into an editable proposed copy (ADR-0023).
+
+    The "go back a step" from the approval phase: the approved version is
+    superseded and its already-gated probes are re-proposed as a new version the
+    operator can edit and re-approve. Until re-approval nothing runs — the FR-05
+    gate is intact — and the approved version stays in history as ``superseded``.
+    The copied probes came from an approved plan, so they need no re-gating here.
+
+    Raises:
+        PlanNotApprovedError: If the finding has no approved plan to revise.
+    """
+    approved = approved_plan(session, finding_id)
+    if approved is None:
+        raise PlanNotApprovedError(finding_id)
+    approved.status = PlanStatus.SUPERSEDED.value
+    plan = RetestPlan(
+        finding_title=finding_title,
+        actions=approved.probes(),
+        raw={
+            "source": "plan_revision",
+            "finding_title": finding_title,
+            "revised_from_version": approved.version,
+        },
+    )
+    return _persist_proposed(session, finding_id, plan, "revised", [])
 
 
 def _latest_proposed(session: Session, finding_id: int) -> PlanRecord | None:

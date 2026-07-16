@@ -55,6 +55,30 @@ def _plan_for(*actions: dict[str, Any]) -> Any:
     return generate_plan(agent, _finding(), _GUARD, _BASE_URL)
 
 
+def test_operator_instructions_steer_the_prompt_and_are_recorded() -> None:
+    """FR-04 (ADR-0023): guidance reaches the model and lands in the plan lineage."""
+    captured: dict[str, str] = {}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        captured["prompt"] = str(messages)
+        tool = info.output_tools[0]
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=tool.name, args={"response": [_LOGIN_ACTION]})]
+        )
+
+    agent = build_plan_agent(FunctionModel(respond))
+    result = generate_plan(agent, _finding(), _GUARD, _BASE_URL, "also probe /admin for IDOR")
+
+    assert "also probe /admin for IDOR" in captured["prompt"]
+    assert "operator instructions" in captured["prompt"].lower()
+    assert result.plan.raw["instructions"] == "also probe /admin for IDOR"
+
+
+def test_no_instructions_records_empty_guidance() -> None:
+    result = _plan_for(_LOGIN_ACTION)
+    assert result.plan.raw["instructions"] == ""
+
+
 def test_valid_action_becomes_typed_allowlisted_probe() -> None:
     result = _plan_for(_LOGIN_ACTION)
 

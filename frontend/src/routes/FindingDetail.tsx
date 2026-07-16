@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Link, useParams } from "react-router-dom";
 
+import { InstructionsField } from "../components/InstructionsField";
 import { PipelineTrack } from "../components/PipelineTrack";
 import { PlanEditor } from "../components/PlanEditor";
 import { PlanHistory } from "../components/PlanHistory";
@@ -38,10 +39,11 @@ function PlanStartPanel({
   failedError: string | null;
 }) {
   const generate = useGeneratePlan(findingId);
+  const [instructions, setInstructions] = useState("");
   return (
     <Panel>
       <PanelHeader eyebrow="Retest plan" />
-      <div className="p-4">
+      <div className="space-y-3 p-4">
         {failedError !== null ? (
           <p className="text-sm text-danger-fg">Plan generation failed: {failedError}</p>
         ) : (
@@ -49,11 +51,15 @@ function PlanStartPanel({
             No plan yet. Generate one to propose gated retest actions.
           </p>
         )}
+        <InstructionsField
+          value={instructions}
+          onChange={setInstructions}
+          disabled={generate.isPending}
+        />
         <Button
-          className="mt-3"
           disabled={generate.isPending}
           onClick={() => {
-            generate.mutate();
+            generate.mutate(instructions);
           }}
         >
           {generate.isPending
@@ -63,7 +69,7 @@ function PlanStartPanel({
               : "Generate plan"}
         </Button>
         {generate.isError && (
-          <p role="alert" className="mt-2 text-sm text-danger-fg">
+          <p role="alert" className="text-sm text-danger-fg">
             {errorMessage(generate.error)}
           </p>
         )}

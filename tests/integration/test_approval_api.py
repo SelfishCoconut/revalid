@@ -149,3 +149,56 @@ def test_generate_empty_plan_settles_failed_and_blocks_approval() -> None:
         # A failed version is not approvable and never runs (AC1).
         assert client.post("/api/findings/1/plan/approve").status_code == 409
         assert client.post("/api/findings/1/retest").status_code == 409
+
+
+def test_generation_records_operator_instructions() -> None:
+    # FR-04 (ADR-0023): the {instructions} body is recorded in the plan lineage.
+    with _client(_token) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post("/api/findings/1/plan", json={"instructions": "also check /admin"})
+        assert started.status_code == 202
+        assert started.json()["raw"]["instructions"] == "also check /admin"
+        assert client.get("/api/findings/1/plans").json()[-1]["raw"]["instructions"] == (
+            "also check /admin"
+        )
+
+
+def test_regenerate_supersedes_approved_and_blocks_retest_until_reapproved() -> None:
+    # ADR-0023: re-POSTing /plan while approved supersedes the approved version;
+    # nothing runs until the fresh plan is approved again (FR-05 gate preserved).
+    with _client(_token) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")
+        assert client.post("/api/findings/1/plan/approve").json()["status"] == "approved"
+
+        assert client.post("/api/findings/1/plan").status_code == 202  # regenerate
+        assert client.post("/api/findings/1/retest").status_code == 409  # approved gone
+        statuses = {p["version"]: p["status"] for p in client.get("/api/findings/1/plans").json()}
+        assert statuses == {1: "superseded", 2: "proposed"}
+
+        client.post("/api/findings/1/plan/approve")
+        assert client.post("/api/findings/1/retest").json()[0]["plan_version"] == 2
+
+
+def test_revise_unapproves_into_editable_proposal() -> None:
+    # ADR-0023: revise supersedes the approved plan into an editable proposed copy.
+    with _client(_token) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")
+        client.post("/api/findings/1/plan/approve")
+
+        revised = client.post("/api/findings/1/plan/revise")
+        assert revised.status_code == 200
+        assert revised.json()["status"] == "proposed"
+        assert revised.json()["origin"] == "revised"
+        # un-approved: retest refused until re-approval (AC1).
+        assert client.post("/api/findings/1/retest").status_code == 409
+        statuses = {p["version"]: p["status"] for p in client.get("/api/findings/1/plans").json()}
+        assert statuses == {1: "superseded", 2: "proposed"}
+
+
+def test_revise_without_approved_plan_is_409() -> None:
+    with _client(_token) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        client.post("/api/findings/1/plan")  # proposed, not approved
+        assert client.post("/api/findings/1/plan/revise").status_code == 409

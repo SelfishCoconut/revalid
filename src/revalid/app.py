@@ -34,6 +34,7 @@ from revalid.approval import (
     finish_plan_generation,
     list_plans,
     reject_plan,
+    revise_plan,
     start_plan_generation,
 )
 from revalid.audit import rederive_run
@@ -94,6 +95,12 @@ class AuditOut(BaseModel):
     reproduced: int
     ok: bool
     discrepancies: list[DiscrepancyOut]
+
+
+class PlanRequest(BaseModel):
+    """Optional body for plan generation: operator guidance for this run (FR-04)."""
+
+    instructions: str = ""
 
 
 class PlanOut(BaseModel):
@@ -305,6 +312,7 @@ def run_plan_generation(
     finding_id: int,
     plan_id: int,
     agent: Agent[None, list[PlannedAction]],
+    instructions: str = "",
 ) -> None:
     """Generate the reserved plan version's actions and settle it (FR-04, ADR-0022).
 
@@ -319,13 +327,16 @@ def run_plan_generation(
         finding_id: The finding being planned.
         plan_id: The reserved ``generating`` version to fill in.
         agent: The plan agent (a stand-in model in tests).
+        instructions: Optional operator guidance for this generation (ADR-0023).
     """
     with sessions() as session:
         finding = session.get(FindingRecord, finding_id)
         if finding is None:  # pragma: no cover - the row was just committed
             return
         try:
-            result = generate_plan(agent, finding.to_domain(), load_allowlist(), lab_base_url())
+            result = generate_plan(
+                agent, finding.to_domain(), load_allowlist(), lab_base_url(), instructions
+            )
         except Exception as exc:
             result = PlanResult(
                 plan=RetestPlan(finding_title=finding.title),
@@ -372,6 +383,15 @@ def _reject_plan(session: Session, finding_id: int) -> PlanOut:
         raise HTTPException(status_code=409, detail="no proposed plan to reject") from exc
 
 
+def _revise_plan(session: Session, finding_id: int) -> PlanOut:
+    """Un-approve the approved plan back into an editable proposed copy (ADR-0023)."""
+    finding = _get_finding_or_404(session, finding_id)
+    try:
+        return PlanOut.from_record(revise_plan(session, finding_id, finding_title=finding.title))
+    except PlanNotApprovedError as exc:
+        raise HTTPException(status_code=409, detail="no approved plan to revise") from exc
+
+
 def _list_plans(session: Session, finding_id: int) -> list[PlanOut]:
     """List all plan versions for a finding (FR-05)."""
     _get_finding_or_404(session, finding_id)
@@ -413,7 +433,7 @@ def _retest_finding(
 def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register ``/health`` and the FR-02 finding import/list routes.
 
-    Split from :func:`_register_plan_and_retest_routes` purely to keep each
+    Split from :func:`_register_plan_routes` purely to keep each
     registration function's route-closure count under the mccabe gate (each
     nested route def adds to its enclosing function's measured complexity).
     Each registration function binds its own ``SessionDep``, closing over this
@@ -542,8 +562,8 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return ReportOut.from_record(report)
 
 
-def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
-    """Register the FR-05 plan lifecycle routes and the plan-driven retest/verdicts routes."""
+def _register_plan_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-05 plan lifecycle routes (generate/edit/approve/reject/revise/list)."""
 
     def get_session() -> Iterator[Session]:
         with sessions() as session:
@@ -557,16 +577,23 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
         background: BackgroundTasks,
         session: SessionDep,
         agent: PlanAgentDep,
+        body: PlanRequest | None = None,
     ) -> PlanOut:
         """Schedule background FR-04 plan generation; persist a ``generating`` version (ADR-0022).
 
         Returns ``202`` immediately with the reserved version so a reload always
         shows the real in-progress state; :func:`run_plan_generation` settles it
         to ``proposed``/``failed`` and the SPA polls ``/plans`` until it does.
+        This is also the *regenerate* path: it supersedes any live version — an
+        approved one included — so the operator can start over at any point
+        (ADR-0023). The optional ``instructions`` body steers this generation.
         """
         _get_finding_or_404(session, finding_id)
-        record = start_plan_generation(session, finding_id)
-        background.add_task(run_plan_generation, sessions, finding_id, record.id, agent)
+        instructions = body.instructions if body else ""
+        record = start_plan_generation(session, finding_id, instructions)
+        background.add_task(
+            run_plan_generation, sessions, finding_id, record.id, agent, instructions
+        )
         return PlanOut.from_record(record)
 
     @router.put("/findings/{finding_id}/plan", response_model=PlanOut)
@@ -586,10 +613,29 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
         """Reject the latest proposed plan version (FR-05)."""
         return _reject_plan(session, finding_id)
 
+    @router.post("/findings/{finding_id}/plan/revise", response_model=PlanOut)
+    def revise_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
+        """Un-approve the approved plan back into an editable proposed copy (ADR-0023)."""
+        return _revise_plan(session, finding_id)
+
     @router.get("/findings/{finding_id}/plans", response_model=list[PlanOut])
     def get_plans(finding_id: int, session: SessionDep) -> list[PlanOut]:
         """List all plan versions for a finding (FR-05)."""
         return _list_plans(session, finding_id)
+
+
+def _register_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the plan-driven retest, verdict-list, and FR-10 audit routes.
+
+    Split from :func:`_register_plan_routes` to keep each registration function's
+    nested-route count under the mccabe gate (see :func:`_register_core_routes`).
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
 
     @router.post("/findings/{finding_id}/retest", response_model=list[VerdictOut])
     def retest_finding(
@@ -735,7 +781,8 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
     _register_report_routes(api, sessions)
-    _register_plan_and_retest_routes(api, sessions)
+    _register_plan_routes(api, sessions)
+    _register_retest_routes(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)
     app.include_router(api)

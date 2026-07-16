@@ -7,12 +7,14 @@ from revalid.allowlist import TargetGuard
 from revalid.approval import (
     AllActionsRejectedError,
     NoProposedPlanError,
+    PlanNotApprovedError,
     approve_plan,
     approved_plan,
     edit_plan,
     finish_plan_generation,
     list_plans,
     reject_plan,
+    revise_plan,
     save_generated_plan,
     start_plan_generation,
 )
@@ -92,6 +94,49 @@ def test_finish_records_generation_error() -> None:
         assert settled is not None
         assert settled.status == PlanStatus.FAILED.value
         assert settled.error == "boom"
+
+
+def test_start_with_instructions_records_them_on_the_generating_row() -> None:
+    # FR-04 (ADR-0023): guidance is stored up front so it survives a failed settle.
+    with _session() as session:
+        record = start_plan_generation(session, 1, "also check /admin for IDOR")
+        assert record.raw["instructions"] == "also check /admin for IDOR"
+
+
+def test_regenerate_supersedes_an_approved_plan() -> None:
+    # ADR-0023: regenerating (start) at any point supersedes the live approved
+    # plan, so approved_plan() is None until the fresh plan is re-approved.
+    with _session() as session:
+        save_generated_plan(session, 1, _generated())
+        approve_plan(session, 1)
+        assert approved_plan(session, 1) is not None
+        start_plan_generation(session, 1)  # regenerate
+        assert approved_plan(session, 1) is None
+        statuses = {p.version: p.status for p in list_plans(session, 1)}
+        assert statuses == {1: PlanStatus.SUPERSEDED.value, 2: PlanStatus.GENERATING.value}
+
+
+def test_revise_unapproves_into_editable_proposed_copy() -> None:
+    # ADR-0023: revise supersedes the approved plan and re-proposes its probes.
+    with _session() as session:
+        save_generated_plan(session, 1, _generated())
+        approve_plan(session, 1)
+        revised = revise_plan(session, 1, finding_title="F")
+        assert revised.version == 2
+        assert revised.status == PlanStatus.PROPOSED.value
+        assert revised.origin == "revised"
+        assert [p.url for p in revised.probes()] == ["http://localhost:3000/rest/x"]
+        # the approved v1 is now history; nothing runs until re-approval (FR-05 gate).
+        assert approved_plan(session, 1) is None
+        statuses = {p.version: p.status for p in list_plans(session, 1)}
+        assert statuses == {1: PlanStatus.SUPERSEDED.value, 2: PlanStatus.PROPOSED.value}
+
+
+def test_revise_without_approved_plan_raises() -> None:
+    with _session() as session:
+        save_generated_plan(session, 1, _generated())  # proposed, not approved
+        with pytest.raises(PlanNotApprovedError):
+            revise_plan(session, 1, finding_title="F")
 
 
 def test_finish_is_a_noop_once_superseded() -> None:
