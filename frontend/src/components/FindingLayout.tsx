@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation, useParams } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom";
 
 import { useFindings } from "../hooks/useFindings";
 import type { FindingStageContext } from "../hooks/useFindingStage";
@@ -63,6 +63,15 @@ export function FindingLayout() {
   const reach = pipelineReach({ planned: hasPlan, approved, retested });
   const currentStage = STAGES[reach.current];
   const segment = location.pathname.split("/").pop();
+
+  // Deep-linking to a stage ahead of progress (e.g. /approve before a plan
+  // exists) would strand the operator on a not-yet-actionable stage — send them
+  // to the current stage instead, matching the index route (#83, ADR-0024).
+  const requestedIndex = isStage(segment) ? STAGES.indexOf(segment) : -1;
+  if (requestedIndex > reach.current) {
+    return <Navigate to={`/findings/${String(findingId)}/${currentStage}`} replace />;
+  }
+
   const activeStage = isStage(segment) ? segment : currentStage;
 
   const context: FindingStageContext = {
