@@ -80,7 +80,12 @@ def test_retest_refused_until_approved_then_executes() -> None:
         # AC1: no approved plan -> 409, and nothing executes.
         assert client.post("/api/findings/1/retest").status_code == 409
 
-        assert client.post("/api/findings/1/plan").json()["status"] == "proposed"
+        # Generation is async (ADR-0022): the POST returns 202 with an in-flight
+        # version; the background task settles it to proposed before the reply lands.
+        started = client.post("/api/findings/1/plan")
+        assert started.status_code == 202
+        assert started.json()["status"] == "generating"
+        assert client.get("/api/findings/1/plans").json()[-1]["status"] == "proposed"
         assert client.post("/api/findings/1/plan/approve").json()["status"] == "approved"
 
         verdicts = client.post("/api/findings/1/retest").json()
@@ -132,9 +137,15 @@ def test_reject_blocks_execution() -> None:
         assert client.post("/api/findings/1/plan/reject").status_code == 409
 
 
-def test_generate_empty_plan_is_422_and_not_persisted() -> None:
+def test_generate_empty_plan_settles_failed_and_blocks_approval() -> None:
     with _client(_token, plan_actions=()) as client:
         client.post("/api/findings/import", json=_IMPORT)
-        assert client.post("/api/findings/1/plan").status_code == 422
-        # nothing persisted: an empty plan must not be a savable/approvable proposal
-        assert client.get("/api/findings/1/plans").json() == []
+        # Async generation (ADR-0022): the 202 reserves a version; an empty plan
+        # settles it to failed (with the reason) rather than raising 422 up front.
+        assert client.post("/api/findings/1/plan").status_code == 202
+        [plan] = client.get("/api/findings/1/plans").json()
+        assert plan["status"] == "failed"
+        assert plan["error"] == "no runnable actions could be planned for this finding"
+        # A failed version is not approvable and never runs (AC1).
+        assert client.post("/api/findings/1/plan/approve").status_code == 409
+        assert client.post("/api/findings/1/retest").status_code == 409

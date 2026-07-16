@@ -1,9 +1,22 @@
 import type { Plan, Verdict, VerdictStatus } from "../api/types";
 
-/** The plan the workflow acts on: newest version that is proposed or approved. */
-export function activePlan(plans: Plan[]): Plan | undefined {
+/** Statuses the detail view still surfaces (superseded/rejected are history). */
+const LIVE_PLAN_STATUSES = new Set<Plan["status"]>([
+  "generating",
+  "proposed",
+  "approved",
+  "failed",
+]);
+
+/**
+ * The plan the detail view acts on: the newest version that is still live — in
+ * flight (`generating`), awaiting a decision (`proposed`), decided (`approved`),
+ * or `failed` (shown so the user can see why and retry). Superseded and rejected
+ * versions are history and never surface here.
+ */
+export function currentPlan(plans: Plan[]): Plan | undefined {
   return plans
-    .filter((plan) => plan.status === "proposed" || plan.status === "approved")
+    .filter((plan) => LIVE_PLAN_STATUSES.has(plan.status))
     .reduce<Plan | undefined>(
       (latest, plan) => (!latest || plan.version > latest.version ? plan : latest),
       undefined,
@@ -36,8 +49,14 @@ export function verdictCounts(verdicts: Verdict[]): Record<VerdictStatus, number
 /**
  * How far a finding has advanced along the fixed pipeline
  * (extract → plan → approve → retest → verdict). Cumulative and monotonic: a
- * later state implies the earlier ones happened. Returns the per-stage reached
- * flags and the index of the furthest reached stage.
+ * later state implies the earlier ones happened.
+ *
+ * Returns the per-stage `reached` flags plus two indices with distinct jobs:
+ * `furthest` is the last *completed* stage (drives the progress fill), while
+ * `current` is the stage the finding is *acting on now* — the first not-yet-
+ * reached stage, i.e. the next thing to do. So on the generate-plan screen
+ * (nothing done yet) `current` is `plan`, not `extract`. Once every stage is
+ * reached the two coincide on the final `verdict` node.
  */
 export function pipelineReach({
   planned,
@@ -47,7 +66,7 @@ export function pipelineReach({
   planned: boolean;
   approved: boolean;
   retested: boolean;
-}): { reached: boolean[]; current: number } {
+}): { reached: boolean[]; furthest: number; current: number } {
   const reached = [
     true,
     planned || approved || retested,
@@ -55,5 +74,10 @@ export function pipelineReach({
     retested,
     retested,
   ];
-  return { reached, current: reached.lastIndexOf(true) };
+  const nextUnreached = reached.indexOf(false);
+  return {
+    reached,
+    furthest: reached.lastIndexOf(true),
+    current: nextUnreached === -1 ? reached.length - 1 : nextUnreached,
+  };
 }

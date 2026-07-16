@@ -10,9 +10,11 @@ from revalid.approval import (
     approve_plan,
     approved_plan,
     edit_plan,
+    finish_plan_generation,
     list_plans,
     reject_plan,
     save_generated_plan,
+    start_plan_generation,
 )
 from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
 from revalid.domain import Finding, PlanStatus, Probe, RetestPlan, Severity
@@ -49,6 +51,73 @@ def test_generate_creates_proposed_v1() -> None:
         assert record.version == 1
         assert record.status == PlanStatus.PROPOSED.value
         assert record.origin == "generated"
+
+
+def test_start_reserves_generating_v1() -> None:
+    with _session() as session:
+        record = start_plan_generation(session, 1)
+        assert record.version == 1
+        assert record.status == PlanStatus.GENERATING.value
+        assert record.origin == "generated"
+        assert record.actions == []
+
+
+def test_finish_settles_generating_to_proposed_in_place() -> None:
+    with _session() as session:
+        started = start_plan_generation(session, 1)
+        settled = finish_plan_generation(session, started.id, _generated())
+        assert settled is not None
+        # Same row, same version — filled in place so the poll transitions cleanly.
+        assert settled.id == started.id
+        assert settled.version == 1
+        assert settled.status == PlanStatus.PROPOSED.value
+        assert [p.url for p in settled.probes()] == ["http://localhost:3000/rest/x"]
+
+
+def test_finish_with_no_actions_marks_failed_with_reason() -> None:
+    empty = PlanResult(plan=RetestPlan(finding_title="F"))
+    with _session() as session:
+        started = start_plan_generation(session, 1)
+        settled = finish_plan_generation(session, started.id, empty)
+        assert settled is not None
+        assert settled.status == PlanStatus.FAILED.value
+        assert settled.error == "no runnable actions could be planned for this finding"
+
+
+def test_finish_records_generation_error() -> None:
+    failed = PlanResult(plan=RetestPlan(finding_title="F"), error="boom")
+    with _session() as session:
+        started = start_plan_generation(session, 1)
+        settled = finish_plan_generation(session, started.id, failed)
+        assert settled is not None
+        assert settled.status == PlanStatus.FAILED.value
+        assert settled.error == "boom"
+
+
+def test_finish_is_a_noop_once_superseded() -> None:
+    with _session() as session:
+        stale = start_plan_generation(session, 1)
+        # A newer generation supersedes the in-flight one before its result lands.
+        fresh = start_plan_generation(session, 1)
+        assert stale.status == PlanStatus.SUPERSEDED.value
+
+        # The stale result must not resurrect the superseded row.
+        assert finish_plan_generation(session, stale.id, _generated()) is None
+        by_version = {p.version: p.status for p in list_plans(session, 1)}
+        assert by_version[stale.version] == PlanStatus.SUPERSEDED.value
+        # The fresh in-flight version is untouched.
+        assert by_version[fresh.version] == PlanStatus.GENERATING.value
+
+
+def test_start_supersedes_a_live_proposal() -> None:
+    with _session() as session:
+        save_generated_plan(session, 1, _generated())  # proposed v1
+        start_plan_generation(session, 1)  # v2 generating supersedes it
+        statuses = {p.version: p.status for p in list_plans(session, 1)}
+        assert statuses == {
+            1: PlanStatus.SUPERSEDED.value,
+            2: PlanStatus.GENERATING.value,
+        }
 
 
 def test_approve_marks_approved_and_records_actor() -> None:

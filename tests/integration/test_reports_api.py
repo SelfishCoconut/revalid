@@ -75,8 +75,10 @@ def test_full_flow_operable_over_api(
     # 2. a finding from that report is now listed.
     finding_id = client.get("/api/findings", params={"report_id": report_id}).json()[0]["id"]
 
-    # 3. plan → approve → retest, every step over /api.
-    assert client.post(f"/api/findings/{finding_id}/plan").json()["status"] == "proposed"
+    # 3. plan → approve → retest, every step over /api. Generation is async
+    # (ADR-0022): the 202 reserves a version the background task settles to proposed.
+    assert client.post(f"/api/findings/{finding_id}/plan").status_code == 202
+    assert client.get(f"/api/findings/{finding_id}/plans").json()[-1]["status"] == "proposed"
     assert client.post(f"/api/findings/{finding_id}/plan/approve").json()["status"] == "approved"
     verdicts = client.post(f"/api/findings/{finding_id}/retest").json()
 

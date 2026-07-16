@@ -14,7 +14,7 @@ import { useFindings } from "../hooks/useFindings";
 import { useGeneratePlan, usePlans } from "../hooks/usePlans";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-import { activePlan } from "../lib/selectors";
+import { currentPlan } from "../lib/selectors";
 
 function DetailBlock({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -22,6 +22,69 @@ function DetailBlock({ label, children }: { label: string; children: ReactNode }
       <Eyebrow>{label}</Eyebrow>
       <div className="mt-1.5 text-sm leading-relaxed text-dim">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Shown when there is no live plan to edit — either none has been generated yet
+ * or the last attempt `failed`. Kicks off async generation (ADR-0022); the POST
+ * returns at once and the page polls until the reserved version settles.
+ */
+function PlanStartPanel({
+  findingId,
+  failedError,
+}: {
+  findingId: number;
+  failedError: string | null;
+}) {
+  const generate = useGeneratePlan(findingId);
+  return (
+    <Panel>
+      <PanelHeader eyebrow="Retest plan" />
+      <div className="p-4">
+        {failedError !== null ? (
+          <p className="text-sm text-danger-fg">Plan generation failed: {failedError}</p>
+        ) : (
+          <p className="text-sm text-dim">
+            No plan yet. Generate one to propose gated retest actions.
+          </p>
+        )}
+        <Button
+          className="mt-3"
+          disabled={generate.isPending}
+          onClick={() => {
+            generate.mutate();
+          }}
+        >
+          {generate.isPending
+            ? "Generating…"
+            : failedError !== null
+              ? "Try again"
+              : "Generate plan"}
+        </Button>
+        {generate.isError && (
+          <p role="alert" className="mt-2 text-sm text-danger-fg">
+            {errorMessage(generate.error)}
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** In-flight generation: the background task is proposing actions (ADR-0022). */
+function PlanGeneratingPanel() {
+  return (
+    <Panel>
+      <PanelHeader eyebrow="Retest plan" />
+      <div className="p-4">
+        <Spinner label="Generating retest plan…" />
+        <p className="mt-2 text-sm text-faint">
+          The model is proposing gated retest actions. This runs in the background — you can
+          leave this page and the plan will be here when you return.
+        </p>
+      </div>
+    </Panel>
   );
 }
 
@@ -33,7 +96,6 @@ export function FindingDetail() {
   const findings = useFindings();
   const plans = usePlans(findingId);
   const verdicts = useVerdicts();
-  const generate = useGeneratePlan(findingId);
 
   if (findings.isPending) {
     return <Spinner label="Loading finding" />;
@@ -52,7 +114,13 @@ export function FindingDetail() {
   }
 
   const planList = plans.data ?? [];
-  const current = activePlan(planList);
+  const current = currentPlan(planList);
+  // "Planned" means a plan actually reached the proposed stage — an in-flight
+  // `generating` or a `failed` attempt has not, so the pipeline still shows
+  // `plan` as the current action.
+  const hasPlan = planList.some(
+    (plan) => plan.status !== "generating" && plan.status !== "failed",
+  );
   const findingVerdicts = (verdicts.data ?? [])
     .filter((verdict) => verdict.finding_id === findingId)
     .sort((a, b) => b.id - a.id);
@@ -110,7 +178,7 @@ export function FindingDetail() {
         </div>
         <div className="border-t border-line bg-panel-2/30 px-4 py-4">
           <PipelineTrack
-            planned={planList.length > 0}
+            planned={hasPlan}
             approved={
               planList.some((plan) => plan.status === "approved") ||
               findingVerdicts.length > 0
@@ -125,31 +193,15 @@ export function FindingDetail() {
         <Panel className="p-4">
           <Spinner label="Loading plan" />
         </Panel>
-      ) : current ? (
+      ) : current?.status === "generating" ? (
+        <PlanGeneratingPanel />
+      ) : current && (current.status === "proposed" || current.status === "approved") ? (
         <PlanEditor findingId={findingId} plan={current} />
       ) : (
-        <Panel>
-          <PanelHeader eyebrow="Retest plan" />
-          <div className="p-4">
-            <p className="text-sm text-dim">
-              No plan yet. Generate one to propose gated retest actions.
-            </p>
-            <Button
-              className="mt-3"
-              disabled={generate.isPending}
-              onClick={() => {
-                generate.mutate();
-              }}
-            >
-              {generate.isPending ? "Generating…" : "Generate plan"}
-            </Button>
-            {generate.isError && (
-              <p role="alert" className="mt-2 text-sm text-danger-fg">
-                {errorMessage(generate.error)}
-              </p>
-            )}
-          </div>
-        </Panel>
+        <PlanStartPanel
+          findingId={findingId}
+          failedError={current?.status === "failed" ? current.error : null}
+        />
       )}
 
       <Panel>

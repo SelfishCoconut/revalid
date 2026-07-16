@@ -22,6 +22,7 @@ export const STATUS_META: Record<KnownStatus, { tone: Tone; label: string }> = {
   ready: { tone: "ok", label: "ready" },
   failed: { tone: "danger", label: "failed" },
   // Plan — the AI proposes; the human/gate decides.
+  generating: { tone: "iris", label: "generating" },
   proposed: { tone: "iris", label: "proposed" },
   approved: { tone: "ok", label: "approved" },
   rejected: { tone: "danger", label: "rejected" },

@@ -122,12 +122,22 @@ class RetestPlan(BaseModel):
 
 
 class PlanStatus(enum.StrEnum):
-    """Lifecycle state of a persisted retest-plan version (FR-05)."""
+    """Lifecycle state of a persisted retest-plan version (FR-05).
 
+    A version is born ``GENERATING`` when FR-04 generation is scheduled in the
+    background (ADR-0022) and always settles: to ``PROPOSED`` once its gated
+    actions are persisted, or ``FAILED`` (with the error recorded) if the model
+    produced nothing runnable — so the UI's plan poll always terminates, exactly
+    as an uploaded report's does. A user edit inserts a ``PROPOSED`` version
+    directly (no generation), and the approve/reject decision moves it on.
+    """
+
+    GENERATING = "generating"
     PROPOSED = "proposed"
     APPROVED = "approved"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
+    FAILED = "failed"
 
 
 class ReportStatus(enum.StrEnum):

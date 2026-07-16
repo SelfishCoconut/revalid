@@ -15,6 +15,7 @@ const proposedPlan: Plan = {
   version: 1,
   status: "proposed",
   origin: "llm",
+  error: null,
   actions: [
     {
       kind: "sqli_login_bypass",

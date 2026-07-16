@@ -65,7 +65,13 @@ export interface RejectedAction {
   reason: string;
 }
 
-export type PlanStatus = "proposed" | "approved" | "rejected" | "superseded";
+export type PlanStatus =
+  | "generating"
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "superseded"
+  | "failed";
 
 export interface Plan {
   id: number;
@@ -73,6 +79,8 @@ export interface Plan {
   version: number;
   status: PlanStatus;
   origin: string;
+  /** Set only on a `failed` version: why background generation produced no plan. */
+  error: string | null;
   actions: Probe[];
   rejected_actions: RejectedAction[];
   raw: Record<string, unknown>;

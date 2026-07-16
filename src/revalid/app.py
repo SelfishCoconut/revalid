@@ -31,9 +31,10 @@ from revalid.approval import (
     approve_plan,
     edit_plan,
     execute_approved_plan,
+    finish_plan_generation,
     list_plans,
     reject_plan,
-    save_generated_plan,
+    start_plan_generation,
 )
 from revalid.audit import rederive_run
 from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, make_browser_runner
@@ -45,13 +46,13 @@ from revalid.db import (
     create_db_engine,
     session_factory,
 )
-from revalid.domain import Finding, Probe, ReportStatus, Settings, Verdict
+from revalid.domain import Finding, Probe, ReportStatus, RetestPlan, Settings, Verdict
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
 from revalid.ingest import IngestError, map_defectdojo_export
 from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
-from revalid.plan import PlannedAction, RejectedAction, build_plan_agent, generate_plan
+from revalid.plan import PlannedAction, PlanResult, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
 from revalid.sanity import PlanDeviationError
 from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
@@ -103,6 +104,7 @@ class PlanOut(BaseModel):
     version: int
     status: str
     origin: str
+    error: str | None
     actions: tuple[Probe, ...]
     rejected_actions: tuple[RejectedAction, ...]
     raw: dict[str, Any]
@@ -118,6 +120,7 @@ class PlanOut(BaseModel):
             version=record.version,
             status=record.status,
             origin=record.origin,
+            error=record.error,
             actions=record.probes(),
             rejected_actions=tuple(
                 RejectedAction.model_validate(item) for item in record.rejected_actions
@@ -297,19 +300,38 @@ def _get_finding_or_404(session: Session, finding_id: int) -> FindingRecord:
     return finding
 
 
-def _generate_plan(
-    session: Session, finding_id: int, agent: Agent[None, list[PlannedAction]]
-) -> PlanOut:
-    """Generate a retest plan (FR-04) and persist it as a proposed version (FR-05)."""
-    finding = _get_finding_or_404(session, finding_id)
-    result = generate_plan(agent, finding.to_domain(), load_allowlist(), lab_base_url())
-    if result.error:
-        raise HTTPException(status_code=422, detail=f"plan generation failed: {result.error}")
-    if not result.plan.actions:
-        raise HTTPException(
-            status_code=422, detail="no runnable actions could be planned for this finding"
-        )
-    return PlanOut.from_record(save_generated_plan(session, finding_id, result))
+def run_plan_generation(
+    sessions: sessionmaker[Session],
+    finding_id: int,
+    plan_id: int,
+    agent: Agent[None, list[PlannedAction]],
+) -> None:
+    """Generate the reserved plan version's actions and settle it (FR-04, ADR-0022).
+
+    Runs as a FastAPI background task — a sync function on Starlette's threadpool
+    — so it opens its **own** session (the request session closed with the
+    ``202``) and never blocks the event loop. It always moves the ``generating``
+    row on: to ``proposed`` with its gated actions, or ``failed`` with the
+    reason, so the SPA's plan poll terminates exactly like the report poll does.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        finding_id: The finding being planned.
+        plan_id: The reserved ``generating`` version to fill in.
+        agent: The plan agent (a stand-in model in tests).
+    """
+    with sessions() as session:
+        finding = session.get(FindingRecord, finding_id)
+        if finding is None:  # pragma: no cover - the row was just committed
+            return
+        try:
+            result = generate_plan(agent, finding.to_domain(), load_allowlist(), lab_base_url())
+        except Exception as exc:
+            result = PlanResult(
+                plan=RetestPlan(finding_title=finding.title),
+                error=f"plan generation failed: {exc}",
+            )
+        finish_plan_generation(session, plan_id, result)
 
 
 def _edit_plan(session: Session, finding_id: int, actions: list[PlannedAction]) -> PlanOut:
@@ -529,10 +551,23 @@ def _register_plan_and_retest_routes(router: APIRouter, sessions: sessionmaker[S
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
 
-    @router.post("/findings/{finding_id}/plan", response_model=PlanOut)
-    def create_plan(finding_id: int, session: SessionDep, agent: PlanAgentDep) -> PlanOut:
-        """Generate a retest plan (FR-04) and persist it as a proposed version (FR-05)."""
-        return _generate_plan(session, finding_id, agent)
+    @router.post("/findings/{finding_id}/plan", response_model=PlanOut, status_code=202)
+    def create_plan(
+        finding_id: int,
+        background: BackgroundTasks,
+        session: SessionDep,
+        agent: PlanAgentDep,
+    ) -> PlanOut:
+        """Schedule background FR-04 plan generation; persist a ``generating`` version (ADR-0022).
+
+        Returns ``202`` immediately with the reserved version so a reload always
+        shows the real in-progress state; :func:`run_plan_generation` settles it
+        to ``proposed``/``failed`` and the SPA polls ``/plans`` until it does.
+        """
+        _get_finding_or_404(session, finding_id)
+        record = start_plan_generation(session, finding_id)
+        background.add_task(run_plan_generation, sessions, finding_id, record.id, agent)
+        return PlanOut.from_record(record)
 
     @router.put("/findings/{finding_id}/plan", response_model=PlanOut)
     def edit_plan_endpoint(
