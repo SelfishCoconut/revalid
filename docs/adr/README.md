@@ -31,3 +31,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0025](0025-agentic-retest-console.md) | Agentic retest console (Slice 0): egress-locked sandbox, deferred-tool gating, transcript audit (supersedes FR-04/05/07-09 over time) | proposed | 2026-07-16 |
 | [0026](0026-operator-manual-commands-no-shared-pty.md) | Operator manual commands (`!`) via discrete exec — not a shared PTY; agent observes them on its next turn | proposed | 2026-07-16 |
 | [0027](0027-agentic-retest-guiding-plan.md) | Agentic retest guiding plan: a gated `set_plan` tool (every plan change human-approved, reuses the command gate, budget-exempt) | proposed | 2026-07-16 |
+| [0028](0028-agentic-retest-chat-steering.md) | Agentic retest chat steering & Q&A: pure-queue messages delivered as a first-class user turn on the next decision; non-gated `respond` tool for prose | proposed | 2026-07-16 |
