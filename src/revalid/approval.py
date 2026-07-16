@@ -70,6 +70,18 @@ def _proposed_rows(session: Session, finding_id: int) -> list[PlanRecord]:
     )
 
 
+def _live_proposal_rows(session: Session, finding_id: int) -> list[PlanRecord]:
+    """Rows a new proposal supersedes: the in-flight or still-proposed versions."""
+    return list(
+        session.scalars(
+            select(PlanRecord).where(
+                PlanRecord.finding_id == finding_id,
+                PlanRecord.status.in_((PlanStatus.GENERATING.value, PlanStatus.PROPOSED.value)),
+            )
+        )
+    )
+
+
 def _next_version(session: Session, finding_id: int) -> int:
     versions = session.scalars(
         select(PlanRecord.version).where(PlanRecord.finding_id == finding_id)
@@ -104,6 +116,58 @@ def _persist_proposed(
 def save_generated_plan(session: Session, finding_id: int, result: PlanResult) -> PlanRecord:
     """Persist an FR-04 generation result as a new proposed version."""
     return _persist_proposed(session, finding_id, result.plan, "generated", list(result.rejected))
+
+
+def start_plan_generation(session: Session, finding_id: int) -> PlanRecord:
+    """Insert an in-flight ``generating`` version and supersede any live proposal (ADR-0022).
+
+    The synchronous half of async FR-04 generation: it reserves the version the
+    background task will fill (:func:`finish_plan_generation`) so the API can
+    return immediately and a reload always shows the real in-progress state.
+    """
+    for row in _live_proposal_rows(session, finding_id):
+        row.status = PlanStatus.SUPERSEDED.value
+    record = PlanRecord(
+        finding_id=finding_id,
+        version=_next_version(session, finding_id),
+        status=PlanStatus.GENERATING.value,
+        origin="generated",
+        actions=[],
+        rejected_actions=[],
+        raw={},
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def finish_plan_generation(session: Session, plan_id: int, result: PlanResult) -> PlanRecord | None:
+    """Settle a ``generating`` version from its FR-04 result (ADR-0022).
+
+    Moves the row out of ``generating``: to ``proposed`` with its gated actions,
+    or ``failed`` with the reason recorded when the model produced nothing
+    runnable — so the plan poll always terminates. Returns ``None`` if the row
+    vanished or a newer generation already superseded it (a stale result must
+    never resurrect a superseded version).
+    """
+    record = session.get(PlanRecord, plan_id)
+    if record is None or record.status != PlanStatus.GENERATING.value:
+        return None
+    error = result.error or (
+        "" if result.plan.actions else "no runnable actions could be planned for this finding"
+    )
+    if error:
+        record.status = PlanStatus.FAILED.value
+        record.error = error
+    else:
+        record.status = PlanStatus.PROPOSED.value
+        record.actions = [action.model_dump() for action in result.plan.actions]
+        record.rejected_actions = [r.model_dump() for r in result.rejected]
+        record.raw = result.plan.raw
+    session.commit()
+    session.refresh(record)
+    return record
 
 
 def edit_plan(

@@ -22,7 +22,7 @@ export function PipelineTrack({
   retested: boolean;
   verdict?: VerdictStatus;
 }) {
-  const { reached, current } = pipelineReach({ planned, approved, retested });
+  const { reached, furthest, current } = pipelineReach({ planned, approved, retested });
 
   return (
     <div className="overflow-x-auto px-1 py-1">
@@ -31,7 +31,7 @@ export function PipelineTrack({
         <div className="absolute inset-x-[10%] top-[13px] h-px bg-line" />
         <div
           className="rev-grow absolute top-[13px] left-[10%] h-px bg-iris/60"
-          style={{ width: `${String(current * 20)}%` }}
+          style={{ width: `${String(furthest * 20)}%` }}
         />
 
         <ol className="relative grid grid-cols-5">
@@ -47,6 +47,12 @@ export function PipelineTrack({
             } else if (isReached) {
               ring = TONE_RING.iris;
               fill = TONE_FILL.iris;
+            } else if (isCurrent) {
+              // The next action — the live node; the iris ring marks "you are here",
+              // and the dot pulses below. The rail fill stops short of it (furthest),
+              // so it reads as in-progress rather than done.
+              ring = TONE_RING.iris;
+              fill = TONE_FILL.iris;
             }
             return (
               <li key={stage} className="flex flex-col items-center gap-2">
@@ -58,7 +64,7 @@ export function PipelineTrack({
                   />
                 </span>
                 <span
-                  className={`font-mono text-[10px] uppercase tracking-[0.14em] ${isReached ? "text-dim" : "text-faint"}`}
+                  className={`font-mono text-[10px] uppercase tracking-[0.14em] ${isReached || isCurrent ? "text-dim" : "text-faint"}`}
                 >
                   {stage}
                 </span>

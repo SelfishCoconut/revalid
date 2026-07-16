@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Plan, Verdict, VerdictStatus } from "../api/types";
-import { activePlan, latestVerdict, pipelineReach, verdictCounts } from "./selectors";
+import { currentPlan, latestVerdict, pipelineReach, verdictCounts } from "./selectors";
 
 function makePlan(overrides: Partial<Plan>): Plan {
   return {
@@ -10,6 +10,7 @@ function makePlan(overrides: Partial<Plan>): Plan {
     version: 1,
     status: "proposed",
     origin: "llm",
+    error: null,
     actions: [],
     rejected_actions: [],
     raw: {},
@@ -42,19 +43,32 @@ function makeVerdict(overrides: Partial<Verdict>): Verdict {
   };
 }
 
-describe("activePlan", () => {
+describe("currentPlan", () => {
   it("returns undefined when there are no plans", () => {
-    expect(activePlan([])).toBeUndefined();
+    expect(currentPlan([])).toBeUndefined();
   });
 
-  it("picks the newest version among proposed or approved plans, in any order", () => {
+  it("picks the newest version among live plans, in any order", () => {
     // Up-then-down (v1 → v3 → v2) exercises both comparator directions.
     const plans = [
       makePlan({ version: 1, status: "approved" }),
       makePlan({ version: 3, status: "proposed" }),
       makePlan({ version: 2, status: "approved" }),
     ];
-    expect(activePlan(plans)?.version).toBe(3);
+    expect(currentPlan(plans)?.version).toBe(3);
+  });
+
+  it("surfaces an in-flight generating version", () => {
+    const plans = [
+      makePlan({ version: 1, status: "superseded" }),
+      makePlan({ version: 2, status: "generating" }),
+    ];
+    expect(currentPlan(plans)?.status).toBe("generating");
+  });
+
+  it("surfaces a failed version so the user can retry", () => {
+    const plans = [makePlan({ version: 1, status: "failed", error: "no actions" })];
+    expect(currentPlan(plans)?.error).toBe("no actions");
   });
 
   it("ignores rejected and superseded versions even when they are newer", () => {
@@ -63,12 +77,12 @@ describe("activePlan", () => {
       makePlan({ version: 2, status: "rejected" }),
       makePlan({ version: 3, status: "superseded" }),
     ];
-    expect(activePlan(plans)?.version).toBe(1);
+    expect(currentPlan(plans)?.version).toBe(1);
   });
 
-  it("returns undefined when every plan is decided", () => {
+  it("returns undefined when every plan is rejected or superseded", () => {
     const plans = [makePlan({ version: 1, status: "rejected" })];
-    expect(activePlan(plans)).toBeUndefined();
+    expect(currentPlan(plans)).toBeUndefined();
   });
 });
 
@@ -102,27 +116,41 @@ describe("verdictCounts", () => {
 });
 
 describe("pipelineReach", () => {
-  it("reaches only extract before any action", () => {
+  it("marks plan as the current action before any plan exists", () => {
+    // Only extract is done; the live node is the next step (plan), not extract.
     expect(pipelineReach({ planned: false, approved: false, retested: false })).toEqual({
       reached: [true, false, false, false, false],
-      current: 0,
+      furthest: 0,
+      current: 1,
     });
   });
 
-  it("advances to plan once a plan exists", () => {
-    const { reached, current } = pipelineReach({ planned: true, approved: false, retested: false });
+  it("advances the current action to approve once a plan exists", () => {
+    const { reached, furthest, current } = pipelineReach({
+      planned: true,
+      approved: false,
+      retested: false,
+    });
     expect(reached).toEqual([true, true, false, false, false]);
-    expect(current).toBe(1);
+    expect(furthest).toBe(1); // plan completed → fill reaches plan
+    expect(current).toBe(2); // next action is approve
   });
 
-  it("advances to approve once approved", () => {
-    expect(pipelineReach({ planned: true, approved: true, retested: false }).current).toBe(2);
+  it("advances the current action to retest once approved", () => {
+    const { furthest, current } = pipelineReach({
+      planned: true,
+      approved: true,
+      retested: false,
+    });
+    expect(furthest).toBe(2);
+    expect(current).toBe(3);
   });
 
-  it("lights the whole track once retested, monotonically", () => {
+  it("lights the whole track once retested, current settling on verdict", () => {
     // `retested` implies the earlier stages even if their flags were not passed.
     expect(pipelineReach({ planned: false, approved: false, retested: true })).toEqual({
       reached: [true, true, true, true, true],
+      furthest: 4,
       current: 4,
     });
   });

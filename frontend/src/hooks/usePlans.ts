@@ -11,12 +11,18 @@ import {
 import type { Plan, PlannedAction, Verdict } from "../api/types";
 import { queryKeys } from "./queryKeys";
 
-/** Every plan version for a finding (the audit trail). */
+/**
+ * Every plan version for a finding (the audit trail). While a version is still
+ * `generating` in the background the query polls; polling stops automatically
+ * once it settles on `proposed`/`failed` — mirroring the report status poll.
+ */
 export function usePlans(findingId: number, enabled = true) {
   return useQuery({
     queryKey: queryKeys.plans(findingId),
     queryFn: () => listPlans(findingId),
     enabled: enabled && Number.isFinite(findingId),
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((plan) => plan.status === "generating") ? 2000 : false,
   });
 }
 

@@ -117,6 +117,9 @@ class PlanRecord(Base):
     actions: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     rejected_actions: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # Set only on a FAILED version: why background generation produced no plan
+    # (ADR-0022), mirroring ReportRecord.error for the async extraction job.
+    error: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     decided_by: Mapped[str | None] = mapped_column(String(32), default=None)
