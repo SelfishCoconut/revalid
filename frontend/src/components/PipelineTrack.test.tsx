@@ -1,52 +1,87 @@
-import userEvent from "@testing-library/user-event";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it } from "vitest";
 
-import { PipelineTrack } from "./PipelineTrack";
+import { PipelineTrack, type Stage } from "./PipelineTrack";
 
 const STAGES = ["extract", "plan", "approve", "retest", "verdict"];
 
+function renderTrack(props: {
+  planned: boolean;
+  approved: boolean;
+  retested: boolean;
+  verdict?: "still_open" | "fixed" | "inconclusive";
+  findingId: number;
+  activeStage: Stage;
+}) {
+  return render(
+    <MemoryRouter>
+      <PipelineTrack {...props} />
+    </MemoryRouter>,
+  );
+}
+
 describe("PipelineTrack", () => {
   it("renders every stage label at a mid-pipeline state", () => {
-    render(<PipelineTrack planned approved={false} retested={false} />);
+    renderTrack({
+      planned: true,
+      approved: false,
+      retested: false,
+      findingId: 7,
+      activeStage: "plan",
+    });
     for (const stage of STAGES) {
       expect(screen.getByText(stage)).toBeInTheDocument();
     }
   });
 
-  it("renders the full track once a verdict exists", () => {
-    render(<PipelineTrack planned approved retested verdict="fixed" />);
+  it("colours the final node from the verdict once retested", () => {
+    renderTrack({
+      planned: true,
+      approved: true,
+      retested: true,
+      verdict: "fixed",
+      findingId: 7,
+      activeStage: "verdict",
+    });
     for (const stage of STAGES) {
       expect(screen.getByText(stage)).toBeInTheDocument();
     }
   });
 
-  it("makes a reached stage with a back-action a clickable button (ADR-0023)", async () => {
-    const onPlan = vi.fn();
-    render(
-      <PipelineTrack
-        planned
-        approved={false}
-        retested={false}
-        onStageBack={{ plan: onPlan }}
-      />,
+  it("links reached and current stages, leaving not-yet-reached stages inert", () => {
+    renderTrack({
+      planned: true,
+      approved: false,
+      retested: false,
+      findingId: 7,
+      activeStage: "plan",
+    });
+    // extract + plan are reached and approve is the current action → navigable.
+    expect(screen.getByRole("link", { name: /go to extract stage/i })).toHaveAttribute(
+      "href",
+      "/findings/7/extract",
     );
-    await userEvent.click(screen.getByRole("button", { name: /step back to plan/i }));
-    expect(onPlan).toHaveBeenCalledOnce();
+    expect(screen.getByRole("link", { name: /go to approve stage/i })).toBeInTheDocument();
+    // retest + verdict are not yet reached → not links.
+    expect(screen.queryByRole("link", { name: /go to retest stage/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /go to verdict stage/i })).not.toBeInTheDocument();
   });
 
-  it("ignores a back-action on a stage that is not yet reached", () => {
-    // `approve` is not reached when only planned — its handler must not wire a button.
-    render(
-      <PipelineTrack
-        planned
-        approved={false}
-        retested={false}
-        onStageBack={{ approve: vi.fn() }}
-      />,
+  it("marks the active stage with aria-current", () => {
+    renderTrack({
+      planned: true,
+      approved: false,
+      retested: false,
+      findingId: 7,
+      activeStage: "plan",
+    });
+    expect(screen.getByRole("link", { name: /go to plan stage/i })).toHaveAttribute(
+      "aria-current",
+      "step",
     );
-    expect(
-      screen.queryByRole("button", { name: /step back to approve/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /go to extract stage/i })).not.toHaveAttribute(
+      "aria-current",
+    );
   });
 });

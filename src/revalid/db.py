@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 from revalid.domain import (
     Evidence,
     Finding,
+    FindingOrigin,
     PlanStatus,
     Probe,
     RetestPlan,
@@ -54,11 +55,38 @@ class ReportRecord(Base):
 
 
 class FindingRecord(Base):
-    """Persisted row for a :class:`revalid.domain.Finding`."""
+    """Stable identity of a finding (FR-16, ADR-0024).
+
+    The finding's *content* lives in append-only :class:`FindingVersionRecord`
+    rows; this row is the stable handle that :attr:`PlanRecord.finding_id` and
+    :attr:`VerdictRecord.finding_id` reference, so amending a finding (appending a
+    new version) never orphans its plans or verdicts. Notes link back via
+    :attr:`FindingNoteRecord.finding_id`.
+    """
 
     __tablename__ = "findings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id"), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class FindingVersionRecord(Base):
+    """One immutable version of a finding's content (FR-16, ADR-0024).
+
+    Extraction/import lands version 1 (``origin=extraction``); each operator edit
+    appends a new version (``origin=edit``). The *current* version is the highest
+    ``version`` — older ones are kept, never mutated, exactly like a
+    :class:`PlanRecord` (ADR-0012). ``edited_by``/``reason`` capture the edit
+    lineage (FR-10); they stay ``None``/empty on the extraction version.
+    """
+
+    __tablename__ = "finding_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    version: Mapped[int]
+    origin: Mapped[str] = mapped_column(String(16))
     title: Mapped[str] = mapped_column(String(500))
     severity: Mapped[str] = mapped_column(String(16))
     description: Mapped[str]
@@ -67,12 +95,26 @@ class FindingRecord(Base):
     affected_endpoints: Mapped[list[str]] = mapped_column(JSON)
     reproduction_steps: Mapped[list[str]] = mapped_column(JSON)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON)
-    report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id"), default=None)
+    edited_by: Mapped[str | None] = mapped_column(String(32), default=None)
+    reason: Mapped[str] = mapped_column(default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     @classmethod
-    def from_domain(cls, finding: Finding, report_id: int | None = None) -> FindingRecord:
-        """Build a row from a domain finding, optionally linked to a report."""
+    def from_domain(
+        cls,
+        finding_id: int,
+        finding: Finding,
+        *,
+        version: int,
+        origin: FindingOrigin,
+        edited_by: str | None = None,
+        reason: str = "",
+    ) -> FindingVersionRecord:
+        """Build a version row from a domain finding (extraction or an edit)."""
         return cls(
+            finding_id=finding_id,
+            version=version,
+            origin=origin.value,
             title=finding.title,
             severity=finding.severity.value,
             description=finding.description,
@@ -81,11 +123,12 @@ class FindingRecord(Base):
             affected_endpoints=list(finding.affected_endpoints),
             reproduction_steps=list(finding.reproduction_steps),
             raw=finding.raw,
-            report_id=report_id,
+            edited_by=edited_by,
+            reason=reason,
         )
 
     def to_domain(self) -> Finding:
-        """Convert this row back to a domain finding."""
+        """Convert this version's content back to a domain finding."""
         return Finding(
             title=self.title,
             severity=Severity(self.severity),
@@ -96,6 +139,24 @@ class FindingRecord(Base):
             reproduction_steps=tuple(self.reproduction_steps),
             raw=self.raw,
         )
+
+
+class FindingNoteRecord(Base):
+    """One append-only, stage-tagged note on a finding (FR-16, ADR-0024).
+
+    Notes are the operator's reasoning trail: free text, tagged with the pipeline
+    stage it was written on (:class:`~revalid.domain.FindingStage`) and never
+    edited or deleted — history is kept, like every other record here.
+    """
+
+    __tablename__ = "finding_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    stage: Mapped[str] = mapped_column(String(16))
+    body: Mapped[str]
+    author: Mapped[str] = mapped_column(String(32), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class PlanRecord(Base):

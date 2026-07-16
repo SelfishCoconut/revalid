@@ -124,6 +124,16 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria**:
   - [~] One command produces the metrics table (correct / wrong / inconclusive per finding, totals, timing) from a run export. — harness shipped: `src/revalid/eval.py` (ADR-0017), `make eval EXPORT=… GROUND_TRUTH=…` (exit-code gated on NFR-01), `make demo-eval` offline. Matches an FR-12 export to a title-keyed ground truth and buckets each finding conservatively (an over-cautious *inconclusive* is a safe miss, not *wrong*). Pending FR-15 completion: Álvaro's real ground truth + a live-lab run for the reported figure.
 
+### FR-16 — Operator finding revision & annotation
+- **Priority**: Should · **Source**: change request 2026-07-16 (ADR-0024)
+- **Description**: The system shall let the operator amend and annotate an extracted finding without ever destroying history: (a) each edit records a new immutable finding **version** (extraction is version 1), symmetric with FR-05 plan versioning (ADR-0012) — the finding's stable **identity** is what plans and verdicts reference, so amendments never orphan them; and (b) the operator may attach **notes**, each timestamped and tagged with the pipeline stage it was written on, appended to a per-finding log.
+- **Acceptance criteria**:
+  - [ ] Editing a finding appends an immutable version (extraction = v1) and never mutates/deletes a prior version; `GET /api/findings/{id}/versions` returns the full ordered history.
+  - [ ] The finding views and `GET /api/findings` return the current version; existing plans/verdicts still resolve to the same finding after an edit (stable identity, no FK breakage).
+  - [ ] A note posted with a stage tag is appended to the finding's log and returned newest-first with its stage + timestamp; notes are append-only.
+  - [ ] The FR-12 export includes each finding's version history + notes; `SCHEMA_VERSION` is bumped and the published schema regenerated + drift-tested.
+- **Traces to**: issue #80, ADR-0024; enhances FR-11 (wizard surface), FR-02/FR-03 (finding model), FR-12 (export).
+
 ## 3. Non-functional requirements
 
 ### NFR-01 — Verdict reliability

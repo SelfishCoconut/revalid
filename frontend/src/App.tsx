@@ -2,13 +2,19 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 
 import { BrandMark } from "./components/BrandMark";
+import { FindingLayout } from "./components/FindingLayout";
 import { SidebarContent } from "./components/Sidebar";
 import { useTheme } from "./lib/theme";
-import { FindingDetail } from "./routes/FindingDetail";
 import { NewReport } from "./routes/NewReport";
 import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
 import Settings from "./routes/Settings";
+import { ApproveStage } from "./routes/stages/ApproveStage";
+import { ExtractStage } from "./routes/stages/ExtractStage";
+import { PlanStage } from "./routes/stages/PlanStage";
+import { RetestStage } from "./routes/stages/RetestStage";
+import { StageRedirect } from "./routes/stages/StageRedirect";
+import { VerdictStage } from "./routes/stages/VerdictStage";
 
 function MenuIcon() {
   return (
@@ -70,7 +76,14 @@ export function App() {
             <Route path="/" element={<ReportsOverview />} />
             <Route path="/new" element={<NewReport />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
-            <Route path="/findings/:id" element={<FindingDetail />} />
+            <Route path="/findings/:id" element={<FindingLayout />}>
+              <Route index element={<StageRedirect />} />
+              <Route path="extract" element={<ExtractStage />} />
+              <Route path="plan" element={<PlanStage />} />
+              <Route path="approve" element={<ApproveStage />} />
+              <Route path="retest" element={<RetestStage />} />
+              <Route path="verdict" element={<VerdictStage />} />
+            </Route>
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

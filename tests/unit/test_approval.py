@@ -18,8 +18,9 @@ from revalid.approval import (
     save_generated_plan,
     start_plan_generation,
 )
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Finding, PlanStatus, Probe, RetestPlan, Severity
+from revalid.findings import create_finding
 from revalid.plan import PlannedAction, PlanResult
 
 _GUARD = TargetGuard(frozenset({"http://localhost:3000/*"}))
@@ -36,7 +37,7 @@ _ACTION = PlannedAction(
 
 def _session() -> Session:
     session = session_factory(create_db_engine(IN_MEMORY))()
-    session.add(FindingRecord.from_domain(Finding(title="F", severity=Severity.HIGH)))
+    create_finding(session, Finding(title="F", severity=Severity.HIGH))
     session.commit()
     return session
 

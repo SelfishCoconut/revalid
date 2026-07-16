@@ -142,13 +142,14 @@ def _app_with_browser_plan() -> FastAPI:
     """Build an app whose shared engine holds an approved browser-XSS plan (FR-14)."""
     from revalid.approval import approve_plan, save_generated_plan
     from revalid.browser import stored_xss_probe
-    from revalid.db import FindingRecord, session_factory
+    from revalid.db import session_factory
     from revalid.domain import Finding, RetestPlan, Severity
+    from revalid.findings import create_finding
     from revalid.plan import PlanResult
 
     engine = create_db_engine(IN_MEMORY)
     session = session_factory(engine)()
-    session.add(FindingRecord.from_domain(Finding(title="DOM XSS", severity=Severity.HIGH)))
+    create_finding(session, Finding(title="DOM XSS", severity=Severity.HIGH))
     session.commit()
     probe = stored_xss_probe("http://localhost:3000")
     plan = RetestPlan(finding_title="DOM XSS", actions=(probe,), raw={"finding_title": "DOM XSS"})

@@ -25,6 +25,7 @@ from revalid.eval import (
 )
 from revalid.export import (
     FindingExport,
+    FindingVersionExport,
     Generator,
     ReportExport,
     RunExport,
@@ -41,8 +42,23 @@ _I = VerdictStatus.INCONCLUSIVE
 
 
 def _finding(fid: int, title: str) -> FindingExport:
+    finding = Finding(title=title, severity=Severity.HIGH)
     return FindingExport(
-        id=fid, report_id=None, finding=Finding(title=title, severity=Severity.HIGH)
+        id=fid,
+        report_id=None,
+        version=1,
+        finding=finding,
+        versions=(
+            FindingVersionExport(
+                version=1,
+                origin="extraction",
+                edited_by=None,
+                reason="",
+                created_at=_NOW,
+                finding=finding,
+            ),
+        ),
+        notes=(),
     )
 
 

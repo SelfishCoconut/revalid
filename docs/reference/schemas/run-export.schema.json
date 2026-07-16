@@ -102,7 +102,7 @@
       "type": "object"
     },
     "FindingExport": {
-      "description": "A persisted finding with its row id and originating report (FR-02/FR-03).",
+      "description": "A persisted finding: current content plus full version history and notes (FR-02/03/16).\n\n``finding`` is the *current* version's content (the field pre-FR-16 consumers\nread); ``version`` names which version that is; ``versions`` is the complete\nappend-only history (oldest first, extraction = v1) and ``notes`` the\nstage-tagged annotation log (chronological) \u2014 the audit-grade record (FR-10).",
       "properties": {
         "finding": {
           "$ref": "#/$defs/Finding"
@@ -110,6 +110,13 @@
         "id": {
           "title": "Id",
           "type": "integer"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/NoteExport"
+          },
+          "title": "Notes",
+          "type": "array"
         },
         "report_id": {
           "anyOf": [
@@ -121,14 +128,74 @@
             }
           ],
           "title": "Report Id"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "versions": {
+          "items": {
+            "$ref": "#/$defs/FindingVersionExport"
+          },
+          "title": "Versions",
+          "type": "array"
         }
       },
       "required": [
         "id",
         "report_id",
-        "finding"
+        "version",
+        "finding",
+        "versions",
+        "notes"
       ],
       "title": "FindingExport",
+      "type": "object"
+    },
+    "FindingVersionExport": {
+      "description": "One immutable version of a finding's content (FR-16).\n\n``origin`` is ``extraction`` for version 1 and ``edit`` for operator\nrevisions; ``edited_by``/``reason`` carry the edit lineage.",
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "edited_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Edited By"
+        },
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        },
+        "origin": {
+          "title": "Origin",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "origin",
+        "edited_by",
+        "reason",
+        "created_at",
+        "finding"
+      ],
+      "title": "FindingVersionExport",
       "type": "object"
     },
     "Generator": {
@@ -148,6 +215,41 @@
         "version"
       ],
       "title": "Generator",
+      "type": "object"
+    },
+    "NoteExport": {
+      "description": "One stage-tagged operator note on a finding (FR-16).",
+      "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "stage",
+        "body",
+        "author",
+        "created_at"
+      ],
+      "title": "NoteExport",
       "type": "object"
     },
     "PlanExport": {

@@ -22,8 +22,9 @@ from revalid.browser import (
     make_browser_runner,
     stored_xss_probe,
 )
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Evidence, Finding, Probe, RetestPlan, Severity, VerdictStatus
+from revalid.findings import create_finding
 from revalid.plan import PlanResult
 from revalid.retest import assess_evidence
 
@@ -118,7 +119,7 @@ def test_make_browser_runner_is_callable() -> None:
 
 def _seed_browser_plan(session_maker: object) -> None:
     session = session_maker()  # type: ignore[operator]
-    session.add(FindingRecord.from_domain(Finding(title="DOM XSS", severity=Severity.HIGH)))
+    create_finding(session, Finding(title="DOM XSS", severity=Severity.HIGH))
     session.commit()
     probe = stored_xss_probe(_BASE)
     plan = RetestPlan(finding_title="DOM XSS", actions=(probe,), raw={"finding_title": "DOM XSS"})
