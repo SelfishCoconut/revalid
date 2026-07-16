@@ -123,6 +123,11 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path so shared, non-test helper modules (e.g.
+# tests/_retest_helpers.py, marked by tests/__init__.py as a regular package)
+# are importable as `tests.<module>` from any test subpackage (unit,
+# integration, system) even though those subpackages have no __init__.py.
+pythonpath = ["."]
 addopts = "--strict-markers"
 markers = [
     "integration: real component interactions; LLM via deterministic Pydantic AI stand-ins (CI: separate job)",
