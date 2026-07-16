@@ -4,10 +4,13 @@ import type { Plan, PlannedAction, Probe } from "../api/types";
 import {
   useApprovePlan,
   useEditPlan,
+  useGeneratePlan,
   useRejectPlan,
   useRetest,
+  useRevisePlan,
 } from "../hooks/usePlans";
 import { errorMessage } from "../lib/format";
+import { InstructionsField } from "./InstructionsField";
 import { Button } from "./ui/Button";
 import { Eyebrow, Panel } from "./ui/Panel";
 import { StatusBadge } from "./StatusBadge";
@@ -55,16 +58,26 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
   const [actions, setActions] = useState<EditableAction[]>(() =>
     plan.actions.map(toEditable),
   );
+  const [regenInstructions, setRegenInstructions] = useState("");
 
   const edit = useEditPlan(findingId);
   const approve = useApprovePlan(findingId);
   const reject = useRejectPlan(findingId);
   const runRetest = useRetest(findingId);
+  const regenerate = useGeneratePlan(findingId);
+  const revise = useRevisePlan(findingId);
 
   const isProposed = plan.status === "proposed";
   const isApproved = plan.status === "approved";
+  const appliedInstructions =
+    typeof plan.raw.instructions === "string" ? plan.raw.instructions : "";
   const busy =
-    edit.isPending || approve.isPending || reject.isPending || runRetest.isPending;
+    edit.isPending ||
+    approve.isPending ||
+    reject.isPending ||
+    runRetest.isPending ||
+    regenerate.isPending ||
+    revise.isPending;
 
   function updateField(index: number, field: keyof EditableAction, value: string) {
     setActions((current) =>
@@ -88,6 +101,14 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
       </div>
 
       <div className="p-4">
+        {appliedInstructions && (
+          <div className="mb-3 rounded-lg border border-iris/25 bg-iris/8 px-3 py-2">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-iris-fg">
+              Guidance applied
+            </span>
+            <p className="mt-1 text-[13px] text-dim">{appliedInstructions}</p>
+          </div>
+        )}
         {actions.length === 0 ? (
           <p className="text-sm text-dim">This plan has no runnable actions.</p>
         ) : (
@@ -214,6 +235,17 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
           >
             Reject
           </Button>
+          {isApproved && (
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                revise.mutate();
+              }}
+            >
+              Revise
+            </Button>
+          )}
           <Button
             className="ml-auto"
             disabled={!isApproved || busy}
@@ -225,9 +257,41 @@ export function PlanEditor({ findingId, plan }: { findingId: number; plan: Plan 
           </Button>
         </div>
 
-        {(edit.isError || approve.isError || reject.isError || runRetest.isError) && (
+        {/* Go back a step at any point: throw this plan away and generate anew,
+            optionally with fresh guidance (ADR-0023). Supersedes this version. */}
+        <div className="mt-4 space-y-2 border-t border-line pt-4">
+          <InstructionsField
+            id="regen-instructions"
+            value={regenInstructions}
+            onChange={setRegenInstructions}
+            disabled={busy}
+          />
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              regenerate.mutate(regenInstructions);
+            }}
+          >
+            {regenerate.isPending ? "Regenerating…" : "Discard & regenerate"}
+          </Button>
+        </div>
+
+        {(edit.isError ||
+          approve.isError ||
+          reject.isError ||
+          runRetest.isError ||
+          regenerate.isError ||
+          revise.isError) && (
           <p role="alert" className="mt-3 text-sm text-danger-fg">
-            {errorMessage(edit.error ?? approve.error ?? reject.error ?? runRetest.error)}
+            {errorMessage(
+              edit.error ??
+                approve.error ??
+                reject.error ??
+                runRetest.error ??
+                regenerate.error ??
+                revise.error,
+            )}
           </p>
         )}
       </div>

@@ -99,8 +99,14 @@ export function listFindings(reportId?: number): Promise<Finding[]> {
 
 // --- Plans ---------------------------------------------------------------
 
-export function generatePlan(findingId: number): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan`, { method: "POST" });
+/**
+ * Start async plan generation (backend replies 202 with a `generating` version).
+ * `instructions` is optional operator guidance woven into this generation and
+ * recorded in the plan's lineage. Re-calling supersedes any live version — an
+ * approved one included — so it doubles as "regenerate" (ADR-0022/0023).
+ */
+export function generatePlan(findingId: number, instructions = ""): Promise<Plan> {
+  return request<Plan>(`/findings/${String(findingId)}/plan`, jsonInit("POST", { instructions }));
 }
 
 /** Replace the proposed plan's actions; backend re-gates each action. */
@@ -114,6 +120,11 @@ export function approvePlan(findingId: number): Promise<Plan> {
 
 export function rejectPlan(findingId: number): Promise<Plan> {
   return request<Plan>(`/findings/${String(findingId)}/plan/reject`, { method: "POST" });
+}
+
+/** Un-approve the approved plan back into an editable proposed copy (ADR-0023). */
+export function revisePlan(findingId: number): Promise<Plan> {
+  return request<Plan>(`/findings/${String(findingId)}/plan/revise`, { method: "POST" });
 }
 
 export function listPlans(findingId: number): Promise<Plan[]> {

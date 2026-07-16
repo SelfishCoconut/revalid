@@ -137,11 +137,18 @@ def build_plan_agent(
     )
 
 
-def _finding_prompt(finding: Finding) -> str:
-    """Render the finding as the planning prompt (fields the model plans from)."""
+def _finding_prompt(finding: Finding, instructions: str = "") -> str:
+    """Render the finding as the planning prompt (fields the model plans from).
+
+    ``instructions`` is optional free-text operator guidance for *this* generation
+    (e.g. "also check /admin for IDOR"); it is appended as a clearly-labelled
+    section so the model treats it as steering, not as finding content. It only
+    biases what the model *proposes* — every proposal still passes the unchanged
+    FR-06 gate in :func:`generate_plan`, so guidance cannot widen the target set.
+    """
     endpoints = ", ".join(finding.affected_endpoints) or "(none stated)"
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
-    return (
+    prompt = (
         f"Title: {finding.title}\n"
         f"Severity: {finding.severity.value}\n"
         f"Description: {finding.description}\n"
@@ -149,6 +156,9 @@ def _finding_prompt(finding: Finding) -> str:
         f"Affected endpoints: {endpoints}\n"
         f"Reproduction steps:\n{steps or '(none stated)'}"
     )
+    if instructions.strip():
+        prompt += f"\n\nAdditional operator instructions for this retest:\n{instructions.strip()}"
+    return prompt
 
 
 def gate_actions(
@@ -190,6 +200,7 @@ def generate_plan(
     finding: Finding,
     guard: TargetGuard,
     base_url: str,
+    instructions: str = "",
 ) -> PlanResult:
     """Generate a gated retest plan for ``finding`` (FR-04).
 
@@ -203,6 +214,9 @@ def generate_plan(
         finding: The finding to retest.
         guard: The FR-06 allowlist guard; the sole authority on allowed targets.
         base_url: Allowlisted base URL that relative targets resolve against.
+        instructions: Optional operator guidance for this generation, steered into
+            the prompt and recorded in the plan's lineage. It cannot bypass the
+            gate — proposals it elicits are gated identically (NFR-02 audit).
 
     Returns:
         A :class:`PlanResult`. On a schema-gate failure the plan has no actions
@@ -210,9 +224,9 @@ def generate_plan(
     """
     model_name = agent_model_name(agent)
     try:
-        proposed = agent.run_sync(_finding_prompt(finding)).output
+        proposed = agent.run_sync(_finding_prompt(finding, instructions)).output
     except UnexpectedModelBehavior as exc:
-        return PlanResult(plan=_empty_plan(finding, model_name), error=str(exc))
+        return PlanResult(plan=_empty_plan(finding, model_name, instructions), error=str(exc))
 
     default_kind = classify_finding_kind(finding)
     actions, rejected = gate_actions(proposed, guard, base_url, default_kind)
@@ -227,6 +241,7 @@ def generate_plan(
             "finding_title": finding.title,
             "proposed": len(proposed),
             "rejected": len(rejected),
+            "instructions": instructions,
         },
     )
     return PlanResult(plan=plan, rejected=tuple(rejected))
@@ -262,9 +277,14 @@ def _gate(
     )
 
 
-def _empty_plan(finding: Finding, model_name: str) -> RetestPlan:
+def _empty_plan(finding: Finding, model_name: str, instructions: str = "") -> RetestPlan:
     """A no-action plan recording that generation failed the schema gate."""
     return RetestPlan(
         finding_title=finding.title,
-        raw={"source": "plan_generation", "model": model_name, "finding_title": finding.title},
+        raw={
+            "source": "plan_generation",
+            "model": model_name,
+            "finding_title": finding.title,
+            "instructions": instructions,
+        },
     )

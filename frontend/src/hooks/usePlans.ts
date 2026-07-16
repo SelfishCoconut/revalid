@@ -7,6 +7,7 @@ import {
   listPlans,
   rejectPlan,
   retest,
+  revisePlan,
 } from "../api/client";
 import type { Plan, PlannedAction, Verdict } from "../api/types";
 import { queryKeys } from "./queryKeys";
@@ -39,8 +40,11 @@ function usePlanMutation<TArgs>(
   });
 }
 
+/** Start (or regenerate) plan generation with optional operator instructions. */
 export function useGeneratePlan(findingId: number) {
-  return usePlanMutation<void>(findingId, () => generatePlan(findingId));
+  return usePlanMutation<string>(findingId, (instructions) =>
+    generatePlan(findingId, instructions),
+  );
 }
 
 export function useEditPlan(findingId: number) {
@@ -55,6 +59,11 @@ export function useApprovePlan(findingId: number) {
 
 export function useRejectPlan(findingId: number) {
   return usePlanMutation<void>(findingId, () => rejectPlan(findingId));
+}
+
+/** Un-approve the approved plan back into an editable draft (ADR-0023). */
+export function useRevisePlan(findingId: number) {
+  return usePlanMutation<void>(findingId, () => revisePlan(findingId));
 }
 
 /** Run the approved plan; refreshes both plans and verdicts on success. */
