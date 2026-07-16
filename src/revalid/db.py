@@ -272,6 +272,48 @@ class VerdictRecord(Base):
         )
 
 
+class RetestSessionRecord(Base):
+    """An FR-17 agentic retest session (parent of its append-only transcript).
+
+    Mirrors :class:`VerdictRecord`'s finding link (``finding_id`` FK) but tracks a
+    live, in-progress agent run rather than a concluded outcome: ``status`` moves
+    through :class:`~revalid.domain.RetestSessionStatus` until a terminal state,
+    at which point ``ended_at`` is set. ``verdict_status``/``verdict_rationale``
+    are populated only once the session concludes with a verdict.
+    """
+
+    __tablename__ = "retest_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    status: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(128))
+    verdict_status: Mapped[str | None] = mapped_column(String(16), default=None)
+    verdict_rationale: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+
+class SessionEventRecord(Base):
+    """One append-only transcript event for a retest session (FR-17 audit).
+
+    The full record of what an agentic session did: each proposed/approved/
+    rejected command, its output, state transitions, and the final verdict are
+    all rows here, ordered by ``seq`` (monotonic per session, assigned by
+    :func:`revalid.retest_session.append_event`) so the transcript replays
+    deterministically regardless of wall-clock timestamp resolution.
+    """
+
+    __tablename__ = "session_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("retest_sessions.id"))
+    seq: Mapped[int]
+    kind: Mapped[str] = mapped_column(String(32))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class SettingsRecord(Base):
     """The single-row persisted model/provider setting (FR-13 / ADR-0021).
 
