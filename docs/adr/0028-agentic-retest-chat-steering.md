@@ -67,3 +67,9 @@ gated is the next approve/reject.
   budget backstop are unchanged (`respond` and queued messages are
   budget-exempt by design); the old batch path still coexists until the last
   slice.
+
+## References
+
+- Design spec: `docs/superpowers/specs/2026-07-16-agentic-retest-console-slice-4-design.md` (chat steering + `respond` Q&A tool)
+- Plan: `docs/superpowers/plans/2026-07-16-agentic-retest-console-slice-4.md` (Slice 4)
+- Builds on ADR-0025 (agentic console), ADR-0026 (operator `!` commands) and ADR-0027 (guiding plan); epic [#87](https://github.com/SelfishCoconut/revalid/issues/87), issue [#96](https://github.com/SelfishCoconut/revalid/issues/96)
