@@ -33,7 +33,7 @@ Three steering channels: **chat** (tell it), **approve/edit** (vet it), **type**
 
 ### Layout — chat-centric console (decided 2026-07-16)
 
-The console reads as **a chat with the model**, not a terminal with controls bolted on. The **center column is the chat** — the agent's voice: its rationale, each gated command rendered as a chat card with **inline approve/reject**, and the verdict, as one scrolling conversation (`agent_message` events are reserved for future agent prose; from the chat-input slice the human's own messages join the same stream). The **terminal docks to the bottom** as a collapsible, read-only panel showing only *executed*-command output. This **supersedes Slice 0's terminal-centric arrangement** (read-only terminal on top, approval card + verdict stacked beneath). The shared *interactive* PTY (the "one shared terminal" bullet above) still lands in a later slice — the human types into this same docked terminal then; the reorientation itself is presentation-only (no API/orchestrator/sandbox change). This decision is carried into the slice order below and recorded as an update note in ADR-0025.
+The console reads as **a chat with the model**, not a terminal with controls bolted on. The **center column is the chat** — the agent's voice: its rationale, each gated command rendered as a chat card with **inline approve/reject**, and the verdict, as one scrolling conversation (`agent_message` events are reserved for future agent prose; from the chat-input slice the human's own messages join the same stream). The **terminal docks to the bottom** as a collapsible, read-only panel showing only *executed*-command output. This **supersedes Slice 0's terminal-centric arrangement** (read-only terminal on top, approval card + verdict stacked beneath). Operator interaction with the shell lands in a later slice — but **not** as the "one shared terminal" PTY bullet above: after researching how comparable tools do it, Álvaro chose discrete execs + a Claude-Code-style `!` command over a shared PTY (**ADR-0026** supersedes that bullet for the retest console). The reorientation itself is presentation-only (no API/orchestrator/sandbox change). This decision is carried into the slice order below and recorded as an update note in ADR-0025.
 
 ### Reproducibility (NFR-02) — an explicit shift
 
@@ -51,7 +51,7 @@ reframed as the chat **input** slice (the chat *view* now arrives in Slice 1).
 |------:|------|
 | **0** (shipped) | skeleton: egress-locked container + Pydantic-AI agent with one gated `run_command` + live **read-only** terminal + one approval card → agent proposes a verdict |
 | **1** | **chat-centric console shell** — chat becomes the center column (agent rationale → gated command card with inline approve/reject → verdict); the terminal docks to the bottom as a collapsible read-only output panel. Presentation only; steering stays approve/reject. |
-| 2 | shared interactive PTY — human types into the docked terminal; agent observes it |
+| 2 | operator manual commands — `!<command>` runs a one-shot command in the sandbox (discrete exec, **not** a shared PTY — ADR-0026); the agent observes it on its next turn |
 | 3 | plan panel — initial plan + gated plan updates |
 | 4 | chat **input** / steering & Q&A — human types messages into the center chat to redirect the agent or ask about what it observed |
 | 5 | free-launch mode + session controls + step/time budget + give-up |

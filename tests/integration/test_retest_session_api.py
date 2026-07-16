@@ -136,3 +136,41 @@ def test_retest_session_ends_in_error_when_sandbox_factory_raises() -> None:
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "error"
         assert any(e["kind"] == "error" for e in state["events"])
+
+
+def _echo_client() -> TestClient:
+    """A client whose sandbox echoes each command, so multiple execs never exhaust it."""
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        FunctionModel(script_run_then_conclude)
+    )
+    box = FakeSandbox(
+        lambda cmd: CommandResult(stdout=f"out:{cmd}", stderr="", exit_code=0, elapsed_ms=1)
+    )
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    return TestClient(app)
+
+
+def test_retest_session_human_command_runs_and_is_recorded() -> None:
+    """A `!` command POSTed to a live session runs ungated and lands in the transcript."""
+    with _echo_client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+
+        resp = client.post(f"/api/retest-sessions/{sid}/human-command", json={"command": "whoami"})
+        assert resp.status_code == 202
+
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        human = next(e for e in state["events"] if e["kind"] == "human_command")
+        assert human["payload"]["command"] == "whoami"
+        assert human["payload"]["stdout"] == "out:whoami"
+
+
+def test_retest_session_human_command_rejects_empty() -> None:
+    """An empty command is a 422 (the request model requires a non-empty command)."""
+    with _echo_client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+
+        resp = client.post(f"/api/retest-sessions/{sid}/human-command", json={"command": ""})
+        assert resp.status_code == 422
