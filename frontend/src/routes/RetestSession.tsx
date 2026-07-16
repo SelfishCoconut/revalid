@@ -48,6 +48,31 @@ function toTerminalLines(events: SessionEvent[]): string[] {
 /** Session statuses past which the sandbox is gone, so `!` commands can't run. */
 const OVER_STATUSES = new Set(["concluded", "ended", "given_up", "error"]);
 
+/** Extract the ordered plan steps from an event payload (defensively typed). */
+function payloadSteps(payload: Record<string, unknown>): string[] {
+  return Array.isArray(payload.steps) ? payload.steps.map(String) : [];
+}
+
+/** The current guiding plan = the steps of the latest approved `plan_updated` event. */
+function currentPlan(events: SessionEvent[]): string[] {
+  const latest = [...events].reverse().find((event) => event.kind === "plan_updated");
+  return latest ? payloadSteps(latest.payload) : [];
+}
+
+/** A compact ordered list of guiding-plan steps. */
+function StepList({ steps }: { steps: string[] }) {
+  return (
+    <ol className="mt-2 space-y-1">
+      {steps.map((step, i) => (
+        <li key={`${String(i)}-${step}`} className="flex gap-2 text-sm text-fg">
+          <span className="font-mono text-[12px] text-iris-fg">{i + 1}.</span>
+          <span>{step}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /** A humanized, non-badge label for the session's own lifecycle status. */
 function humanizeStatus(status: string): string {
   return status.replace(/_/g, " ");
@@ -115,8 +140,51 @@ export function RetestSession() {
   });
 
   const terminalLines = toTerminalLines(events);
-  const latestProposed = [...events].reverse().find((event) => event.kind === "command_proposed");
-  const awaitingApproval = status === "awaiting_command" && latestProposed !== undefined;
+  const planSteps = currentPlan(events);
+  // A pending approval is for either a command or a plan change; both gate on the
+  // same tool_call_id, so they share the approve/reject mutations below.
+  const latestProposal = [...events]
+    .reverse()
+    .find((event) => event.kind === "command_proposed" || event.kind === "plan_proposed");
+  const awaitingApproval =
+    (status === "awaiting_command" || status === "awaiting_plan") && latestProposal !== undefined;
+
+  // Shared approve/reject block for a pending command or plan proposal.
+  const renderApproval = (toolCallId: string, note: string) => (
+    <div className="mt-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="positive"
+          disabled={approveMutation.isPending}
+          onClick={() => {
+            approveMutation.mutate(toolCallId);
+          }}
+        >
+          Approve
+        </Button>
+        <Button
+          variant="danger"
+          disabled={rejectMutation.isPending}
+          onClick={() => {
+            rejectMutation.mutate(toolCallId);
+          }}
+        >
+          Reject
+        </Button>
+        <span className="text-[11px] text-faint">{note}</span>
+      </div>
+      {approveMutation.isError && (
+        <p role="alert" className="text-sm text-danger-fg">
+          {errorMessage(approveMutation.error)}
+        </p>
+      )}
+      {rejectMutation.isError && (
+        <p role="alert" className="text-sm text-danger-fg">
+          {errorMessage(rejectMutation.error)}
+        </p>
+      )}
+    </div>
+  );
 
   // `!<command>` runs a manual command in the sandbox; anything else is reserved
   // for chat-to-agent steering (a later slice), so it's only hinted here.
@@ -142,57 +210,39 @@ export function RetestSession() {
       ];
     }
     if (event.kind === "command_proposed") {
-      const isPending = awaitingApproval && event.seq === latestProposed?.seq;
-      const toolCallId = String(event.payload.tool_call_id);
+      const isPending = awaitingApproval && event.seq === latestProposal?.seq;
       return [
         <AgentTurn key={event.seq}>
           <p className="text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
           <code className="mt-2 block overflow-x-auto rounded-md border border-line bg-ink/50 px-3 py-2 font-mono text-[13px] text-fg">
             <span className="text-faint">$</span> {String(event.payload.command ?? "")}
           </code>
-          {isPending && (
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="positive"
-                  disabled={approveMutation.isPending}
-                  onClick={() => {
-                    approveMutation.mutate(toolCallId);
-                  }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="danger"
-                  disabled={rejectMutation.isPending}
-                  onClick={() => {
-                    rejectMutation.mutate(toolCallId);
-                  }}
-                >
-                  Reject
-                </Button>
-                <span className="text-[11px] text-faint">runs once in the egress-locked sandbox</span>
-              </div>
-              {approveMutation.isError && (
-                <p role="alert" className="text-sm text-danger-fg">
-                  {errorMessage(approveMutation.error)}
-                </p>
-              )}
-              {rejectMutation.isError && (
-                <p role="alert" className="text-sm text-danger-fg">
-                  {errorMessage(rejectMutation.error)}
-                </p>
-              )}
-            </div>
-          )}
+          {isPending &&
+            renderApproval(
+              String(event.payload.tool_call_id),
+              "runs once in the egress-locked sandbox",
+            )}
         </AgentTurn>,
       ];
     }
-    if (event.kind === "command_rejected") {
+    if (event.kind === "plan_proposed") {
+      const isPending = awaitingApproval && event.seq === latestProposal?.seq;
+      return [
+        <AgentTurn key={event.seq}>
+          <Eyebrow>{planSteps.length > 0 ? "Plan revision" : "Proposed plan"}</Eyebrow>
+          <p className="mt-1 text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
+          <StepList steps={payloadSteps(event.payload)} />
+          {isPending &&
+            renderApproval(String(event.payload.tool_call_id), "the plan changes only if you approve")}
+        </AgentTurn>,
+      ];
+    }
+    if (event.kind === "command_rejected" || event.kind === "plan_rejected") {
+      const what = event.kind === "plan_rejected" ? "plan" : "command";
       const reason = String(event.payload.reason ?? "");
       return [
         <p key={event.seq} className="pl-5 text-[12px] text-faint">
-          ✗ command rejected{reason ? `: ${reason}` : ""}
+          ✗ {what} rejected{reason ? `: ${reason}` : ""}
         </p>,
       ];
     }
@@ -223,6 +273,25 @@ export function RetestSession() {
           )}
         </div>
       </div>
+
+      {/* Plan — the agent's guiding checklist; every change is human-approved. */}
+      <Panel className="shrink-0">
+        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+          <Eyebrow>Plan</Eyebrow>
+          <span className="font-mono text-[11px] text-faint">
+            {planSteps.length} {planSteps.length === 1 ? "step" : "steps"}
+          </span>
+        </div>
+        <div className="p-4">
+          {planSteps.length > 0 ? (
+            <StepList steps={planSteps} />
+          ) : (
+            <p className="text-sm text-dim">
+              The agent proposes a guiding plan first — approve it and it appears here.
+            </p>
+          )}
+        </div>
+      </Panel>
 
       {/* Chat — the center column, the agent's voice. */}
       <div

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from tests._retest_helpers import (
     has_command_result,
     script_always_propose,
+    script_plan_then_run_then_conclude,
     script_run_then_conclude,
 )
 
@@ -475,3 +476,78 @@ def test_submit_human_command_on_dead_session_is_a_noop() -> None:
     with sessions() as session:
         rs.submit_human_command(session, registry, 999, "whoami")  # never started
         assert rs.load_events_after(session, 999, 0) == []
+
+
+def test_plan_flow_records_proposal_approval_and_current_plan() -> None:
+    """The agent proposes a plan first (gated); approving it records + sets the current plan."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    steps = ["Retry the login-bypass payload", "Baseline with valid creds"]
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_PLAN.value
+        proposed = next(
+            e for e in rs.load_events_after(session, s.id, 0) if e["kind"] == "plan_proposed"
+        )
+        assert proposed["payload"]["steps"] == steps
+
+        cid = _pending_cid(registry, s.id)
+        rs.apply_decision(session, registry, s.id, approved=True, command_id=cid)
+
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+        kinds = [e["kind"] for e in events]
+    assert "plan_approved" in kinds
+    assert "plan_updated" in kinds  # the approved plan is now the current plan
+    updated = next(e for e in events if e["kind"] == "plan_updated")
+    assert updated["payload"]["steps"] == steps
+    # After the plan is approved the agent moves on to proposing a command.
+    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
+
+
+def test_plan_approval_is_exempt_from_command_budget() -> None:
+    """Approving a plan does not consume the command step-budget (only commands do)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+        # Only ONE command is allowed; if the plan approval counted, the single
+        # command approval would trip the budget and give up instead of concluding.
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.", max_steps=1)
+
+        rs.apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
+        rs.apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
+
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+
+
+def test_plan_rejected_records_event_and_never_updates_the_plan() -> None:
+    """Rejecting a proposed plan records `plan_rejected` and the plan never takes effect."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        cid = _pending_cid(registry, s.id)
+        rs.apply_decision(
+            session, registry, s.id, approved=False, reason="too broad", command_id=cid
+        )
+
+        kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
+    assert "plan_rejected" in kinds
+    assert "plan_updated" not in kinds

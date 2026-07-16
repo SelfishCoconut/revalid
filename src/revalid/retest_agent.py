@@ -26,8 +26,12 @@ You are a penetration-test *retester*. You are given one finding to re-verify \
 against an authorised lab target that is reachable from your sandbox.
 
 Rules:
-- Work one command at a time. Propose a single shell command plus a one-line \
-rationale; a human approves or rejects each before it runs.
+- FIRST, propose a short guiding plan with `set_plan`: an ordered list of a \
+few concise steps. A human approves or rejects it before it takes effect. \
+Revise it with `set_plan` whenever your strategy changes — every plan change \
+is approved the same way.
+- Then work one command at a time. Propose a single shell command plus a \
+one-line rationale; a human approves or rejects each before it runs.
 - The sandbox can reach ONLY the lab target — never the internet or the host.
 - Prefer non-destructive verification. Do not attempt to damage the target.
 - When you are confident, conclude with a verdict: `still_open` (the issue \
@@ -49,6 +53,10 @@ def _no_observations() -> list[str]:
     return []
 
 
+def _no_emit_plan(steps: list[str]) -> None:
+    """Default ``emit_plan``: drop the approved plan (agent-unit tests need no sink)."""
+
+
 @dataclass
 class RetestSessionDeps:
     """Runtime dependencies injected into the retest agent's tools."""
@@ -61,6 +69,10 @@ class RetestSessionDeps:
     #: default surfaces nothing — the human-command path (`!`) injects the real
     #: drain via the orchestrator's :func:`~revalid.retest_session._make_deps`.
     drain_observations: Callable[[], list[str]] = _no_observations
+    #: Records an approved guiding plan (FR-17 Slice 3). Invoked by the gated
+    #: ``set_plan`` tool once the human approves it; the orchestrator wires this
+    #: to append a ``plan_updated`` transcript event.
+    emit_plan: Callable[[list[str]], None] = _no_emit_plan
 
 
 def _format_result(result: CommandResult) -> str:
@@ -91,7 +103,7 @@ def format_observations(observations: list[str]) -> str:
 def build_retest_agent(
     model: Model | KnownModelName | str | None = None,
 ) -> Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]:
-    """Build the FR-17 retest agent: one gated ``run_command`` tool + a verdict output.
+    """Build the FR-17 retest agent: gated ``run_command`` + ``set_plan`` tools + a verdict.
 
     Args:
         model: A Pydantic AI model instance or name. When omitted, the
@@ -100,7 +112,7 @@ def build_retest_agent(
 
     Returns:
         An agent whose output is either a :class:`ConcludeOutput` verdict or,
-        while a ``run_command`` call awaits human approval, a
+        while a gated ``run_command``/``set_plan`` call awaits human approval, a
         :class:`~pydantic_ai.DeferredToolRequests`.
     """
     agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests] = Agent(
@@ -127,5 +139,21 @@ def build_retest_agent(
         result = ctx.deps.sandbox.exec(command, timeout=ctx.deps.command_timeout)
         ctx.deps.emit_output(command, result)
         return _format_result(result) + format_observations(ctx.deps.drain_observations())
+
+    @agent.tool(requires_approval=True)
+    def set_plan(ctx: RunContext[RetestSessionDeps], steps: list[str], rationale: str) -> str:
+        """Propose or revise the guiding plan; takes effect only once the human approves.
+
+        Args:
+            ctx: The run context carrying the plan-emit callback.
+            steps: The ordered guiding-plan steps (a few concise items) — this
+                replaces the whole plan.
+            rationale: A one-line reason for this plan (or this revision).
+
+        Returns:
+            A short confirmation the approved plan is now in effect.
+        """
+        ctx.deps.emit_plan(steps)
+        return f"Plan set ({len(steps)} steps)."
 
     return agent

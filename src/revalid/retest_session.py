@@ -188,6 +188,11 @@ class LiveSession:
     sandbox: Sandbox
     messages: list[ModelMessage] = field(default_factory=list)
     pending_call_id: str | None = None
+    #: What the pending approval is for: ``"command"`` (run a command) or
+    #: ``"plan"`` (a guiding-plan change, FR-17 Slice 3). Set when a proposal is
+    #: emitted; read by ``apply_decision`` to record the matching approval event
+    #: and to exempt plan approvals from the command step-budget.
+    pending_kind: str = "command"
     step_count: int = 0
     max_steps: int = 8
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -255,7 +260,52 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
             },
         )
 
-    return RetestSessionDeps(sandbox=live.sandbox, emit_output=emit, drain_observations=live.drain)
+    def emit_plan(steps: list[str]) -> None:
+        append_event(session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": steps})
+
+    return RetestSessionDeps(
+        sandbox=live.sandbox, emit_output=emit, drain_observations=live.drain, emit_plan=emit_plan
+    )
+
+
+def _emit_proposal(
+    session: Session, session_id: int, live: LiveSession, call: Any
+) -> RetestSessionStatus:
+    """Record a proposed command or plan change and return the awaiting status.
+
+    Branches on the gated tool the agent called: ``run_command`` becomes a
+    ``command_proposed`` event (awaiting a command decision), ``set_plan`` a
+    ``plan_proposed`` event (awaiting a plan decision). ``live.pending_kind``
+    tags which, so :func:`apply_decision` records the matching approval event
+    and only command approvals count against the step budget.
+    """
+    args = call.args_as_dict()
+    live.pending_call_id = call.tool_call_id
+    if call.tool_name == "set_plan":
+        live.pending_kind = "plan"
+        append_event(
+            session,
+            session_id,
+            SessionEventKind.PLAN_PROPOSED,
+            {
+                "steps": args["steps"],
+                "rationale": args["rationale"],
+                "tool_call_id": call.tool_call_id,
+            },
+        )
+        return RetestSessionStatus.AWAITING_PLAN
+    live.pending_kind = "command"
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.COMMAND_PROPOSED,
+        {
+            "command": args["command"],
+            "rationale": args["rationale"],
+            "tool_call_id": call.tool_call_id,
+        },
+    )
+    return RetestSessionStatus.AWAITING_COMMAND
 
 
 def _dispatch_output(
@@ -278,20 +328,8 @@ def _dispatch_output(
     live.messages = result.all_messages()
     output = result.output
     if isinstance(output, DeferredToolRequests) and output.approvals:
-        call = output.approvals[0]
-        args = call.args_as_dict()
-        live.pending_call_id = call.tool_call_id
-        append_event(
-            session,
-            session_id,
-            SessionEventKind.COMMAND_PROPOSED,
-            {
-                "command": args["command"],
-                "rationale": args["rationale"],
-                "tool_call_id": call.tool_call_id,
-            },
-        )
-        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
+        awaiting = _emit_proposal(session, session_id, live, output.approvals[0])
+        set_status(session, session_id, awaiting)
     elif isinstance(output, ConcludeOutput):
         record_verdict(session, session_id, output.status, output.rationale)
         _teardown(registry, session_id)
@@ -378,6 +416,13 @@ def _consume_pending_call(live: LiveSession, command_id: str) -> str | None:
         return call_id
 
 
+def _decision_event_kind(pending_kind: str, *, approved: bool) -> SessionEventKind:
+    """Map the pending approval kind + decision to its transcript event kind."""
+    if pending_kind == "plan":
+        return SessionEventKind.PLAN_APPROVED if approved else SessionEventKind.PLAN_REJECTED
+    return SessionEventKind.COMMAND_APPROVED if approved else SessionEventKind.COMMAND_REJECTED
+
+
 def _resume_with_decision(
     session: Session,
     registry: SessionRegistry,
@@ -393,14 +438,18 @@ def _resume_with_decision(
     Split out of :func:`apply_decision` so the lock-holding compare-and-swap
     stays a small, easily-audited critical section; everything here — the
     budget check, the LLM resume call — runs AFTER the lock has been released.
+    Only *command* approvals count against the step budget; a plan change runs
+    no command, so it is exempt and resumes in a transient ``thinking`` state.
     """
-    if approved and _step_budget_exhausted(live):
+    is_command = live.pending_kind == "command"
+    if approved and is_command and _step_budget_exhausted(live):
         record_verdict(session, session_id, VerdictStatus.INCONCLUSIVE, "budget exhausted")
         _mark_given_up(session, session_id)
         _teardown(registry, session_id)
         return
 
-    set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
+    transient = RetestSessionStatus.RUNNING_COMMAND if is_command else RetestSessionStatus.THINKING
+    set_status(session, session_id, transient)
     results = DeferredToolResults()
     if approved:
         # Approved: the run_command tool runs and drains observations into its
@@ -464,7 +513,7 @@ def apply_decision(
     if call_id is None:
         return  # stale, duplicate, or mismatched decision: no-op
 
-    kind = SessionEventKind.COMMAND_APPROVED if approved else SessionEventKind.COMMAND_REJECTED
+    kind = _decision_event_kind(live.pending_kind, approved=approved)
     append_event(session, session_id, kind, {"reason": reason} if reason else {})
     _resume_with_decision(
         session, registry, session_id, live, call_id, approved=approved, reason=reason

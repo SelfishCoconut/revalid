@@ -52,7 +52,7 @@ reframed as the chat **input** slice (the chat *view* now arrives in Slice 1).
 | **0** (shipped) | skeleton: egress-locked container + Pydantic-AI agent with one gated `run_command` + live **read-only** terminal + one approval card → agent proposes a verdict |
 | **1** | **chat-centric console shell** — chat becomes the center column (agent rationale → gated command card with inline approve/reject → verdict); the terminal docks to the bottom as a collapsible read-only output panel. Presentation only; steering stays approve/reject. |
 | 2 | operator manual commands — `!<command>` runs a one-shot command in the sandbox (discrete exec, **not** a shared PTY — ADR-0026); the agent observes it on its next turn |
-| 3 | plan panel — initial plan + gated plan updates |
+| 3 | plan panel — the agent proposes & maintains a guiding plan (ordered steps) via a gated `set_plan` tool; every change human-approved, budget-exempt (ADR-0027) |
 | 4 | chat **input** / steering & Q&A — human types messages into the center chat to redirect the agent or ask about what it observed |
 | 5 | free-launch mode + session controls + step/time budget + give-up |
 | 6 | verdict adjudication + FR-10 audit / FR-12 export integration; retire the old batch path |
