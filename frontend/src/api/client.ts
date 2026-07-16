@@ -178,3 +178,64 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
 export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
   return request<ProbeResult>("/settings/probe", jsonInit("POST", body));
 }
+
+// --- Agentic retest sessions (FR-17) ---------------------------------------
+
+/** One ordered event from a retest session's transcript (see the WS stream). */
+export interface SessionEvent {
+  seq: number;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** A retest session's full state, as returned by the start/get endpoints. */
+export interface RetestSession {
+  id: number;
+  finding_id: number;
+  status: string;
+  model: string;
+  verdict_status: string | null;
+  verdict_rationale: string | null;
+  events: SessionEvent[];
+}
+
+/** Start an agentic retest session for a finding (backend replies with the new session). */
+export function startRetestSession(findingId: number): Promise<RetestSession> {
+  return request<RetestSession>(`/findings/${String(findingId)}/retest-session`, {
+    method: "POST",
+  });
+}
+
+export function getRetestSession(id: number): Promise<RetestSession> {
+  return request<RetestSession>(`/retest-sessions/${String(id)}`);
+}
+
+/** Approve a proposed command so the agent runs it against the allowlisted lab target. */
+export function approveCommand(id: number, cid: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/commands/${cid}/approve`, {
+    method: "POST",
+  });
+}
+
+/** Reject a proposed command; an optional reason is recorded on the session. */
+export function rejectCommand(id: number, cid: string, reason = ""): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/commands/${cid}/reject`,
+    jsonInit("POST", { reason }),
+  );
+}
+
+export function endRetestSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/end`, { method: "POST" });
+}
+
+/**
+ * Build the absolute WS(S) URL for a session's live transcript stream.
+ * WebSocket has no relative-URL form, so this resolves against the current
+ * page's origin/protocol the way `fetch`'s relative `API_BASE` paths do
+ * implicitly — mirroring dev (Vite proxy) and prod (single uvicorn process).
+ */
+export function retestSocketUrl(id: number): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}${API_BASE}/retest-sessions/${String(id)}/stream`;
+}
