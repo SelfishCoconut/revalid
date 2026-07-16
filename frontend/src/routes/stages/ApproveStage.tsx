@@ -5,7 +5,7 @@ import { NotesThread } from "../../components/NotesThread";
 import { PlanActions } from "../../components/PlanActions";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Button } from "../../components/ui/Button";
-import { Eyebrow, Panel } from "../../components/ui/Panel";
+import { Eyebrow, Panel, PanelHeader } from "../../components/ui/Panel";
 import { useApprovePlan, useRejectPlan, useRevisePlan } from "../../hooks/usePlans";
 import { errorMessage } from "../../lib/format";
 import { toEditable } from "../../lib/planActions";
@@ -23,8 +23,9 @@ export function ApproveStage() {
   if (!currentPlan || currentPlan.status === "generating" || currentPlan.status === "failed") {
     return (
       <div className="space-y-6">
-        <Panel className="p-4">
-          <p className="text-sm text-dim">
+        <Panel>
+          <PanelHeader eyebrow="Approve plan" />
+          <p className="p-4 text-sm text-dim">
             No plan to approve yet.{" "}
             <Link
               to={`/findings/${String(findingId)}/plan`}

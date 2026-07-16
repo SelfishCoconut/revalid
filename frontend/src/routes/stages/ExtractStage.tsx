@@ -7,7 +7,7 @@ import { useFindingStage } from "../../hooks/useFindingStage";
 import { NotesThread } from "../../components/NotesThread";
 import { Spinner } from "../../components/Spinner";
 import { Button } from "../../components/ui/Button";
-import { Eyebrow, Panel, PanelHeader } from "../../components/ui/Panel";
+import { Panel, PanelHeader } from "../../components/ui/Panel";
 import { useEditFinding, useFindingVersions } from "../../hooks/useFindingRevision";
 import { errorMessage, formatDateTime } from "../../lib/format";
 
@@ -62,7 +62,19 @@ function FindingEditor({ finding }: { finding: Finding }) {
 
   return (
     <Panel>
-      <PanelHeader eyebrow="Extracted finding" aside={<span className="font-mono text-[11px] text-faint">v{finding.version}</span>} />
+      <PanelHeader
+        eyebrow="Extracted finding"
+        aside={
+          finding.report_id != null ? (
+            <Link
+              to={`/reports/${String(finding.report_id)}`}
+              className="font-mono text-[11px] text-iris-fg hover:underline"
+            >
+              View source report →
+            </Link>
+          ) : undefined
+        }
+      />
       <div className="space-y-3 p-4">
         <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
           <label className={fieldLabel}>
@@ -232,17 +244,6 @@ export function ExtractStage() {
 
   return (
     <div className="space-y-6">
-      {finding.report_id != null && (
-        <div className="flex items-center justify-between">
-          <Eyebrow>Source</Eyebrow>
-          <Link
-            to={`/reports/${String(finding.report_id)}`}
-            className="font-mono text-[12px] text-iris-fg hover:underline"
-          >
-            View source report →
-          </Link>
-        </div>
-      )}
       <FindingEditor key={finding.version} finding={finding} />
       <VersionHistory findingId={findingId} />
       <NotesThread findingId={findingId} stage="extract" scope="all" />
