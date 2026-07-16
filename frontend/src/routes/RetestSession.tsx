@@ -3,7 +3,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
-import { approveCommand, endRetestSession, rejectCommand, type SessionEvent } from "../api/client";
+import {
+  approveCommand,
+  endRetestSession,
+  rejectCommand,
+  submitHumanCommand,
+  type SessionEvent,
+} from "../api/client";
 import { RetestTerminal } from "../components/RetestTerminal";
 import { StatusBadge } from "../components/StatusBadge";
 import { Button } from "../components/ui/Button";
@@ -19,18 +25,28 @@ import { STATUS_META, type KnownStatus } from "../lib/status";
  * never appears here: the docked terminal is a faithful log of the sandbox
  * shell, while the reasoning + gate live in the chat above it.
  */
+/** Append one command (with a prompt marker) and its stdout/stderr to the terminal. */
+function pushCommand(lines: string[], prompt: string, payload: Record<string, unknown>): void {
+  lines.push(`${prompt} ${String(payload.command ?? "")}`);
+  const stdout = String(payload.stdout ?? "");
+  const stderr = String(payload.stderr ?? "");
+  if (stdout) lines.push(stdout);
+  if (stderr) lines.push(stderr);
+}
+
 function toTerminalLines(events: SessionEvent[]): string[] {
   const lines: string[] = [];
   for (const event of events) {
-    if (event.kind !== "command_output") continue;
-    lines.push(`$ ${String(event.payload.command ?? "")}`);
-    const stdout = String(event.payload.stdout ?? "");
-    const stderr = String(event.payload.stderr ?? "");
-    if (stdout) lines.push(stdout);
-    if (stderr) lines.push(stderr);
+    // Agent-run commands use a bare `$`; the operator's own `!` commands are
+    // marked so the two voices are distinguishable in the same shared log.
+    if (event.kind === "command_output") pushCommand(lines, "$", event.payload);
+    else if (event.kind === "human_command") pushCommand(lines, "operator$", event.payload);
   }
   return lines;
 }
+
+/** Session statuses past which the sandbox is gone, so `!` commands can't run. */
+const OVER_STATUSES = new Set(["concluded", "ended", "given_up", "error"]);
 
 /** A humanized, non-badge label for the session's own lifecycle status. */
 function humanizeStatus(status: string): string {
@@ -75,6 +91,7 @@ export function RetestSession() {
   const id = Number(useParams().id);
   const { events, status, verdict } = useRetestSession(id);
   const [terminalOpen, setTerminalOpen] = useState(true);
+  const [input, setInput] = useState("");
   const chatRef = useRef<HTMLDivElement>(null);
 
   // Each gate action is its own mutation so pending/error state stays scoped to
@@ -91,10 +108,23 @@ export function RetestSession() {
   const endMutation = useMutation({
     mutationFn: () => endRetestSession(id),
   });
+  // The operator's own commands (`!`) run ungated in the same sandbox; separate
+  // mutation so its pending/error state is independent of the gate buttons.
+  const humanCommandMutation = useMutation({
+    mutationFn: (command: string) => submitHumanCommand(id, command),
+  });
 
   const terminalLines = toTerminalLines(events);
   const latestProposed = [...events].reverse().find((event) => event.kind === "command_proposed");
   const awaitingApproval = status === "awaiting_command" && latestProposed !== undefined;
+
+  // `!<command>` runs a manual command in the sandbox; anything else is reserved
+  // for chat-to-agent steering (a later slice), so it's only hinted here.
+  const trimmed = input.trim();
+  const isCommand = trimmed.startsWith("!");
+  const commandBody = isCommand ? trimmed.slice(1).trim() : "";
+  const sessionOver = OVER_STATUSES.has(status);
+  const canRun = commandBody.length > 0 && !sessionOver;
 
   // Keep the newest turn in view as the transcript streams in. `scrollTop`
   // assignment is a no-op under jsdom, so tests need no scroll polyfill.
@@ -242,6 +272,44 @@ export function RetestSession() {
           </div>
         )}
       </Panel>
+
+      {/* Operator console: `!<command>` runs it in the sandbox (Claude-Code-style). */}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!canRun) return;
+          humanCommandMutation.mutate(commandBody);
+          setInput("");
+        }}
+        className="shrink-0"
+      >
+        <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
+          <input
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+            }}
+            placeholder="!command runs it in the sandbox — e.g. !curl -s http://revalid-juice-shop:3000/rest/products"
+            disabled={sessionOver}
+            aria-label="Operator console input"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
+          />
+          <Button type="submit" variant="ghost" disabled={!canRun}>
+            Run
+          </Button>
+        </div>
+        {trimmed.length > 0 && !isCommand && (
+          <p className="mt-1 px-1 text-[11px] text-faint">
+            Prefix with <span className="font-mono text-dim">!</span> to run a command in the
+            sandbox. Chatting to the agent arrives in a later slice.
+          </p>
+        )}
+        {humanCommandMutation.isError && (
+          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
+            {errorMessage(humanCommandMutation.error)}
+          </p>
+        )}
+      </form>
     </div>
   );
 }

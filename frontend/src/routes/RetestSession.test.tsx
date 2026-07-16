@@ -234,4 +234,70 @@ describe("RetestSession", () => {
     expect(screen.queryByTestId("retest-terminal")).not.toBeInTheDocument();
     expect(screen.getByText(/2 lines/)).toBeInTheDocument();
   });
+
+  it("runs a !-prefixed console line as a manual operator command", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.submitHumanCommand).mockResolvedValue({ status: "accepted" });
+
+    renderAt(1);
+
+    await userEvent.type(screen.getByLabelText(/operator console input/i), "!whoami");
+    await userEvent.click(screen.getByRole("button", { name: /run/i }));
+
+    expect(client.submitHumanCommand).toHaveBeenCalledWith(1, "whoami");
+  });
+
+  it("treats non-! text as chat (hinted), not a command", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    await userEvent.type(screen.getByLabelText(/operator console input/i), "focus on login");
+    expect(screen.getByRole("button", { name: /run/i })).toBeDisabled();
+    expect(screen.getByText(/arrives in a later slice/i)).toBeInTheDocument();
+    expect(client.submitHumanCommand).not.toHaveBeenCalled();
+  });
+
+  it("shows operator commands in the docked terminal, marked apart from the agent's", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "human_command",
+          payload: { command: "whoami", stdout: "you", stderr: "", exit_code: 0 },
+        },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    // `operator$ whoami` + one stdout line = 2 terminal lines.
+    expect(screen.getByText(/2 lines/)).toBeInTheDocument();
+  });
+
+  it("disables the console input once the session is over", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "concluded",
+      verdict: { status: "still_open", rationale: "bypassable" },
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByLabelText(/operator console input/i)).toBeDisabled();
+  });
 });

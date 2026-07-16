@@ -230,6 +230,18 @@ export function endRetestSession(id: number): Promise<{ status: string }> {
 }
 
 /**
+ * Run a manual operator command (`!`) in the session's sandbox — ungated,
+ * discrete exec (FR-17 Slice 2). Its output lands in the shared terminal and
+ * the agent observes it on its next turn.
+ */
+export function submitHumanCommand(id: number, command: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/human-command`,
+    jsonInit("POST", { command }),
+  );
+}
+
+/**
  * Build the absolute WS(S) URL for a session's live transcript stream.
  * WebSocket has no relative-URL form, so this resolves against the current
  * page's origin/protocol the way `fetch`'s relative `API_BASE` paths do
