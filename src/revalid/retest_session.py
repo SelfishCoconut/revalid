@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from revalid.db import RetestSessionRecord, SessionEventRecord
 from revalid.domain import RetestSessionStatus, SessionEventKind, VerdictStatus
-from revalid.retest_agent import ConcludeOutput, RetestSessionDeps
+from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, format_observations
 from revalid.sandbox import CommandResult, Sandbox
 
 _TERMINAL: frozenset[RetestSessionStatus] = frozenset(
@@ -191,6 +191,23 @@ class LiveSession:
     step_count: int = 0
     max_steps: int = 8
     lock: threading.Lock = field(default_factory=threading.Lock)
+    #: Manual operator commands (`!`) run since the agent's last turn, buffered
+    #: here and surfaced to the agent on its next turn so it observes what the
+    #: human did (FR-17 Slice 2). Guarded by ``lock`` — appended by the human-
+    #: command worker, drained by the next agent resume, on separate threads.
+    observations: list[str] = field(default_factory=list)
+
+    def observe(self, summary: str) -> None:
+        """Buffer one operator-command summary for the agent's next turn (thread-safe)."""
+        with self.lock:
+            self.observations.append(summary)
+
+    def drain(self) -> list[str]:
+        """Atomically return and clear the buffered operator observations (thread-safe)."""
+        with self.lock:
+            drained = list(self.observations)
+            self.observations.clear()
+            return drained
 
 
 class SessionRegistry:
@@ -213,13 +230,15 @@ class SessionRegistry:
         self._live.pop(session_id, None)
 
 
-def _make_deps(session: Session, session_id: int, sandbox: Sandbox) -> RetestSessionDeps:
-    """Build agent deps whose output callback appends a ``command_output`` event.
+def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSessionDeps:
+    """Build agent deps whose callbacks append output + surface operator activity.
 
     Rebuilt fresh, immediately before every ``agent.run_sync`` call — see the
     correctness note on :class:`LiveSession`. The returned ``emit_output``
     closure is only ever invoked synchronously inside that same call, so
-    binding it to ``session`` here is safe.
+    binding it to ``session`` here is safe. ``drain_observations`` drains any
+    manual operator commands buffered on ``live`` (under its lock) so the
+    agent's ``run_command`` tool can append them to the result it reads.
     """
 
     def emit(command: str, result: CommandResult) -> None:
@@ -236,7 +255,7 @@ def _make_deps(session: Session, session_id: int, sandbox: Sandbox) -> RetestSes
             },
         )
 
-    return RetestSessionDeps(sandbox=sandbox, emit_output=emit)
+    return RetestSessionDeps(sandbox=live.sandbox, emit_output=emit, drain_observations=live.drain)
 
 
 def _dispatch_output(
@@ -313,7 +332,7 @@ def start_and_step(
     live = LiveSession(agent=agent, sandbox=sandbox, max_steps=max_steps)
     registry.put(session_id, live)
     set_status(session, session_id, RetestSessionStatus.STARTING)
-    deps = _make_deps(session, session_id, sandbox)
+    deps = _make_deps(session, session_id, live)
     try:
         result = agent.run_sync(finding_prompt, deps=deps)
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
@@ -383,8 +402,15 @@ def _resume_with_decision(
 
     set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
     results = DeferredToolResults()
-    results.approvals[call_id] = ToolApproved() if approved else ToolDenied(reason)
-    deps = _make_deps(session, session_id, live.sandbox)
+    if approved:
+        # Approved: the run_command tool runs and drains observations into its
+        # own result (see _make_deps / the agent tool).
+        results.approvals[call_id] = ToolApproved()
+    else:
+        # Rejected: no tool runs, so fold any operator activity into the denial
+        # message here — the agent still observes what the human did.
+        results.approvals[call_id] = ToolDenied(reason + format_observations(live.drain()))
+    deps = _make_deps(session, session_id, live)
     try:
         result = live.agent.run_sync(
             deps=deps, message_history=live.messages, deferred_tool_results=results
@@ -443,6 +469,60 @@ def apply_decision(
     _resume_with_decision(
         session, registry, session_id, live, call_id, approved=approved, reason=reason
     )
+
+
+def _summarize_human_command(command: str, result: CommandResult) -> str:
+    """Render a manual operator command + result as the note the agent will read."""
+    return (
+        f"The operator manually ran: {command}\n"
+        f"exit_code={result.exit_code}\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+
+
+def submit_human_command(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    command: str,
+    *,
+    timeout: float = 30.0,
+) -> None:
+    """Run a manual operator command (`!`) in the live session's sandbox (FR-17 Slice 2).
+
+    The human's own commands are **ungated** (single trusted user, ADR-0008) and
+    run through the *same* discrete ``sandbox.exec`` the agent uses — no shared
+    PTY (ADR-0026). The command + its result are recorded as a ``HUMAN_COMMAND``
+    transcript event (so the terminal shows it) and buffered on the live session
+    so the agent observes it on its next turn.
+
+    A no-op if the session is not live (already ended/concluded, or never
+    started) — there is no sandbox to run in once torn down.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry (holds the sandbox + observation buffer).
+        session_id: The retest session to run the command in.
+        command: The exact shell command the operator submitted (without the `!`).
+        timeout: Per-command timeout, matching the agent's command budget.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    result = live.sandbox.exec(command, timeout=timeout)
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.HUMAN_COMMAND,
+        {
+            "command": command,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.exit_code,
+            "elapsed_ms": result.elapsed_ms,
+        },
+    )
+    live.observe(_summarize_human_command(command, result))
 
 
 def end_session(session: Session, registry: SessionRegistry, session_id: int) -> None:

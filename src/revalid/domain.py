@@ -206,6 +206,7 @@ class SessionEventKind(enum.StrEnum):
     COMMAND_APPROVED = "command_approved"
     COMMAND_REJECTED = "command_rejected"
     COMMAND_OUTPUT = "command_output"
+    HUMAN_COMMAND = "human_command"
     STATE_CHANGE = "state_change"
     VERDICT = "verdict"
     ERROR = "error"

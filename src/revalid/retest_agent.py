@@ -44,6 +44,11 @@ class ConcludeOutput(BaseModel):
     rationale: str = Field(min_length=1)
 
 
+def _no_observations() -> list[str]:
+    """Default ``drain_observations``: no operator activity to surface."""
+    return []
+
+
 @dataclass
 class RetestSessionDeps:
     """Runtime dependencies injected into the retest agent's tools."""
@@ -51,6 +56,11 @@ class RetestSessionDeps:
     sandbox: Sandbox
     emit_output: Callable[[str, CommandResult], None]
     command_timeout: float = 30.0
+    #: Returns (and clears) any manual operator commands run since the agent's
+    #: last turn, so the agent observes what the human did (FR-17 Slice 2). The
+    #: default surfaces nothing — the human-command path (`!`) injects the real
+    #: drain via the orchestrator's :func:`~revalid.retest_session._make_deps`.
+    drain_observations: Callable[[], list[str]] = _no_observations
 
 
 def _format_result(result: CommandResult) -> str:
@@ -59,6 +69,23 @@ def _format_result(result: CommandResult) -> str:
         f"exit_code={result.exit_code} elapsed_ms={result.elapsed_ms}\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
+
+
+def format_observations(observations: list[str]) -> str:
+    """Render buffered operator activity as a block the agent reads on its next turn.
+
+    Returns an empty string when there is nothing to surface, so callers can
+    append it unconditionally.
+
+    Args:
+        observations: Human-run command summaries buffered since the last turn.
+
+    Returns:
+        A labelled block to append to the next tool result, or ``""`` if empty.
+    """
+    if not observations:
+        return ""
+    return "\n\n--- operator activity while you waited ---\n" + "\n".join(observations)
 
 
 def build_retest_agent(
@@ -99,6 +126,6 @@ def build_retest_agent(
         """
         result = ctx.deps.sandbox.exec(command, timeout=ctx.deps.command_timeout)
         ctx.deps.emit_output(command, result)
-        return _format_result(result)
+        return _format_result(result) + format_observations(ctx.deps.drain_observations())
 
     return agent

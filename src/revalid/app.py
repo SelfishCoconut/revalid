@@ -97,6 +97,7 @@ from revalid.retest_session import (
     is_terminal,
     load_events_after,
     start_and_step,
+    submit_human_command,
 )
 from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
 from revalid.sanity import PlanDeviationError
@@ -312,6 +313,12 @@ class RejectRequest(BaseModel):
     """Optional body for a command rejection: the operator's reason (FR-17)."""
 
     reason: str = ""
+
+
+class HumanCommandRequest(BaseModel):
+    """Body for a manual operator command (`!`): the exact command to run (FR-17)."""
+
+    command: str = Field(min_length=1)
 
 
 class ImportResult(BaseModel):
@@ -637,6 +644,24 @@ def run_decision(
         apply_decision(
             session, registry, session_id, approved=approved, reason=reason, command_id=command_id
         )
+
+
+def run_human_command(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    command: str,
+) -> None:
+    """Run a manual operator command (`!`) in the session's sandbox (FR-17 background task).
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The retest session to run the command in.
+        command: The exact shell command the operator submitted (without the `!`).
+    """
+    with sessions() as session:
+        submit_human_command(session, registry, session_id, command)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1128,6 +1153,19 @@ def _register_session_routes(
         reason = body.reason if body else ""
         background.add_task(run_decision, sessions, registry, session_id, False, reason, cid)
         return {"status": "rejected"}
+
+    @router.post("/retest-sessions/{session_id}/human-command", status_code=202)
+    def human_command(
+        session_id: int, body: HumanCommandRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Run a manual operator command (`!`) in the session's sandbox (FR-17 Slice 2).
+
+        Ungated (single trusted user, ADR-0008); runs in the background and
+        surfaces via the transcript stream, then the agent observes it on its
+        next turn. A no-op if the session is no longer live.
+        """
+        background.add_task(run_human_command, sessions, registry, session_id, body.command)
+        return {"status": "accepted"}
 
     @router.post("/retest-sessions/{session_id}/end", status_code=202)
     def end_retest_session(session_id: int, session: SessionDep) -> dict[str, str]:

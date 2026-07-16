@@ -7,10 +7,20 @@ plus the Task 5 orchestration layer that drives the Task 4 agent step-by-step.
 
 from __future__ import annotations
 
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
-from tests._retest_helpers import script_always_propose, script_run_then_conclude
+from tests._retest_helpers import (
+    has_command_result,
+    script_always_propose,
+    script_run_then_conclude,
+)
 
 from revalid import retest_session as rs
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
@@ -353,3 +363,115 @@ def test_apply_decision_agent_error_on_resume_sets_error_status_and_tears_down()
     assert "error" in kinds
     assert box.stopped
     assert registry.get(s.id) is None
+
+
+def _echo_box() -> FakeSandbox:
+    """A FakeSandbox that echoes each command's text, for deterministic multi-command tests."""
+    return FakeSandbox(
+        lambda cmd: CommandResult(stdout=f"out:{cmd}", stderr="", exit_code=0, elapsed_ms=1)
+    )
+
+
+def _saw_operator_activity(messages: list[ModelMessage]) -> bool:
+    """True once a run_command tool return carrying operator activity is in history."""
+    return any(
+        isinstance(part, ToolReturnPart) and "operator activity" in str(part.content)
+        for m in messages
+        if isinstance(m, ModelRequest)
+        for part in m.parts
+    )
+
+
+def _conclude_noting_operator(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Propose once, then conclude with a rationale reporting whether it saw the human's command."""
+    if not has_command_result(messages):
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="run_command",
+                    args={
+                        "command": "curl -s http://revalid-juice-shop:3000/",
+                        "rationale": "probe",
+                    },
+                )
+            ]
+        )
+    rationale = "saw-operator" if _saw_operator_activity(messages) else "no-operator"
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=info.output_tools[0].name,
+                args={"status": "still_open", "rationale": rationale},
+            )
+        ]
+    )
+
+
+def test_submit_human_command_records_event_and_buffers_observation() -> None:
+    """A manual `!` command runs ungated, is recorded, and is buffered for the agent."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_human_command(session, registry, s.id, "whoami")
+
+        human = [e for e in rs.load_events_after(session, s.id, 0) if e["kind"] == "human_command"]
+        assert len(human) == 1
+        assert human[0]["payload"]["command"] == "whoami"
+        assert human[0]["payload"]["stdout"] == "out:whoami"
+        live = registry.get(s.id)
+        assert live is not None
+        assert len(live.observations) == 1
+        assert "whoami" in live.observations[0]
+
+
+def test_agent_observes_human_command_on_next_turn() -> None:
+    """The human's manual command is surfaced to the agent when the run resumes."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(_conclude_noting_operator))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_human_command(session, registry, s.id, "whoami")  # while awaiting approval
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
+
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.verdict_rationale == "saw-operator"  # the agent read the operator activity
+
+
+def test_reject_folds_operator_activity_into_the_denial() -> None:
+    """A rejection surfaces buffered operator activity to the agent via the denial message."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(_conclude_noting_operator))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_human_command(session, registry, s.id, "whoami")
+        cid = _pending_cid(registry, s.id)
+        # Reject the agent's own proposal: no command runs, but the denial the
+        # agent reads still carries what the operator did.
+        apply_decision(session, registry, s.id, approved=False, reason="not that", command_id=cid)
+
+        session.refresh(s)
+    assert s.verdict_rationale == "saw-operator"
+
+
+def test_submit_human_command_on_dead_session_is_a_noop() -> None:
+    """Submitting a command to a non-live session records nothing and does not raise."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        rs.submit_human_command(session, registry, 999, "whoami")  # never started
+        assert rs.load_events_after(session, 999, 0) == []
