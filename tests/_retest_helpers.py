@@ -99,6 +99,31 @@ def has_tool_result(messages: list[ModelMessage], tool_name: str) -> bool:
     )
 
 
+def script_respond_then_conclude(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Stateful scripted model: call ``respond`` once, then conclude (FR-17 Slice 4).
+
+    Proves the non-gated ``respond`` tool emits prose mid-run and the run then
+    continues to a verdict without proposing any command.
+    """
+    if not has_tool_result(messages, "respond"):
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="respond",
+                    args={"message": "the 500 was the WAF rejecting the payload"},
+                )
+            ]
+        )
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=info.output_tools[0].name,
+                args={"status": "inconclusive", "rationale": "answered the operator"},
+            )
+        ]
+    )
+
+
 def script_plan_then_run_then_conclude(
     messages: list[ModelMessage], info: AgentInfo
 ) -> ModelResponse:

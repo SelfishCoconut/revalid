@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
 from pydantic_ai.models.function import FunctionModel
-from tests._retest_helpers import script_run_then_conclude
+from tests._retest_helpers import script_respond_then_conclude, script_run_then_conclude
 
 from revalid.domain import VerdictStatus
 from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
@@ -58,4 +58,18 @@ def test_reject_returns_reason_to_the_model() -> None:
     results.approvals[call.tool_call_id] = ToolDenied("out of scope host")
     # After denial the (scripted) model concludes; the point is no sandbox exec happened.
     agent.run_sync(deps=deps, message_history=first.all_messages(), deferred_tool_results=results)
+    assert box.commands == []
+
+
+def test_respond_tool_emits_agent_message_and_run_continues() -> None:
+    """The non-gated respond tool emits prose mid-run; the run then reaches a verdict."""
+    box = FakeSandbox([])  # respond never touches the sandbox
+    prose: list[str] = []
+    deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None, emit_message=prose.append)
+    agent = build_retest_agent(FunctionModel(script_respond_then_conclude))
+
+    result = agent.run_sync("Retest the SQLi finding.", deps=deps)
+
+    assert prose == ["the 500 was the WAF rejecting the payload"]
+    assert isinstance(result.output, ConcludeOutput)
     assert box.commands == []
