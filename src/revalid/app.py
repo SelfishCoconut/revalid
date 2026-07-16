@@ -8,6 +8,7 @@ The app must only ever bind to 127.0.0.1 (NFR-03); there is no
 authentication in TFG scope.
 """
 
+import asyncio
 import contextlib
 from collections.abc import Iterable, Iterator
 from datetime import datetime
@@ -15,7 +16,16 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, DeferredToolRequests
@@ -57,6 +67,7 @@ from revalid.domain import (
     Probe,
     ReportStatus,
     RetestPlan,
+    RetestSessionStatus,
     Settings,
     Severity,
     Verdict,
@@ -83,6 +94,7 @@ from revalid.retest_session import (
     apply_decision,
     create_session,
     end_session,
+    is_terminal,
     load_events_after,
     start_and_step,
 )
@@ -1019,6 +1031,35 @@ def _register_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         )
 
 
+# Poll interval for the FR-17 WS transcript tail (Task 7): frequent enough to feel
+# live, coarse enough not to hammer SQLite on a single-user local install.
+_WS_POLL_SECONDS = 0.25
+
+
+def _load_stream_batch(
+    session: Session, session_id: int, last_seq: int
+) -> tuple[list[dict[str, Any]], bool] | None:
+    """Return one WS poll tick's new events and terminal flag, or ``None`` if gone.
+
+    Split out of :func:`_register_session_routes`'s WS handler to keep it under
+    the mccabe complexity gate: the handler's ``while``/``for``/branches alone
+    are enough to trip it once the DB read is inlined too.
+
+    Args:
+        session: Active DB session for the read.
+        session_id: The retest session to read.
+        last_seq: Only events with ``seq`` greater than this are returned.
+
+    Returns:
+        ``(new_events, is_terminal)``, or ``None`` if ``session_id`` doesn't exist.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None:
+        return None
+    events = load_events_after(session, session_id, last_seq)
+    return events, is_terminal(RetestSessionStatus(record.status))
+
+
 def _register_session_routes(
     router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
 ) -> None:
@@ -1087,6 +1128,52 @@ def _register_session_routes(
         """Operator-initiated end: tear down and mark the session ended (FR-17)."""
         end_session(session, registry, session_id)
         return {"status": "ended"}
+
+
+def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-17 WS transcript-tail route.
+
+    Split from :func:`_register_session_routes` to keep each registration
+    function's nested-route count under the mccabe gate (see
+    :func:`_register_core_routes`): the WS handler's own ``while``/``for``/
+    ``try`` branches are enough on their own to trip the shared registrar's
+    budget once added on top of its five REST routes.
+    """
+
+    @router.websocket("/retest-sessions/{session_id}/stream")
+    async def stream_session(websocket: WebSocket, session_id: int) -> None:
+        """Tail one retest session's transcript over a WebSocket (FR-17).
+
+        On connect, replays every persisted event in ``seq`` order, then polls
+        every ``_WS_POLL_SECONDS`` for newly appended ones — each sent as
+        ``{seq, kind, payload}`` JSON — until the session reaches a terminal
+        status with nothing left to send, at which point the server closes
+        the socket on its own. Closes immediately with code 1008 (policy
+        violation) if ``session_id`` doesn't exist.
+
+        Args:
+            websocket: The accepted client connection.
+            session_id: The retest session to tail.
+        """
+        await websocket.accept()
+        last_seq = 0
+        try:
+            while True:
+                with sessions() as session:
+                    batch = _load_stream_batch(session, session_id, last_seq)
+                if batch is None:
+                    await websocket.close(code=1008)
+                    return
+                events, terminal = batch
+                for event in events:
+                    await websocket.send_json(event)
+                    last_seq = event["seq"]
+                if terminal and not events:
+                    await websocket.close()
+                    return
+                await asyncio.sleep(_WS_POLL_SECONDS)
+        except WebSocketDisconnect:
+            return
 
 
 def _register_export_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1194,6 +1281,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_plan_routes(api, sessions)
     _register_retest_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
+    _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)
     app.include_router(api)
