@@ -20,6 +20,7 @@ from tests._retest_helpers import (
     has_command_result,
     script_always_propose,
     script_plan_then_run_then_conclude,
+    script_respond_then_conclude,
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
 )
@@ -614,6 +615,29 @@ def test_no_message_means_no_extra_user_turn() -> None:
 
         session.refresh(s)
     assert s.verdict_rationale == "no-message"
+
+
+def test_respond_emits_agent_message_through_the_orchestrator() -> None:
+    """The agent's `respond` prose is recorded as an `agent_message` transcript event.
+
+    Exercises the real `_make_deps` emit_message wire end-to-end (not a stub): a
+    scripted model calls `respond` then concludes, and the orchestrator must
+    persist an `agent_message` event carrying the prose text.
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_respond_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    prose = [e for e in events if e["kind"] == "agent_message"]
+    assert len(prose) == 1
+    assert prose[0]["payload"]["text"] == "the 500 was the WAF rejecting the payload"
+    assert s.status == RetestSessionStatus.CONCLUDED.value
 
 
 def test_plan_rejected_records_event_and_never_updates_the_plan() -> None:
