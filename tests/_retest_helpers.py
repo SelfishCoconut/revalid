@@ -65,3 +65,25 @@ def script_run_then_conclude(messages: list[ModelMessage], info: AgentInfo) -> M
             )
         ]
     )
+
+
+def script_always_propose(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Stateful scripted model: always propose ``run_command``, never conclude.
+
+    Unlike :func:`script_run_then_conclude`, this never calls the output tool —
+    every turn re-proposes the same ``run_command`` call regardless of history.
+    Used to exercise the orchestrator's step-budget backstop (Task 5): an
+    agent that never concludes on its own must still be forced to a verdict
+    once ``max_steps`` approved commands have run.
+    """
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="run_command",
+                args={
+                    "command": "curl -s http://revalid-juice-shop:3000/rest/user/whoami",
+                    "rationale": "keep probing",
+                },
+            )
+        ]
+    )

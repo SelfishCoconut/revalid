@@ -1,10 +1,16 @@
 """Unit tests for the FR-17 retest-session persistence layer (ADR-0025, Slice 0).
 
 In-memory SQLite, no I/O. Covers the append-only transcript (monotonic ``seq``),
-status transitions, and verdict recording on :class:`~revalid.db.RetestSessionRecord`.
+status transitions, and verdict recording on :class:`~revalid.db.RetestSessionRecord`,
+plus the Task 5 orchestration layer that drives the Task 4 agent step-by-step.
 """
 
 from __future__ import annotations
+
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
+from sqlalchemy.orm import Session
+from tests._retest_helpers import script_always_propose, script_run_then_conclude
 
 from revalid import retest_session as rs
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
@@ -16,9 +22,26 @@ from revalid.domain import (
     VerdictStatus,
 )
 from revalid.findings import create_finding
+from revalid.retest_agent import build_retest_agent
+from revalid.retest_session import SessionRegistry, apply_decision, end_session, start_and_step
+from revalid.sandbox import CommandResult, FakeSandbox
 
 
-def _seed_finding(session) -> int:  # type: ignore[no-untyped-def]
+def _propose_then_boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Propose ``run_command`` once, then raise on the next call (agent-crash simulation)."""
+    if len(messages) <= 1:
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="run_command", args={"command": "id", "rationale": "x"})]
+        )
+    raise RuntimeError("model backend unavailable")
+
+
+def _always_boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Always raise (agent-crash simulation for the first-step error boundary)."""
+    raise RuntimeError("model backend unavailable")
+
+
+def _seed_finding(session: Session) -> int:
     record = create_finding(
         session, Finding(title="SQLi", severity=Severity.HIGH, description="login bypass")
     )
@@ -106,3 +129,161 @@ def test_record_verdict_on_unknown_session_is_a_noop() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     with sessions() as session:
         rs.record_verdict(session, 999, VerdictStatus.FIXED, "n/a")  # must not raise
+
+
+def test_full_cycle_proposes_runs_and_concludes() -> None:
+    """start_and_step pauses on the proposed command; approving runs it and concludes."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        start_and_step(session, registry, s.id, agent, box, "Retest the SQLi finding.")
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
+        kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
+        assert "command_proposed" in kinds
+
+        apply_decision(session, registry, s.id, approved=True)
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.CONCLUDED.value
+        assert s.verdict_status == "still_open"
+        assert box.commands and box.stopped  # ran once, torn down
+
+
+def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
+    """Denying the proposed command never touches the sandbox but still resumes the run."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([])  # nothing scripted: must never be called
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        apply_decision(session, registry, s.id, approved=False, reason="out of scope host")
+        session.refresh(s)
+        kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
+    assert "command_rejected" in kinds
+    assert box.commands == []
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+
+
+def test_budget_exhaustion_gives_up() -> None:
+    """An always-proposing agent is bounded: exceeding max_steps forces a give-up.
+
+    ``max_steps=1`` allows exactly one approved command. The first approval runs
+    it; the second approval would be a second command, which exceeds the budget
+    and must force-conclude ``inconclusive`` + ``GIVEN_UP`` without running it.
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
+
+        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=1)
+        apply_decision(session, registry, s.id, approved=True)  # uses the one allowed step
+        assert len(box.commands) == 1
+
+        apply_decision(session, registry, s.id, approved=True)  # exceeds the 1-step budget
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.GIVEN_UP.value
+    assert s.verdict_status == "inconclusive"
+    assert len(box.commands) == 1  # the over-budget command never ran
+    assert box.stopped
+
+
+def test_is_terminal_matches_the_terminal_statuses() -> None:
+    assert rs.is_terminal(RetestSessionStatus.CONCLUDED)
+    assert rs.is_terminal(RetestSessionStatus.GIVEN_UP)
+    assert rs.is_terminal(RetestSessionStatus.ENDED)
+    assert rs.is_terminal(RetestSessionStatus.ERROR)
+    assert not rs.is_terminal(RetestSessionStatus.STARTING)
+    assert not rs.is_terminal(RetestSessionStatus.AWAITING_COMMAND)
+    assert not rs.is_terminal(RetestSessionStatus.RUNNING_COMMAND)
+
+
+def test_apply_decision_on_unknown_session_is_a_noop() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        apply_decision(session, registry, 999, approved=True)  # must not raise
+
+
+def test_end_session_tears_down_and_marks_ended() -> None:
+    """An operator can end a live session mid-flight: sandbox stops, status -> ended."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([])
+        agent = build_retest_agent(FunctionModel(script_always_propose))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+
+        end_session(session, registry, s.id)
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.ENDED.value
+    assert box.stopped
+    assert registry.get(s.id) is None
+
+
+def test_end_session_on_already_terminal_session_is_a_noop() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.record_verdict(session, s.id, VerdictStatus.FIXED, "patched")
+
+        end_session(session, registry, s.id)
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.CONCLUDED.value  # untouched, not overwritten to "ended"
+
+
+def test_start_and_step_agent_error_sets_error_status_and_tears_down() -> None:
+    """A crashing agent on the first step trips the orchestration boundary, not the caller."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([])
+        agent = build_retest_agent(FunctionModel(_always_boom))
+
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        session.refresh(s)
+        kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
+    assert s.status == RetestSessionStatus.ERROR.value
+    assert "error" in kinds
+    assert box.stopped
+    assert registry.get(s.id) is None
+
+
+def test_apply_decision_agent_error_on_resume_sets_error_status_and_tears_down() -> None:
+    """A crash on the resumed run (after approval) is caught at the same boundary."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)])
+        agent = build_retest_agent(FunctionModel(_propose_then_boom))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+
+        apply_decision(session, registry, s.id, approved=True)
+        session.refresh(s)
+        kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
+    assert s.status == RetestSessionStatus.ERROR.value
+    assert "error" in kinds
+    assert box.stopped
+    assert registry.get(s.id) is None
