@@ -1,7 +1,7 @@
 # 0024. Finding revision & annotation; pipeline stage wizard
 
 Date: 2026-07-16
-Status: proposed
+Status: accepted
 
 ## Context
 

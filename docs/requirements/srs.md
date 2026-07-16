@@ -127,12 +127,12 @@ non-lab targets, destructive exploitation.
 ### FR-16 — Operator finding revision & annotation
 - **Priority**: Should · **Source**: change request 2026-07-16 (ADR-0024)
 - **Description**: The system shall let the operator amend and annotate an extracted finding without ever destroying history: (a) each edit records a new immutable finding **version** (extraction is version 1), symmetric with FR-05 plan versioning (ADR-0012) — the finding's stable **identity** is what plans and verdicts reference, so amendments never orphan them; and (b) the operator may attach **notes**, each timestamped and tagged with the pipeline stage it was written on, appended to a per-finding log.
-- **Acceptance criteria**:
-  - [ ] Editing a finding appends an immutable version (extraction = v1) and never mutates/deletes a prior version; `GET /api/findings/{id}/versions` returns the full ordered history.
-  - [ ] The finding views and `GET /api/findings` return the current version; existing plans/verdicts still resolve to the same finding after an edit (stable identity, no FK breakage).
-  - [ ] A note posted with a stage tag is appended to the finding's log and returned newest-first with its stage + timestamp; notes are append-only.
-  - [ ] The FR-12 export includes each finding's version history + notes; `SCHEMA_VERSION` is bumped and the published schema regenerated + drift-tested.
-- **Traces to**: issue #80, ADR-0024; enhances FR-11 (wizard surface), FR-02/FR-03 (finding model), FR-12 (export).
+- **Acceptance criteria** (met — PR #82, verified 2026-07-16):
+  - [x] Editing a finding appends an immutable version (extraction = v1) and never mutates/deletes a prior version; `GET /api/findings/{id}/versions` returns the full ordered history.
+  - [x] The finding views and `GET /api/findings` return the current version; existing plans/verdicts still resolve to the same finding after an edit (stable identity, no FK breakage).
+  - [x] A note posted with a stage tag is appended to the finding's log and returned newest-first with its stage + timestamp; notes are append-only.
+  - [x] The FR-12 export includes each finding's version history + notes; `SCHEMA_VERSION` is bumped (1.0 → 1.1) and the published schema regenerated + drift-tested.
+- **Traces to**: issue #80, ADR-0024 (accepted); enhances FR-11 (wizard surface — deep-link redirect #84), FR-02/FR-03 (finding model), FR-12 (export).
 
 ## 3. Non-functional requirements
 
