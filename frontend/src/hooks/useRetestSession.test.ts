@@ -7,6 +7,7 @@ class FakeSocket {
   onmessage: ((e: { data: string }) => void) | null = null;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
   close = () => {};
   emit(event: unknown) {
     this.onmessage?.({ data: JSON.stringify(event) });
@@ -41,6 +42,23 @@ describe("useRetestSession", () => {
     expect(result.current.verdict?.status).toBe("still_open");
     expect(result.current.connected).toBe(true);
     expect(callCount).toBe(1);
+  });
+
+  it("marks connected false when the server closes the socket, not just on error", async () => {
+    const socket = new FakeSocket();
+    const makeSocket = () => socket as unknown as WebSocket;
+
+    const { result } = renderHook(() => useRetestSession(1, makeSocket));
+
+    act(() => {
+      socket.onopen?.();
+    });
+    expect(result.current.connected).toBe(true);
+
+    act(() => {
+      socket.onclose?.();
+    });
+    expect(result.current.connected).toBe(false);
   });
 
   it("derives status from the latest state_change event, defaulting to starting", async () => {
@@ -110,5 +128,59 @@ describe("useRetestSession", () => {
     rerender({ id: 2 });
 
     expect(closeCalls).toBe(1);
+  });
+
+  it("resets events/status/verdict before the new id's socket can emit anything", async () => {
+    const socketA = new FakeSocket();
+    const socketB = new FakeSocket();
+    // Stable factory reference (created once, outside any render) that hands
+    // out a different fake socket per session id — mirrors how a real caller
+    // would key sockets by the URL retestSocketUrl(id) produces, without
+    // recreating the factory itself on every render (which would reopen the
+    // reconnect-loop bug this hook's effect dependency guards against).
+    const sockets = new Map([
+      [1, socketA],
+      [2, socketB],
+    ]);
+    const makeSocket = (url: string) => {
+      const id = Number(/retest-sessions\/(\d+)\/stream/.exec(url)?.[1]);
+      const socket = sockets.get(id);
+      if (!socket) throw new Error(`no fake socket registered for id ${id}`);
+      return socket as unknown as WebSocket;
+    };
+
+    const { result, rerender } = renderHook(({ id }) => useRetestSession(id, makeSocket), {
+      initialProps: { id: 1 },
+    });
+
+    act(() => {
+      socketA.emit({ seq: 1, kind: "command_proposed", payload: { command: "id" } });
+    });
+    act(() => {
+      socketA.emit({
+        seq: 2,
+        kind: "verdict",
+        payload: { status: "still_open", rationale: "x" },
+      });
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(2));
+    expect(result.current.verdict?.status).toBe("still_open");
+
+    rerender({ id: 2 });
+
+    // Reset must be visible immediately on the re-render that picks up the
+    // new id — before socket B has emitted anything — so no stale events
+    // from session 1 leak into session 2's view.
+    expect(result.current.events).toEqual([]);
+    expect(result.current.status).toBe("starting");
+    expect(result.current.verdict).toBeNull();
+
+    act(() => {
+      socketB.emit({ seq: 1, kind: "command_proposed", payload: { command: "ls" } });
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(1));
+    expect(result.current.events[0]?.payload).toEqual({ command: "ls" });
   });
 });

@@ -60,6 +60,9 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
     socket.onerror = () => {
       setConnected(false);
     };
+    socket.onclose = () => {
+      setConnected(false);
+    };
     socket.onmessage = (e: MessageEvent<string>) => {
       const event = JSON.parse(e.data) as SessionEvent;
       if (seen.current.has(event.seq)) return;
