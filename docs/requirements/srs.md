@@ -134,6 +134,17 @@ non-lab targets, destructive exploitation.
   - [x] The FR-12 export includes each finding's version history + notes; `SCHEMA_VERSION` is bumped (1.0 → 1.1) and the published schema regenerated + drift-tested.
 - **Traces to**: issue #80, ADR-0024 (accepted); enhances FR-11 (wizard surface — deep-link redirect #84), FR-02/FR-03 (finding model), FR-12 (export).
 
+### FR-17 — Interactive agentic retest console
+- **Priority**: Must · **Source**: change request 2026-07-16 (ADR-0025, epic #87)
+- **Description**: The system shall offer, per finding, an **interactive, sandboxed, human-in-the-loop agentic retest session** as the successor to the FR-04/05/07-09 batch-plan model: an LLM agent reasons, proposes a command, observes its output, and decides the next step — instead of executing a fixed plan generated up front — while a human approves every command before it runs. This is an **umbrella requirement**, built walking-skeleton-first across six slices (design spec: `docs/superpowers/specs/2026-07-16-agentic-retest-console-design.md`); acceptance criteria accumulate as each slice lands, mirroring FR-16.
+- **Acceptance criteria — Slice 0** (met — issue #88, ADR-0025 proposed, 2026-07-16):
+  - [x] **AC1**: from a finding, an operator starts a session; a sandboxed agent proposes one shell command + rationale, the operator approves it, the command runs in an egress-locked container, and the agent concludes with a verdict (still_open / fixed / inconclusive).
+  - [x] **AC2**: no command executes before human approval — enforced structurally by the Pydantic AI deferred-tool gate (`run_command` cannot resolve without an explicit `ToolApproved`/`ToolDenied` resume), not by policy alone.
+  - [x] **AC3**: the session transcript (`session_events`) is append-only and replayable — every proposed/approved/rejected command, its output, each state transition, and the final verdict, ordered by a monotonic sequence number.
+  - [x] **AC4**: a non-lab host is unreachable from inside the sandbox (egress lock) — proven by a live system test (`tests/system/test_retest_session_system.py`) asserting the lab container is reachable and `example.com` is not.
+- **Deferred to later slices** (not yet built, tracked in epic #87): human terminal input / shared PTY (Slice 1); a gated plan panel (Slice 2); chat steering (Slice 3); free-launch mode + budget UI (Slice 4 — the step-budget "give up" backstop exists server-side in Slice 0 with no UI); verdict adjudication UI + FR-09/FR-10/FR-12 integration, and retirement of the old batch path (Slice 5).
+- **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. Supersedes FR-04/FR-05/FR-07/FR-08/FR-09 over time (both paths coexist until Slice 5); NFR-02's reproducibility claim shifts from deterministic re-derivation to a replayable transcript for agentic sessions (stated in ADR-0025).
+
 ## 3. Non-functional requirements
 
 ### NFR-01 — Verdict reliability
