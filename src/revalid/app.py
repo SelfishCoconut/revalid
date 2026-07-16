@@ -8,16 +8,27 @@ The app must only ever bind to 127.0.0.1 (NFR-03); there is no
 authentication in TFG scope.
 """
 
+import asyncio
+import contextlib
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
@@ -45,6 +56,7 @@ from revalid.db import (
     FindingVersionRecord,
     PlanRecord,
     ReportRecord,
+    RetestSessionRecord,
     VerdictRecord,
     create_db_engine,
     session_factory,
@@ -55,6 +67,7 @@ from revalid.domain import (
     Probe,
     ReportStatus,
     RetestPlan,
+    RetestSessionStatus,
     Settings,
     Severity,
     Verdict,
@@ -74,8 +87,23 @@ from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
 from revalid.plan import PlannedAction, PlanResult, RejectedAction, build_plan_agent, generate_plan
 from revalid.retest import build_probe_client, lab_base_url
+from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
+from revalid.retest_session import (
+    SessionRegistry,
+    _fail,
+    apply_decision,
+    create_session,
+    end_session,
+    is_terminal,
+    load_events_after,
+    start_and_step,
+)
+from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
 from revalid.sanity import PlanDeviationError
 from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
+
+#: The retest agent's static output type: a verdict, or a deferred approval request.
+RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -245,6 +273,47 @@ class PlanOut(BaseModel):
         )
 
 
+class SessionEventOut(BaseModel):
+    """One append-only transcript event as returned by the API (FR-17)."""
+
+    seq: int
+    kind: str
+    payload: dict[str, Any]
+
+
+class RetestSessionOut(BaseModel):
+    """A persisted agentic retest session + its transcript as returned by the API (FR-17)."""
+
+    id: int
+    finding_id: int
+    status: str
+    model: str
+    verdict_status: str | None
+    verdict_rationale: str | None
+    events: list[SessionEventOut] = []
+
+    @classmethod
+    def from_record(
+        cls, record: RetestSessionRecord, events: list[dict[str, Any]]
+    ) -> "RetestSessionOut":
+        """Build the API view from a session row and its ordered transcript events."""
+        return cls(
+            id=record.id,
+            finding_id=record.finding_id,
+            status=record.status,
+            model=record.model,
+            verdict_status=record.verdict_status,
+            verdict_rationale=record.verdict_rationale,
+            events=[SessionEventOut(**e) for e in events],
+        )
+
+
+class RejectRequest(BaseModel):
+    """Optional body for a command rejection: the operator's reason (FR-17)."""
+
+    reason: str = ""
+
+
 class ImportResult(BaseModel):
     """Outcome of a findings import."""
 
@@ -356,6 +425,22 @@ def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFin
     return build_extraction_agent(build_model(settings))
 
 
+def get_retest_agent(settings: SettingsDep) -> RetestAgent:
+    """Yield the FR-17 agentic retest agent built from the persisted setting (ADR-0021)."""
+    return build_retest_agent(build_model(settings))
+
+
+def get_sandbox_factory() -> SandboxFactory:
+    """Yield the production sandbox factory: a fresh egress-locked Docker sandbox per session.
+
+    The returned factory is bound to the retest session's id (which scopes the
+    sandbox's internal Docker network, FR-06). Tests override this with a factory
+    that returns a :class:`~revalid.sandbox.FakeSandbox`, so the HTTP flow runs
+    without Docker.
+    """
+    return lambda sid: DockerSandbox(sid)
+
+
 # Both underlying dependencies (get_probe_client, get_plan_agent) are module-level
 # functions with no per-app-instance state, so these aliases can live here too —
 # unlike SessionDep, which closes over each app's own session factory.
@@ -363,6 +448,8 @@ ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]
 BrowserRunnerDep = Annotated[BrowserRunner, Depends(get_browser_runner)]
 PlanAgentDep = Annotated[Agent[None, list[PlannedAction]], Depends(get_plan_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
+RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
+SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
 
 
 def run_extraction(
@@ -484,6 +571,89 @@ def run_plan_generation(
                 error=f"plan generation failed: {exc}",
             )
         finish_plan_generation(session, plan_id, result)
+
+
+def run_first_step(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    agent: RetestAgent,
+    make_sandbox: SandboxFactory,
+    prompt: str,
+) -> None:
+    """Build the sandbox and run the retest agent's first step (FR-17 background task).
+
+    Runs as a FastAPI background task — a sync function on Starlette's threadpool
+    — so it opens its **own** session (the request session closed with the
+    ``202``). It must let **no** exception escape: ``make_sandbox`` may raise
+    (``SandboxUnavailableError`` when the ``sandbox`` extra is absent, or a real
+    Docker error) and :func:`~revalid.retest_session.start_and_step` calls
+    ``sandbox.start()`` outside its own guard, so both are wrapped here. On any
+    failure the sandbox (if one was created) is best-effort torn down and the
+    session is settled to ``error`` — never stranded in ``starting`` (Task 5
+    review correction).
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The already-created (``starting``) retest session to drive.
+        agent: The built retest agent (a stand-in model in tests).
+        make_sandbox: The session-scoped sandbox factory.
+        prompt: The finding goal prompt the agent retests against.
+    """
+    with sessions() as session:
+        sandbox: Sandbox | None = None
+        try:
+            sandbox = make_sandbox(session_id)
+            start_and_step(session, registry, session_id, agent, sandbox, prompt)
+        except Exception as exc:  # broad on purpose: no failure may strand the session
+            if sandbox is not None:
+                with contextlib.suppress(Exception):  # best-effort teardown only
+                    sandbox.stop()
+            _fail(session, registry, session_id, str(exc))
+
+
+def run_decision(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    approved: bool,
+    reason: str,
+    command_id: str,
+) -> None:
+    """Resume a paused session with the operator's decision (FR-17 background task).
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The retest session to resume.
+        approved: Whether the pending command was approved.
+        reason: Optional operator reason (surfaced to the model on rejection).
+        command_id: The ``cid`` path param from the approve/reject URL; must
+            match the session's pending ``tool_call_id`` or the decision is a
+            no-op (guards against a double-click resuming the run twice).
+    """
+    with sessions() as session:
+        apply_decision(
+            session, registry, session_id, approved=approved, reason=reason, command_id=command_id
+        )
+
+
+def _finding_prompt(finding: Finding) -> str:
+    """Render the finding as the retest agent's goal prompt (FR-17).
+
+    Gives the agent the finding's identity and how it was originally reproduced so
+    it can re-verify the issue against the lab target. Mirrors the FR-04 planning
+    prompt (:mod:`revalid.plan`) but carries no operator steering — the retest
+    agent proposes each command for human approval instead.
+    """
+    lines = [f"Title: {finding.title}", f"Description: {finding.description}"]
+    if finding.affected_endpoints:
+        lines.append("Affected endpoints: " + ", ".join(finding.affected_endpoints))
+    if finding.reproduction_steps:
+        steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
+        lines.append(f"Reproduction steps:\n{steps}")
+    return "\n".join(lines)
 
 
 def _edit_plan(session: Session, finding_id: int, actions: list[PlannedAction]) -> PlanOut:
@@ -867,6 +1037,151 @@ def _register_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         )
 
 
+# Poll interval for the FR-17 WS transcript tail (Task 7): frequent enough to feel
+# live, coarse enough not to hammer SQLite on a single-user local install.
+_WS_POLL_SECONDS = 0.25
+
+
+def _load_stream_batch(
+    session: Session, session_id: int, last_seq: int
+) -> tuple[list[dict[str, Any]], bool] | None:
+    """Return one WS poll tick's new events and terminal flag, or ``None`` if gone.
+
+    Split out of :func:`_register_session_routes`'s WS handler to keep it under
+    the mccabe complexity gate: the handler's ``while``/``for``/branches alone
+    are enough to trip it once the DB read is inlined too.
+
+    Args:
+        session: Active DB session for the read.
+        session_id: The retest session to read.
+        last_seq: Only events with ``seq`` greater than this are returned.
+
+    Returns:
+        ``(new_events, is_terminal)``, or ``None`` if ``session_id`` doesn't exist.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None:
+        return None
+    events = load_events_after(session, session_id, last_seq)
+    return events, is_terminal(RetestSessionStatus(record.status))
+
+
+def _register_session_routes(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the FR-17 agentic retest-session routes (start/poll/approve/reject/end).
+
+    Split from :func:`_register_retest_routes` to keep each registration
+    function's nested-route count under the mccabe gate (see
+    :func:`_register_core_routes`). Starting a session and each command decision
+    run in a FastAPI background task against a fresh session; the live in-memory
+    orchestration state lives in the process-local ``registry`` (ADR-0025).
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post(
+        "/findings/{finding_id}/retest-session", response_model=RetestSessionOut, status_code=202
+    )
+    def start_retest_session(
+        finding_id: int,
+        background: BackgroundTasks,
+        session: SessionDep,
+        agent: RetestAgentDep,
+        make_sandbox: SandboxFactoryDep,
+    ) -> RetestSessionOut:
+        """Open an agentic retest session and schedule its first agent step (FR-17)."""
+        version = _current_or_404(session, finding_id)
+        prompt = _finding_prompt(version.to_domain())
+        record = create_session(session, finding_id=finding_id, model=agent_model_name(agent))
+        background.add_task(
+            run_first_step, sessions, registry, record.id, agent, make_sandbox, prompt
+        )
+        return RetestSessionOut.from_record(record, [])
+
+    @router.get("/retest-sessions/{session_id}", response_model=RetestSessionOut)
+    def get_retest_session(session_id: int, session: SessionDep) -> RetestSessionOut:
+        """Return one session's status + full transcript (the SPA's poll target, FR-17)."""
+        record = session.get(RetestSessionRecord, session_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return RetestSessionOut.from_record(record, load_events_after(session, session_id, 0))
+
+    @router.post("/retest-sessions/{session_id}/commands/{cid}/approve", status_code=202)
+    def approve_command(session_id: int, cid: str, background: BackgroundTasks) -> dict[str, str]:
+        """Approve the pending command; resume the run in the background (FR-17)."""
+        background.add_task(run_decision, sessions, registry, session_id, True, "", cid)
+        return {"status": "approved"}
+
+    @router.post("/retest-sessions/{session_id}/commands/{cid}/reject", status_code=202)
+    def reject_command(
+        session_id: int,
+        cid: str,
+        background: BackgroundTasks,
+        body: RejectRequest | None = None,
+    ) -> dict[str, str]:
+        """Reject the pending command with an optional reason; resume the run (FR-17)."""
+        reason = body.reason if body else ""
+        background.add_task(run_decision, sessions, registry, session_id, False, reason, cid)
+        return {"status": "rejected"}
+
+    @router.post("/retest-sessions/{session_id}/end", status_code=202)
+    def end_retest_session(session_id: int, session: SessionDep) -> dict[str, str]:
+        """Operator-initiated end: tear down and mark the session ended (FR-17)."""
+        end_session(session, registry, session_id)
+        return {"status": "ended"}
+
+
+def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-17 WS transcript-tail route.
+
+    Split from :func:`_register_session_routes` to keep each registration
+    function's nested-route count under the mccabe gate (see
+    :func:`_register_core_routes`): the WS handler's own ``while``/``for``/
+    ``try`` branches are enough on their own to trip the shared registrar's
+    budget once added on top of its five REST routes.
+    """
+
+    @router.websocket("/retest-sessions/{session_id}/stream")
+    async def stream_session(websocket: WebSocket, session_id: int) -> None:
+        """Tail one retest session's transcript over a WebSocket (FR-17).
+
+        On connect, replays every persisted event in ``seq`` order, then polls
+        every ``_WS_POLL_SECONDS`` for newly appended ones — each sent as
+        ``{seq, kind, payload}`` JSON — until the session reaches a terminal
+        status with nothing left to send, at which point the server closes
+        the socket on its own. Closes immediately with code 1008 (policy
+        violation) if ``session_id`` doesn't exist.
+
+        Args:
+            websocket: The accepted client connection.
+            session_id: The retest session to tail.
+        """
+        await websocket.accept()
+        last_seq = 0
+        try:
+            while True:
+                with sessions() as session:
+                    batch = _load_stream_batch(session, session_id, last_seq)
+                if batch is None:
+                    await websocket.close(code=1008)
+                    return
+                events, terminal = batch
+                for event in events:
+                    await websocket.send_json(event)
+                    last_seq = event["seq"]
+                if terminal and not events:
+                    await websocket.close()
+                    return
+                await asyncio.sleep(_WS_POLL_SECONDS)
+        except WebSocketDisconnect:
+            return
+
+
 def _register_export_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-12 versioned run-export routes.
 
@@ -962,6 +1277,8 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     sessions = session_factory(db_engine)
     app = FastAPI(title="revalid", version=__version__)
     app.state.sessions = sessions
+    registry = SessionRegistry()
+    app.state.registry = registry
 
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
@@ -969,6 +1286,8 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_report_routes(api, sessions)
     _register_plan_routes(api, sessions)
     _register_retest_routes(api, sessions)
+    _register_session_routes(api, sessions, registry)
+    _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)
     app.include_router(api)

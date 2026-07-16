@@ -182,6 +182,35 @@ class ReportStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class RetestSessionStatus(enum.StrEnum):
+    """Lifecycle of an FR-17 agentic retest session.
+
+    A session always reaches a terminal state (``CONCLUDED``/``GIVEN_UP``/
+    ``ENDED``/``ERROR``) so the SPA poll and the WS tail terminate.
+    """
+
+    STARTING = "starting"
+    AWAITING_COMMAND = "awaiting_command"
+    RUNNING_COMMAND = "running_command"
+    CONCLUDED = "concluded"
+    GIVEN_UP = "given_up"
+    ENDED = "ended"
+    ERROR = "error"
+
+
+class SessionEventKind(enum.StrEnum):
+    """Kinds of append-only transcript event (FR-17 audit trail)."""
+
+    AGENT_MESSAGE = "agent_message"
+    COMMAND_PROPOSED = "command_proposed"
+    COMMAND_APPROVED = "command_approved"
+    COMMAND_REJECTED = "command_rejected"
+    COMMAND_OUTPUT = "command_output"
+    STATE_CHANGE = "state_change"
+    VERDICT = "verdict"
+    ERROR = "error"
+
+
 class Evidence(BaseModel):
     """Captured request/response of one executed probe step (FR-07).
 

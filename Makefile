@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-techniques demo-browser-xss demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-techniques demo-browser-xss demo-retest-session demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests
@@ -95,6 +95,15 @@ ground-truth-skeleton:
 # gate + FR-08 guard with a canned runner (no real browser), fully offline
 demo-browser-xss:
 	uv run python scripts/demo/browser_xss.py
+
+# FR-17 agentic retest session demo (ADR-0025, Slice 0): propose -> approve ->
+# output -> verdict through the real orchestrator, with a FakeSandbox + scripted
+# FunctionModel standing in for Docker/the lab/the LLM — fully offline. PYTHONPATH=.
+# mirrors pytest's pythonpath setting so the shared tests/_retest_helpers.py
+# scripted model is importable outside the test tree. A real run against the
+# lab needs the `sandbox` extra + `make lab-up` — see the system test.
+demo-retest-session:
+	PYTHONPATH=. uv run python scripts/demo/retest_session.py
 
 # M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
 demo-walking-skeleton:

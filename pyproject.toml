@@ -22,6 +22,9 @@ dependencies = [
 # FR-14 browser-driven probes (ADR-0018). Optional: HTTP-only paths never import
 # it. Enable with `uv sync --extra browser && uv run playwright install chromium`.
 browser = ["playwright>=1.48"]
+# FR-17 agentic retest sandbox (ADR-0025). Optional: HTTP/unit paths never
+# import it. Enable with `uv sync --extra sandbox`.
+sandbox = ["docker>=7.0"]
 
 [dependency-groups]
 dev = [
@@ -110,9 +113,21 @@ ignore_missing_imports = true
 module = ["playwright.*"]
 ignore_missing_imports = true
 
+# docker is the optional `sandbox` extra — not installed in the lint/unit CI
+# job, and imported lazily inside revalid.sandbox. Silence the missing import
+# there; the live DockerSandbox path is exercised by the system-marked test.
+[[tool.mypy.overrides]]
+module = ["docker.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path so shared, non-test helper modules (e.g.
+# tests/_retest_helpers.py, marked by tests/__init__.py as a regular package)
+# are importable as `tests.<module>` from any test subpackage (unit,
+# integration, system) even though those subpackages have no __init__.py.
+pythonpath = ["."]
 addopts = "--strict-markers"
 markers = [
     "integration: real component interactions; LLM via deterministic Pydantic AI stand-ins (CI: separate job)",

@@ -28,3 +28,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0022](0022-async-plan-generation.md) | Asynchronous plan generation: a persisted `generating` version settled by a background job | proposed | 2026-07-16 |
 | [0023](0023-plan-iteration-instructions-regenerate-revise.md) | Plan iteration: operator instructions + regenerate / revise (go back a step) | proposed | 2026-07-16 |
 | [0024](0024-finding-revision-annotation-stage-wizard.md) | Finding revision & annotation; pipeline stage wizard (supersedes ADR-0023's confirm-on-click) | accepted | 2026-07-16 |
+| [0025](0025-agentic-retest-console.md) | Agentic retest console (Slice 0): egress-locked sandbox, deferred-tool gating, transcript audit (supersedes FR-04/05/07-09 over time) | proposed | 2026-07-16 |
