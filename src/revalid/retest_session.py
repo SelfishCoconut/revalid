@@ -113,21 +113,31 @@ def set_status(session: Session, session_id: int, status: RetestSessionStatus) -
 def record_verdict(
     session: Session, session_id: int, status: VerdictStatus, rationale: str
 ) -> None:
-    """Persist the agent verdict on the session row + a ``verdict`` transcript event."""
+    """Persist the agent verdict on the session row + a ``verdict`` transcript event.
+
+    Appends the ``VERDICT`` event BEFORE committing the terminal ``concluded``
+    row (event-before-terminal-status invariant, cf. ``_fail`` which already
+    appends its ``ERROR`` event before ``set_status``). The WS stream handler
+    closes on ``terminal AND no new events``, polling concurrently with this
+    function on a separate DB session; without this ordering a poll landing
+    between the two commits could observe the terminal status with the
+    verdict event not yet visible, and close the stream without ever sending
+    the verdict frame.
+    """
     record = session.get(RetestSessionRecord, session_id)
     if record is None:
         return
-    record.status = RetestSessionStatus.CONCLUDED.value
-    record.verdict_status = status.value
-    record.verdict_rationale = rationale
-    record.ended_at = func.now()
-    session.commit()
     append_event(
         session,
         session_id,
         SessionEventKind.VERDICT,
         {"status": status.value, "rationale": rationale},
     )
+    record.status = RetestSessionStatus.CONCLUDED.value
+    record.verdict_status = status.value
+    record.verdict_rationale = rationale
+    record.ended_at = func.now()
+    session.commit()
 
 
 @dataclass
