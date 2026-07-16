@@ -29,6 +29,7 @@ from revalid.retest_session import (
     create_session,
     load_events_after,
     start_and_step,
+    submit_human_command,
 )
 from revalid.sandbox import CommandResult, FakeSandbox
 
@@ -36,7 +37,11 @@ from revalid.sandbox import CommandResult, FakeSandbox
 def _run_scripted_session(
     session: Session, registry: SessionRegistry, finding_id: int
 ) -> RetestSessionRecord:
-    """Create a session and drive it through propose -> approve -> output -> verdict.
+    """Create a session and drive it through propose -> operator `!` -> approve -> verdict.
+
+    Shows the FR-17 Slice 2 (ADR-0026) operator-command path: while the agent's
+    proposal awaits approval, the human runs a manual `!` command in the same
+    sandbox; it is recorded and the agent observes it on its next turn.
 
     Args:
         session: The active DB session.
@@ -46,8 +51,12 @@ def _run_scripted_session(
     Returns:
         The (refreshed) retest-session record, now in its terminal ``concluded`` status.
     """
+    # Two scripted results: the operator's `!whoami`, then the agent's approved command.
     box = FakeSandbox(
-        [CommandResult(stdout='{"status":"ok"}', stderr="", exit_code=0, elapsed_ms=42)]
+        [
+            CommandResult(stdout="www-data", stderr="", exit_code=0, elapsed_ms=3),
+            CommandResult(stdout='{"status":"ok"}', stderr="", exit_code=0, elapsed_ms=42),
+        ]
     )
     agent = build_retest_agent(FunctionModel(script_run_then_conclude))
 
@@ -55,6 +64,8 @@ def _run_scripted_session(
     start_and_step(
         session, registry, record.id, agent, box, "Retest the SQLi login-bypass finding."
     )
+    # The operator takes over and runs a manual command (ungated) before deciding.
+    submit_human_command(session, registry, record.id, "whoami")
     # The proposed command's ``tool_call_id`` is the ``cid`` the UI approves against
     # (from the ``command_proposed`` transcript event); resolve it the same way here.
     proposed = next(
