@@ -14,6 +14,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     ToolCallPart,
     ToolReturnPart,
+    UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo
 
@@ -162,6 +163,52 @@ def script_plan_then_run_then_conclude(
             ToolCallPart(
                 tool_name=info.output_tools[0].name,
                 args={"status": "still_open", "rationale": "auth still bypassable"},
+            )
+        ]
+    )
+
+
+def operator_message_count(messages: list[ModelMessage]) -> int:
+    """Count user-turn messages in history.
+
+    A retest starts with exactly one user turn (the finding goal); each operator
+    chat message delivered on an approve/reject resume adds one more.
+    """
+    return sum(
+        1
+        for m in messages
+        if isinstance(m, ModelRequest)
+        for part in m.parts
+        if isinstance(part, UserPromptPart)
+    )
+
+
+def script_run_then_conclude_noting_message(
+    messages: list[ModelMessage], info: AgentInfo
+) -> ModelResponse:
+    """Propose a command, then conclude reporting whether an operator chat message arrived.
+
+    The verdict rationale is ``"saw-message"`` iff more than one user turn is
+    present (the initial goal plus a delivered chat message), else ``"no-message"``.
+    """
+    if not has_command_result(messages):
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="run_command",
+                    args={
+                        "command": "curl -s http://revalid-juice-shop:3000/",
+                        "rationale": "probe",
+                    },
+                )
+            ]
+        )
+    rationale = "saw-message" if operator_message_count(messages) > 1 else "no-message"
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=info.output_tools[0].name,
+                args={"status": "still_open", "rationale": rationale},
             )
         ]
     )

@@ -214,6 +214,26 @@ class LiveSession:
             self.observations.clear()
             return drained
 
+    #: Free-text operator chat messages (FR-17 Slice 4) queued since the agent's
+    #: last turn. Delivered as a first-class ``user_prompt`` on the next agent
+    #: resume (approve/reject) — the operator's *voice*, distinct from
+    #: ``observations`` (`!` command *results* folded into a tool return).
+    #: Guarded by ``lock`` — appended by the message worker, drained by the next
+    #: agent resume, on separate threads.
+    human_messages: list[str] = field(default_factory=list)
+
+    def receive_message(self, text: str) -> None:
+        """Queue one operator chat message for the agent's next turn (thread-safe)."""
+        with self.lock:
+            self.human_messages.append(text)
+
+    def drain_messages(self) -> list[str]:
+        """Atomically return and clear the queued operator chat messages (thread-safe)."""
+        with self.lock:
+            drained = list(self.human_messages)
+            self.human_messages.clear()
+            return drained
+
 
 class SessionRegistry:
     """Process-local registry of live sessions (one per app instance)."""
@@ -263,8 +283,15 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
     def emit_plan(steps: list[str]) -> None:
         append_event(session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": steps})
 
+    def emit_message(message: str) -> None:
+        append_event(session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": message})
+
     return RetestSessionDeps(
-        sandbox=live.sandbox, emit_output=emit, drain_observations=live.drain, emit_plan=emit_plan
+        sandbox=live.sandbox,
+        emit_output=emit,
+        drain_observations=live.drain,
+        emit_plan=emit_plan,
+        emit_message=emit_message,
     )
 
 
@@ -460,9 +487,14 @@ def _resume_with_decision(
         # message here — the agent still observes what the human did.
         results.approvals[call_id] = ToolDenied(reason + format_observations(live.drain()))
     deps = _make_deps(session, session_id, live)
+    queued = live.drain_messages()
+    user_prompt = "\n".join(queued) if queued else None
     try:
         result = live.agent.run_sync(
-            deps=deps, message_history=live.messages, deferred_tool_results=results
+            user_prompt,
+            deps=deps,
+            message_history=live.messages,
+            deferred_tool_results=results,
         )
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
@@ -572,6 +604,33 @@ def submit_human_command(
         },
     )
     live.observe(_summarize_human_command(command, result))
+
+
+def submit_message(session: Session, registry: SessionRegistry, session_id: int, text: str) -> None:
+    """Queue a free-text operator chat message for the agent (FR-17 Slice 4).
+
+    Recorded as a ``HUMAN_MESSAGE`` transcript event (so the chat shows it and it
+    replays) and buffered on the live session; delivered to the agent as a
+    first-class user turn on the next approve/reject resume
+    (:func:`_resume_with_decision`) — the pure-queue model (the agent is never
+    idle, so a message can only land at the next turn boundary). Distinct from the
+    `!` command path (:func:`submit_human_command`): a chat message is the
+    operator's *voice*, not an observed command result.
+
+    A no-op if the session is not live (already ended/concluded, or never
+    started) — there is nothing to steer once torn down.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry (holds the message buffer).
+        session_id: The retest session to message.
+        text: The exact operator message.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
+    live.receive_message(text)
 
 
 def end_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
