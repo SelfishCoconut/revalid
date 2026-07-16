@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import { approveCommand, endRetestSession, rejectCommand, type SessionEvent } from "../api/client";
@@ -6,6 +7,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { Button } from "../components/ui/Button";
 import { Panel, PanelHeader } from "../components/ui/Panel";
 import { useRetestSession } from "../hooks/useRetestSession";
+import { errorMessage } from "../lib/format";
 import { STATUS_META, type KnownStatus } from "../lib/status";
 
 /** Terminal transcript lines derived from the session's ordered event log. */
@@ -47,6 +49,21 @@ export function RetestSession() {
   const id = Number(useParams().id);
   const { events, status, verdict } = useRetestSession(id);
 
+  // Each gate action is its own mutation so pending/error state stays scoped
+  // to the button that triggered it — approving never disables Reject, and a
+  // failed rejection doesn't blank out an unrelated approve error. Success
+  // still relies on the WS stream (useRetestSession) to advance `status`;
+  // these mutations only ever report their own request's pending/error state.
+  const approveMutation = useMutation({
+    mutationFn: (toolCallId: string) => approveCommand(id, toolCallId),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: (toolCallId: string) => rejectCommand(id, toolCallId),
+  });
+  const endMutation = useMutation({
+    mutationFn: () => endRetestSession(id),
+  });
+
   const lines = toLines(events);
   const latestProposed = [...events].reverse().find((event) => event.kind === "command_proposed");
   const awaitingApproval = status === "awaiting_command" && latestProposed !== undefined;
@@ -72,21 +89,33 @@ export function RetestSession() {
             <div className="flex gap-2 pt-2">
               <Button
                 variant="positive"
+                disabled={approveMutation.isPending}
                 onClick={() => {
-                  void approveCommand(id, String(latestProposed.payload.tool_call_id));
+                  approveMutation.mutate(String(latestProposed.payload.tool_call_id));
                 }}
               >
                 Approve
               </Button>
               <Button
                 variant="danger"
+                disabled={rejectMutation.isPending}
                 onClick={() => {
-                  void rejectCommand(id, String(latestProposed.payload.tool_call_id));
+                  rejectMutation.mutate(String(latestProposed.payload.tool_call_id));
                 }}
               >
                 Reject
               </Button>
             </div>
+            {approveMutation.isError && (
+              <p role="alert" className="text-sm text-danger-fg">
+                {errorMessage(approveMutation.error)}
+              </p>
+            )}
+            {rejectMutation.isError && (
+              <p role="alert" className="text-sm text-danger-fg">
+                {errorMessage(rejectMutation.error)}
+              </p>
+            )}
           </div>
         </Panel>
       )}
@@ -103,12 +132,18 @@ export function RetestSession() {
 
       <Button
         variant="ghost"
+        disabled={endMutation.isPending}
         onClick={() => {
-          void endRetestSession(id);
+          endMutation.mutate();
         }}
       >
         End session
       </Button>
+      {endMutation.isError && (
+        <p role="alert" className="text-sm text-danger-fg">
+          {errorMessage(endMutation.error)}
+        </p>
+      )}
     </div>
   );
 }
