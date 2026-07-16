@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    import docker
     from docker.models.containers import Container
 
 #: Pinned sandbox image (pentest CLIs: curl, etc.). Kept minimal for Slice 0.
@@ -120,6 +121,7 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
                 "the sandbox extra is required: `uv sync --extra sandbox`"
             ) from exc
         client = docker.from_env()
+        self._clear_stale_network(client)
         network = client.networks.create(self._network_name, driver="bridge", internal=True)
         network.connect(self._lab_container)  # allowlist == network membership (FR-06)
         self._container = client.containers.run(
@@ -130,6 +132,30 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             auto_remove=False,
             network_disabled=False,
         )
+
+    def _clear_stale_network(self, client: docker.DockerClient) -> None:
+        """Remove a same-named network left over from a crashed prior session, if any.
+
+        ``start()`` is not re-entrant across a crash: a session killed before it
+        reaches ``stop()`` (process kill, daemon restart) leaves its internal
+        network behind. Because the network name is session-scoped, retrying
+        ``start()`` for the same ``session_id`` would otherwise hit a 409
+        conflict on ``networks.create`` forever. Self-heal instead: disconnect
+        any leftover endpoints and remove the stale network first.
+        """
+        import docker
+
+        try:
+            stale = client.networks.get(self._network_name)
+        except docker.errors.NotFound:
+            return
+        stale.reload()
+        for container_id in list(stale.attrs.get("Containers") or {}):
+            try:
+                stale.disconnect(container_id, force=True)
+            except docker.errors.APIError:
+                pass
+        stale.remove()
 
     def exec(self, command: str, *, timeout: float) -> CommandResult:
         """Run ``command`` inside the live container and capture stdout/stderr/exit code."""
@@ -149,7 +175,13 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         )
 
     def stop(self) -> None:
-        """Remove the container and tear down the egress-locked network."""
+        """Remove the container and tear down the egress-locked network (best-effort).
+
+        Each step is independently tolerant of "already gone": ``disconnect``
+        raises a non-``NotFound`` ``APIError`` when the lab container was never
+        actually connected (e.g. ``start()`` failed before ``network.connect``),
+        which must not prevent the subsequent ``network.remove()`` from running.
+        """
         import docker
 
         if self._container is not None:
@@ -158,7 +190,13 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         client = docker.from_env()
         try:
             network = client.networks.get(self._network_name)
+        except docker.errors.NotFound:
+            return
+        try:
             network.disconnect(self._lab_container, force=True)
+        except docker.errors.APIError:
+            pass
+        try:
             network.remove()
         except docker.errors.NotFound:
             pass
