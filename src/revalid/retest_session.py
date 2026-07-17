@@ -17,6 +17,7 @@ never stops proposing commands.
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,10 +60,34 @@ def is_terminal(status: RetestSessionStatus) -> bool:
     return status in _TERMINAL
 
 
-def create_session(session: Session, *, finding_id: int, model: str) -> RetestSessionRecord:
-    """Insert a ``starting`` session row and return it."""
+def create_session(
+    session: Session,
+    *,
+    finding_id: int,
+    model: str,
+    free_launch: bool = False,
+    max_steps: int = 8,
+    max_seconds: int | None = None,
+) -> RetestSessionRecord:
+    """Insert a ``starting`` session row and return it.
+
+    Args:
+        session: Active DB session.
+        finding_id: The finding identity (FR-16) this session retests.
+        model: The resolved LLM model string driving the agent.
+        free_launch: Whether the agent's commands auto-run without a per-command
+            human approval (plan changes stay gated regardless). FR-17 Slice 5.
+        max_steps: Step budget — commands approved before force-conclude.
+        max_seconds: Wall-clock budget in seconds, enforced only in free-launch
+            mode; ``None`` means no time bound.
+    """
     record = RetestSessionRecord(
-        finding_id=finding_id, status=RetestSessionStatus.STARTING.value, model=model
+        finding_id=finding_id,
+        status=RetestSessionStatus.STARTING.value,
+        model=model,
+        free_launch=free_launch,
+        max_steps=max_steps,
+        max_seconds=max_seconds,
     )
     session.add(record)
     session.commit()
@@ -195,6 +220,16 @@ class LiveSession:
     pending_kind: str = "command"
     step_count: int = 0
     max_steps: int = 8
+    #: Whether the agent's commands auto-run without a per-command human approval
+    #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
+    #: ``set_free_launch``; the free-launch loop lives in ``_drive_auto``.
+    free_launch: bool = False
+    #: Wall-clock budget in seconds (free-launch only); ``None`` = no time bound.
+    max_seconds: float | None = None
+    #: The wall-clock budget's origin, stamped by ``start_and_step`` from its
+    #: injected ``clock`` (``time.monotonic`` in production). The default is a
+    #: safe fallback for a directly-constructed live session.
+    started_at: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
     #: Manual operator commands (`!`) run since the agent's last turn, buffered
     #: here and surfaced to the agent on its next turn so it observes what the

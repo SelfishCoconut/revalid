@@ -81,6 +81,27 @@ def test_create_session_starts_in_starting_status() -> None:
         assert s.model == "ollama:qwen3.6:27b"
         assert s.verdict_status is None
         assert s.ended_at is None
+        # Slice 5 config defaults: gated, 8-step budget, no time bound.
+        assert s.free_launch is False
+        assert s.max_steps == 8
+        assert s.max_seconds is None
+
+
+def test_create_session_persists_budget_config() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(
+            session,
+            finding_id=fid,
+            model="m",
+            free_launch=True,
+            max_steps=20,
+            max_seconds=300,
+        )
+        assert s.free_launch is True
+        assert s.max_steps == 20
+        assert s.max_seconds == 300
 
 
 def test_append_event_assigns_monotonic_seq() -> None:

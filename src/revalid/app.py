@@ -292,6 +292,9 @@ class RetestSessionOut(BaseModel):
     model: str
     verdict_status: str | None
     verdict_rationale: str | None
+    free_launch: bool
+    max_steps: int
+    max_seconds: int | None
     events: list[SessionEventOut] = []
 
     @classmethod
@@ -306,6 +309,9 @@ class RetestSessionOut(BaseModel):
             model=record.model,
             verdict_status=record.verdict_status,
             verdict_rationale=record.verdict_rationale,
+            free_launch=record.free_launch,
+            max_steps=record.max_steps,
+            max_seconds=record.max_seconds,
             events=[SessionEventOut(**e) for e in events],
         )
 
