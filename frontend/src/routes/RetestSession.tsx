@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import {
   approveCommand,
   endRetestSession,
+  getRetestSession,
   rejectCommand,
+  setFreeLaunch,
   submitHumanCommand,
   submitMessage,
   type SessionEvent,
@@ -17,6 +19,13 @@ import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
 import { useRetestSession } from "../hooks/useRetestSession";
 import { errorMessage } from "../lib/format";
+import {
+  autoApprovedSeqs,
+  budgetLabel,
+  currentFreeLaunch,
+  givenUpReason,
+  stepsUsed,
+} from "../lib/sessionBudget";
 import { STATUS_META, type KnownStatus } from "../lib/status";
 
 /**
@@ -170,7 +179,22 @@ export function RetestSession() {
   const messageMutation = useMutation({
     mutationFn: (text: string) => submitMessage(id, text),
   });
+  // The session record carries the free-launch + budget config (FR-17 Slice 5)
+  // the WS event stream doesn't: max_steps/max_seconds are immutable, and the
+  // *initial* free_launch seeds the derivation below. One fetch is enough — live
+  // toggles arrive as `free_launch_changed` events, tracked by `currentFreeLaunch`.
+  const { data: record } = useQuery({
+    queryKey: ["retest-session", id],
+    queryFn: () => getRetestSession(id),
+  });
+  const toggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => setFreeLaunch(id, enabled),
+  });
 
+  const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
+  const stepsDone = stepsUsed(events);
+  const maxSteps = record?.max_steps ?? 8;
+  const autoSeqs = autoApprovedSeqs(events);
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);
   const decisionSeq = lastDecisionSeq(events);
@@ -254,9 +278,17 @@ export function RetestSession() {
     }
     if (event.kind === "command_proposed") {
       const isPending = awaitingApproval && event.seq === latestProposal?.seq;
+      const wasAuto = autoSeqs.has(event.seq);
       return [
         <AgentTurn key={event.seq}>
-          <p className="text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
+            {wasAuto && (
+              <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-iris-fg ring-1 ring-iris/30">
+                auto
+              </span>
+            )}
+          </div>
           <code className="mt-2 block overflow-x-auto rounded-md border border-line bg-ink/50 px-3 py-2 font-mono text-[13px] text-fg">
             <span className="text-faint">$</span> {String(event.payload.command ?? "")}
           </code>
@@ -298,17 +330,41 @@ export function RetestSession() {
         <div className="flex items-baseline gap-3">
           <Eyebrow>Agentic retest session</Eyebrow>
           <span className="font-mono text-[12px] text-dim">{humanizeStatus(status)}</span>
+          {/* Step budget meter — steps used / max (auto or human approvals). */}
+          <span className="font-mono text-[12px] text-faint" aria-label="step budget">
+            {budgetLabel(stepsDone, maxSteps)}
+          </span>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button
-            variant="ghost"
-            disabled={endMutation.isPending}
-            onClick={() => {
-              endMutation.mutate();
-            }}
-          >
-            End session
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* Free-launch — auto-approve the agent's commands (plan changes stay gated). */}
+            <label className="flex items-center gap-2 text-[13px] text-dim">
+              <input
+                type="checkbox"
+                checked={freeLaunch}
+                disabled={sessionOver || toggleMutation.isPending}
+                onChange={(event) => {
+                  toggleMutation.mutate(event.target.checked);
+                }}
+                className="accent-iris disabled:opacity-45"
+              />
+              Free-launch
+            </label>
+            <Button
+              variant="ghost"
+              disabled={endMutation.isPending}
+              onClick={() => {
+                endMutation.mutate();
+              }}
+            >
+              End session
+            </Button>
+          </div>
+          {toggleMutation.isError && (
+            <p role="alert" className="text-sm text-danger-fg">
+              {errorMessage(toggleMutation.error)}
+            </p>
+          )}
           {endMutation.isError && (
             <p role="alert" className="text-sm text-danger-fg">
               {errorMessage(endMutation.error)}
@@ -348,14 +404,25 @@ export function RetestSession() {
             <p className="text-sm text-dim">The agent is preparing its first step…</p>
           )}
           {chatItems}
-          {verdict && (
-            <div className="rounded-lg border border-line bg-panel-2/50 p-4">
-              <div className="mb-2 flex items-center gap-2">
-                <Eyebrow>Verdict</Eyebrow>
-                {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
-              </div>
-              <p className="text-sm text-fg">{verdict.rationale}</p>
+          {status === "given_up" ? (
+            // The agent hit a budget bound (step or wall-clock). Rendered
+            // distinctly from a reasoned verdict or an operator-ended session.
+            <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
+              <Eyebrow>Agent gave up</Eyebrow>
+              <p className="mt-1 text-sm text-warn-fg">
+                {givenUpReason(events) ?? "budget exhausted"}
+              </p>
             </div>
+          ) : (
+            verdict && (
+              <div className="rounded-lg border border-line bg-panel-2/50 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <Eyebrow>Verdict</Eyebrow>
+                  {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
+                </div>
+                <p className="text-sm text-fg">{verdict.rationale}</p>
+              </div>
+            )
           )}
         </div>
       </div>

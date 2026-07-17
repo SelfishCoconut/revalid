@@ -196,18 +196,44 @@ export interface RetestSession {
   model: string;
   verdict_status: string | null;
   verdict_rationale: string | null;
+  free_launch: boolean;
+  max_steps: number;
+  max_seconds: number | null;
   events: SessionEvent[];
 }
 
+/** Free-launch + budget config for a new session (FR-17 Slice 5); all optional. */
+export interface StartSessionOptions {
+  free_launch?: boolean;
+  max_steps?: number;
+  max_seconds?: number | null;
+}
+
 /** Start an agentic retest session for a finding (backend replies with the new session). */
-export function startRetestSession(findingId: number): Promise<RetestSession> {
-  return request<RetestSession>(`/findings/${String(findingId)}/retest-session`, {
-    method: "POST",
-  });
+export function startRetestSession(
+  findingId: number,
+  opts?: StartSessionOptions,
+): Promise<RetestSession> {
+  return request<RetestSession>(
+    `/findings/${String(findingId)}/retest-session`,
+    opts ? jsonInit("POST", opts) : { method: "POST" },
+  );
 }
 
 export function getRetestSession(id: number): Promise<RetestSession> {
   return request<RetestSession>(`/retest-sessions/${String(id)}`);
+}
+
+/**
+ * Toggle free-launch mode on a live session (FR-17 Slice 5). Enabling
+ * auto-approves the agent's commands (plan changes stay gated) and drives any
+ * pending command; disabling re-arms the per-command gate.
+ */
+export function setFreeLaunch(id: number, enabled: boolean): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/free-launch`,
+    jsonInit("POST", { enabled }),
+  );
 }
 
 /** Approve a proposed command so the agent runs it against the allowlisted lab target. */

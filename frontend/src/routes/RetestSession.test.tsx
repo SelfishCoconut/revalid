@@ -20,9 +20,27 @@ function renderAt(id = 1) {
   );
 }
 
+/** A default session record for the config `useQuery` (FR-17 Slice 5). */
+function mockRecord(overrides: Partial<client.RetestSession> = {}): void {
+  vi.mocked(client.getRetestSession).mockResolvedValue({
+    id: 1,
+    finding_id: 1,
+    status: "awaiting_command",
+    model: "test",
+    verdict_status: null,
+    verdict_rationale: null,
+    free_launch: false,
+    max_steps: 8,
+    max_seconds: null,
+    events: [],
+    ...overrides,
+  });
+}
+
 describe("RetestSession", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockRecord();
   });
 
   it("shows the approval card and approves the proposed command", async () => {
@@ -381,5 +399,74 @@ describe("RetestSession", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /approve/i }));
     expect(client.approveCommand).toHaveBeenCalledWith(1, "plan-1");
+  });
+
+  it("shows the step-budget meter (steps used / max)", async () => {
+    mockRecord({ max_steps: 5 });
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        { seq: 1, kind: "command_approved", payload: { auto: true } },
+        { seq: 2, kind: "command_output", payload: { command: "id", stdout: "ok" } },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    // The meter first renders with the default budget, then updates to 5 once
+    // the config query resolves — wait for the updated readout.
+    expect(await screen.findByText("1 / 5 steps")).toBeInTheDocument();
+  });
+
+  it("toggles free-launch via the endpoint", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.setFreeLaunch).mockResolvedValue({ status: "accepted" });
+
+    renderAt(1);
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /free-launch/i }));
+    expect(client.setFreeLaunch).toHaveBeenCalledWith(1, true);
+  });
+
+  it("tags an auto-approved command and shows no approval card for it", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        { seq: 1, kind: "command_proposed", payload: { command: "id", rationale: "who am i" } },
+        { seq: 2, kind: "command_approved", payload: { auto: true } },
+        { seq: 3, kind: "command_output", payload: { command: "id", stdout: "root" } },
+      ],
+      status: "concluded",
+      verdict: { status: "still_open", rationale: "bypassable" },
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByText("auto")).toBeInTheDocument();
+    // Auto-run commands never showed an approve/reject card.
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("renders a distinct given-up banner citing the budget reason", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "verdict", payload: { status: "inconclusive", rationale: "budget exhausted" } }],
+      status: "given_up",
+      verdict: { status: "inconclusive", rationale: "budget exhausted" },
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.getByText(/agent gave up/i)).toBeInTheDocument();
+    expect(screen.getByText("budget exhausted")).toBeInTheDocument();
+    // Not rendered as an ordinary "Verdict" box.
+    expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
   });
 });
