@@ -132,3 +132,15 @@ design of record.
   practice (no formal migrations yet).
 - **Status `proposed`:** the precedence change, the local-first default, and storing
   the key in the DB are Álvaro's to ratify.
+
+## Update (2026-07-17): default model → `ollama:qwen3.5:9b`
+
+The shipped `DEFAULT_MODEL` above was `ollama:qwen3.6:27b`; it is now
+`ollama:qwen3.5:9b` (issue #98). Live use of the FR-17 agentic console exposed
+that 27B is too heavy for its multi-turn reason→command→observe loop — a single
+turn took ~50s+ locally (minutes cold / under Docker + memory contention), so an
+interactive session read as hung. `qwen3.5:9b` proposes its first step in ~10s
+(verified live: `plan_proposed` streamed in 8.6s over the real WebSocket). The
+local-first, config-only-switch decision above is unchanged — only the shipped
+default model string moved; users still select any provider/model (including
+27B) in `/settings`.

@@ -2,7 +2,7 @@
 
 One switch, ``REVALID_LLM_MODEL``, selects the backend for every LLM-using
 component: it holds a Pydantic AI model string (``provider:model``, e.g.
-``ollama:qwen3.6:27b`` or ``anthropic:claude-sonnet-5``) and defaults to a
+``ollama:qwen3.5:9b`` or ``anthropic:claude-sonnet-5``) and defaults to a
 local-first Ollama backend (ADR-0021) — no API key or network egress required
 out of the box. Switching backends is configuration-only — no code change.
 The Ollama backend additionally needs a base URL (``OLLAMA_BASE_URL``, falling
@@ -31,8 +31,14 @@ from revalid.domain import Settings
 MODEL_ENV = "REVALID_LLM_MODEL"
 """Environment variable that selects the Pydantic AI backend (ADR-0010)."""
 
-DEFAULT_MODEL = "ollama:qwen3.6:27b"
+DEFAULT_MODEL = "ollama:qwen3.5:9b"
 """Local-first default backend (ADR-0021); used when :data:`MODEL_ENV` is unset.
+
+A small, responsive model on purpose: the FR-17 agentic console runs a
+multi-turn reason->command->observe loop, and a heavier model (e.g.
+``ollama:qwen3.6:27b`` at ~50s+/turn locally) makes the interactive session
+read as hung. ``qwen3.5:9b`` proposes its first step in ~10s here; users can
+still select a larger model in ``/settings`` when they can tolerate the latency.
 
 Not a member of Pydantic AI's ``KnownModelName`` literal (Ollama models are
 open-ended, not a fixed catalog), so this is a plain ``str``.
