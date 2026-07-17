@@ -399,6 +399,70 @@ def test_free_launch_time_budget_gives_up() -> None:
     assert box.stopped
 
 
+def test_enable_free_launch_auto_approves_pending_command() -> None:
+    """Turning free-launch on with a command pending drives it to a verdict."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        # Start gated: the first command proposal waits for a decision.
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        assert _pending_cid(registry, s.id)  # a command is pending
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
+
+        rs.set_free_launch(session, registry, s.id, True)
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.free_launch is True
+    assert len(box.commands) == 1  # auto-approved and run without a human decision
+    assert SessionEventKind.FREE_LAUNCH_CHANGED.value in [e["kind"] for e in events]
+    approvals = [e for e in events if e["kind"] == SessionEventKind.COMMAND_APPROVED.value]
+    assert approvals and all(e["payload"].get("auto") is True for e in approvals)
+
+
+def test_disable_free_launch_records_event_on_live_session() -> None:
+    """Turning free-launch off on a live (parked-at-plan) session records the toggle."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+
+        # Free-launch on, but the first proposal is a plan → it parks (still live).
+        start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
+        assert registry.get(s.id) is not None  # still live at the plan gate
+
+        rs.set_free_launch(session, registry, s.id, False)
+        live = registry.get(s.id)
+        assert live is not None
+        assert live.free_launch is False
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.free_launch is False
+    toggles = [e for e in events if e["kind"] == SessionEventKind.FREE_LAUNCH_CHANGED.value]
+    assert toggles[-1]["payload"] == {"enabled": False}
+
+
+def test_set_free_launch_noop_when_not_live() -> None:
+    """Toggling a session that is not live is a no-op (no raise, record untouched)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()  # nothing registered
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.set_free_launch(session, registry, s.id, True)  # no live session → no-op
+        session.refresh(s)
+        assert s.free_launch is False
+
+
 def test_is_terminal_matches_the_terminal_statuses() -> None:
     assert rs.is_terminal(RetestSessionStatus.CONCLUDED)
     assert rs.is_terminal(RetestSessionStatus.GIVEN_UP)

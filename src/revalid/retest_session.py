@@ -682,6 +682,44 @@ def apply_decision(
     _drive_auto(session, registry, session_id)
 
 
+def set_free_launch(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    enabled: bool,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Toggle free-launch on a live session (FR-17 Slice 5).
+
+    Updates the persisted mode + the live flag, records a ``free_launch_changed``
+    transcript event, and — when enabling with a command already pending —
+    auto-approves it (and any that follow) via :func:`_drive_auto`. A no-op if
+    the session is not live (already ended/concluded, or never started): there is
+    nothing to steer once torn down, and the persisted mode is fixed at that point.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The retest session to toggle.
+        enabled: The new free-launch state.
+        clock: Monotonic clock for the wall-clock budget check (injectable for
+            tests); forwarded to :func:`_drive_auto`.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None:
+        return
+    record.free_launch = enabled
+    session.commit()
+    live.free_launch = enabled
+    append_event(session, session_id, SessionEventKind.FREE_LAUNCH_CHANGED, {"enabled": enabled})
+    if enabled:
+        _drive_auto(session, registry, session_id, clock=clock)
+
+
 def _summarize_human_command(command: str, result: CommandResult) -> str:
     """Render a manual operator command + result as the note the agent will read."""
     return (
