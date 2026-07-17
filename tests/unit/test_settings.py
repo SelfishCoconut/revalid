@@ -23,7 +23,7 @@ def test_seed_on_empty_db_uses_local_first_default(
     monkeypatch.delenv("REVALID_LLM_MODEL", raising=False)
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     cfg = settings_mod.load_or_seed(session)
-    assert cfg.model == DEFAULT_MODEL == "ollama:qwen3.6:27b"
+    assert cfg.model == DEFAULT_MODEL == "ollama:qwen3.5:9b"
     assert cfg.base_url == DEFAULT_BASE_URL == "http://localhost:11434/v1"
     assert cfg.api_key is None
 

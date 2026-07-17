@@ -16,6 +16,11 @@ dependencies = [
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0",
     "uvicorn>=0.32",
+    # WebSocket protocol implementation uvicorn needs to serve the FR-17 retest
+    # session stream (WS /api/retest-sessions/{id}/stream). Without it uvicorn
+    # logs "No supported WebSocket library detected" and the route 404s; the
+    # Starlette TestClient does WS in-process so the test suite never needs it.
+    "websockets>=13",
 ]
 
 [project.optional-dependencies]

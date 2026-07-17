@@ -16,7 +16,7 @@ def client() -> TestClient:
 
 def test_get_returns_seeded_default_with_no_key(client: TestClient) -> None:
     body = client.get("/api/settings").json()
-    assert body["model"] == "ollama:qwen3.6:27b"
+    assert body["model"] == "ollama:qwen3.5:9b"
     assert body["base_url"] == "http://localhost:11434/v1"
     assert body["api_key_set"] is False
     assert body["api_key_hint"] is None
