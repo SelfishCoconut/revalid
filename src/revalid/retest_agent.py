@@ -36,6 +36,10 @@ one-line rationale; a human approves or rejects each before it runs.
 - Prefer non-destructive verification. Do not attempt to damage the target.
 - When you are confident, conclude with a verdict: `still_open` (the issue \
 reproduces), `fixed` (it does not), or `inconclusive` (you cannot tell).
+- The operator may message you at any time; their message arrives as a new \
+turn. Always address it: answer questions with `respond`, then continue; fold \
+any steering into your plan and commands. Use `respond` sparingly — to answer \
+or for a brief status note, not to narrate every step.
 """
 
 
@@ -57,6 +61,10 @@ def _no_emit_plan(steps: list[str]) -> None:
     """Default ``emit_plan``: drop the approved plan (agent-unit tests need no sink)."""
 
 
+def _no_emit_message(message: str) -> None:
+    """Default ``emit_message``: drop agent prose (agent-unit tests need no sink)."""
+
+
 @dataclass
 class RetestSessionDeps:
     """Runtime dependencies injected into the retest agent's tools."""
@@ -73,6 +81,10 @@ class RetestSessionDeps:
     #: ``set_plan`` tool once the human approves it; the orchestrator wires this
     #: to append a ``plan_updated`` transcript event.
     emit_plan: Callable[[list[str]], None] = _no_emit_plan
+    #: Records the agent's prose replies to the operator (FR-17 Slice 4). Invoked
+    #: by the non-gated ``respond`` tool; the orchestrator wires this to append an
+    #: ``agent_message`` transcript event. The default drops it (agent-unit tests).
+    emit_message: Callable[[str], None] = _no_emit_message
 
 
 def _format_result(result: CommandResult) -> str:
@@ -155,5 +167,23 @@ def build_retest_agent(
         """
         ctx.deps.emit_plan(steps)
         return f"Plan set ({len(steps)} steps)."
+
+    @agent.tool
+    def respond(ctx: RunContext[RetestSessionDeps], message: str) -> str:
+        """Send a short prose message to the operator (e.g. answer a question).
+
+        Use this to reply to the operator or give a brief status note — not to
+        narrate every step. It runs nothing; after it you continue with your
+        plan, a command, or a verdict.
+
+        Args:
+            ctx: The run context carrying the message-emit callback.
+            message: The prose to show the operator in the chat.
+
+        Returns:
+            A short confirmation the message was delivered.
+        """
+        ctx.deps.emit_message(message)
+        return "Delivered to the operator."
 
     return agent

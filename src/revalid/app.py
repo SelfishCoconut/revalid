@@ -98,6 +98,7 @@ from revalid.retest_session import (
     load_events_after,
     start_and_step,
     submit_human_command,
+    submit_message,
 )
 from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
 from revalid.sanity import PlanDeviationError
@@ -319,6 +320,12 @@ class HumanCommandRequest(BaseModel):
     """Body for a manual operator command (`!`): the exact command to run (FR-17)."""
 
     command: str = Field(min_length=1)
+
+
+class MessageRequest(BaseModel):
+    """Body for an operator chat message to the agent (FR-17 Slice 4)."""
+
+    text: str = Field(min_length=1)
 
 
 class ImportResult(BaseModel):
@@ -662,6 +669,24 @@ def run_human_command(
     """
     with sessions() as session:
         submit_human_command(session, registry, session_id, command)
+
+
+def run_message(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    text: str,
+) -> None:
+    """Queue an operator chat message for the agent (FR-17 Slice 4 background task).
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The retest session to message.
+        text: The exact operator message.
+    """
+    with sessions() as session:
+        submit_message(session, registry, session_id, text)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1165,6 +1190,19 @@ def _register_session_routes(
         next turn. A no-op if the session is no longer live.
         """
         background.add_task(run_human_command, sessions, registry, session_id, body.command)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/message", status_code=202)
+    def send_message(
+        session_id: int, body: MessageRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Queue an operator chat message to the agent (FR-17 Slice 4).
+
+        Recorded on the transcript and delivered to the agent as a user turn on
+        its next approve/reject (pure-queue steering). A no-op if the session is
+        no longer live.
+        """
+        background.add_task(run_message, sessions, registry, session_id, body.text)
         return {"status": "accepted"}
 
     @router.post("/retest-sessions/{session_id}/end", status_code=202)

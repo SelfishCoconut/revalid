@@ -209,6 +209,7 @@ class SessionEventKind(enum.StrEnum):
     COMMAND_REJECTED = "command_rejected"
     COMMAND_OUTPUT = "command_output"
     HUMAN_COMMAND = "human_command"
+    HUMAN_MESSAGE = "human_message"
     PLAN_PROPOSED = "plan_proposed"
     PLAN_APPROVED = "plan_approved"
     PLAN_REJECTED = "plan_rejected"

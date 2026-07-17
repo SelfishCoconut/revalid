@@ -142,7 +142,12 @@ non-lab targets, destructive exploitation.
   - [x] **AC2**: no command executes before human approval — enforced structurally by the Pydantic AI deferred-tool gate (`run_command` cannot resolve without an explicit `ToolApproved`/`ToolDenied` resume), not by policy alone.
   - [x] **AC3**: the session transcript (`session_events`) is append-only and replayable — every proposed/approved/rejected command, its output, each state transition, and the final verdict, ordered by a monotonic sequence number.
   - [x] **AC4**: a non-lab host is unreachable from inside the sandbox (egress lock) — proven by a live system test (`tests/system/test_retest_session_system.py`) asserting the lab container is reachable and `example.com` is not.
-- **Deferred to later slices** (not yet built, tracked in epic #87): human terminal input / shared PTY (Slice 1); a gated plan panel (Slice 2); chat steering (Slice 3); free-launch mode + budget UI (Slice 4 — the step-budget "give up" backstop exists server-side in Slice 0 with no UI); verdict adjudication UI + FR-09/FR-10/FR-12 integration, and retirement of the old batch path (Slice 5).
+- **Acceptance criteria — Slice 4** (met — issue #96, ADR-0028 proposed, 2026-07-16):
+  - [x] **AC5**: the operator can type a free-text message into the console; it is recorded as a `human_message` transcript event and queued on the live session (a no-op if the session is not live).
+  - [x] **AC6**: a queued message is delivered to the agent as a first-class user turn (`user_prompt`) on the next approve/reject, in order — never interrupting a run nor discarding a pending proposal (pure-queue steering).
+  - [x] **AC7**: the agent can answer in prose via a non-gated `respond` tool (an `agent_message` event) and the run continues to its next proposal/verdict; messages and `respond` consume no step budget.
+  - [x] **AC8**: the SPA sends plain text as a chat message (Send) while `!command` still runs (Run); operator messages render as a distinct turn with a "queued" treatment until delivered; the input disables when the session is over.
+- **Deferred to later slices** (tracked in epic #87): free-launch mode + session controls + step/time budget + give-up UI (Slice 5); verdict adjudication UI + FR-09/FR-10/FR-12 integration and retirement of the old batch path (Slice 6).
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. Supersedes FR-04/FR-05/FR-07/FR-08/FR-09 over time (both paths coexist until Slice 5); NFR-02's reproducibility claim shifts from deterministic re-derivation to a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements

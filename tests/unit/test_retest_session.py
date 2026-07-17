@@ -20,7 +20,9 @@ from tests._retest_helpers import (
     has_command_result,
     script_always_propose,
     script_plan_then_run_then_conclude,
+    script_respond_then_conclude,
     script_run_then_conclude,
+    script_run_then_conclude_noting_message,
 )
 
 from revalid import retest_session as rs
@@ -530,6 +532,111 @@ def test_plan_approval_is_exempt_from_command_budget() -> None:
         )
 
         session.refresh(s)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+
+
+def test_submit_message_records_event_and_buffers() -> None:
+    """A chat message is recorded on the transcript and queued on the live session."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_message(session, registry, s.id, "focus on the login endpoint")
+
+        msgs = [e for e in rs.load_events_after(session, s.id, 0) if e["kind"] == "human_message"]
+        assert len(msgs) == 1
+        assert msgs[0]["payload"]["text"] == "focus on the login endpoint"
+        live = registry.get(s.id)
+        assert live is not None
+        assert live.human_messages == ["focus on the login endpoint"]
+
+
+def test_submit_message_on_dead_session_is_a_noop() -> None:
+    """A chat message to a non-live session records nothing and does not raise."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        rs.submit_message(session, registry, 999, "hello")  # never started
+        assert rs.load_events_after(session, 999, 0) == []
+
+
+def test_agent_reads_queued_message_on_approve() -> None:
+    """A queued chat message reaches the agent as a user turn on the next approval."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_message(session, registry, s.id, "focus on the login endpoint")
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
+
+        session.refresh(s)
+    assert s.verdict_rationale == "saw-message"
+
+
+def test_agent_reads_queued_message_on_reject() -> None:
+    """A queued chat message is delivered even when the pending command is rejected."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        rs.submit_message(session, registry, s.id, "focus on the login endpoint")
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=False, reason="no", command_id=cid)
+
+        session.refresh(s)
+    assert s.verdict_rationale == "saw-message"
+
+
+def test_no_message_means_no_extra_user_turn() -> None:
+    """Without a chat message the agent sees only the initial goal (control)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        cid = _pending_cid(registry, s.id)
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
+
+        session.refresh(s)
+    assert s.verdict_rationale == "no-message"
+
+
+def test_respond_emits_agent_message_through_the_orchestrator() -> None:
+    """The agent's `respond` prose is recorded as an `agent_message` transcript event.
+
+    Exercises the real `_make_deps` emit_message wire end-to-end (not a stub): a
+    scripted model calls `respond` then concludes, and the orchestrator must
+    persist an `agent_message` event carrying the prose text.
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        agent = build_retest_agent(FunctionModel(script_respond_then_conclude))
+        start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
+
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    prose = [e for e in events if e["kind"] == "agent_message"]
+    assert len(prose) == 1
+    assert prose[0]["payload"]["text"] == "the 500 was the WAF rejecting the payload"
     assert s.status == RetestSessionStatus.CONCLUDED.value
 
 
