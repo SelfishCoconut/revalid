@@ -215,6 +215,7 @@ class SessionEventKind(enum.StrEnum):
     PLAN_REJECTED = "plan_rejected"
     PLAN_UPDATED = "plan_updated"
     STATE_CHANGE = "state_change"
+    FREE_LAUNCH_CHANGED = "free_launch_changed"
     VERDICT = "verdict"
     ERROR = "error"
 

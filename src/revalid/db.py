@@ -292,6 +292,9 @@ class RetestSessionRecord(Base):
     verdict_rationale: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    free_launch: Mapped[bool] = mapped_column(default=False)
+    max_steps: Mapped[int] = mapped_column(default=8)
+    max_seconds: Mapped[int | None] = mapped_column(default=None)
 
 
 class SessionEventRecord(Base):

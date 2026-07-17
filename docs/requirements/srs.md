@@ -147,7 +147,12 @@ non-lab targets, destructive exploitation.
   - [x] **AC6**: a queued message is delivered to the agent as a first-class user turn (`user_prompt`) on the next approve/reject, in order — never interrupting a run nor discarding a pending proposal (pure-queue steering).
   - [x] **AC7**: the agent can answer in prose via a non-gated `respond` tool (an `agent_message` event) and the run continues to its next proposal/verdict; messages and `respond` consume no step budget.
   - [x] **AC8**: the SPA sends plain text as a chat message (Send) while `!command` still runs (Run); operator messages render as a distinct turn with a "queued" treatment until delivered; the input disables when the session is over.
-- **Deferred to later slices** (tracked in epic #87): free-launch mode + session controls + step/time budget + give-up UI (Slice 5); verdict adjudication UI + FR-09/FR-10/FR-12 integration and retirement of the old batch path (Slice 6).
+- **Acceptance criteria — Slice 5** (met — issue #100, ADR-0029 proposed, 2026-07-17):
+  - [x] **AC9**: with free-launch on, the agent's commands auto-run to a verdict with no per-command human approval, while a `set_plan` proposal still pauses for approval (plan changes are always gated).
+  - [x] **AC10**: free-launch is settable at session start (`POST /retest-session` body) and toggleable live (`POST /retest-sessions/{id}/free-launch`); enabling mid-session auto-approves any pending command; every toggle is a `free_launch_changed` transcript event and each auto-approval is marked `{"auto": true}`.
+  - [x] **AC11**: `max_steps` (both modes) and `max_seconds` (free-launch only, checked at step boundaries) force-conclude the session `given_up`/`inconclusive` with a budget-exhausted reason; both bounds are visible in the SPA.
+  - [x] **AC12**: the given-up state renders distinctly from an operator-ended or concluded session.
+- **Deferred to later slices** (tracked in epic #87): verdict adjudication UI + FR-09/FR-10/FR-12 integration and retirement of the old batch path (Slice 6).
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. Supersedes FR-04/FR-05/FR-07/FR-08/FR-09 over time (both paths coexist until Slice 5); NFR-02's reproducibility claim shifts from deterministic re-derivation to a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements

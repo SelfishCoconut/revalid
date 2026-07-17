@@ -104,6 +104,9 @@ describe("RetestStage", () => {
       model: "claude",
       verdict_status: null,
       verdict_rationale: null,
+      free_launch: false,
+      max_steps: 8,
+      max_seconds: null,
       events: [],
     });
     renderStage(<RetestStage />, stageContext({ approved: true }));

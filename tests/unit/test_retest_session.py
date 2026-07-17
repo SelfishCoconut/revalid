@@ -81,6 +81,27 @@ def test_create_session_starts_in_starting_status() -> None:
         assert s.model == "ollama:qwen3.6:27b"
         assert s.verdict_status is None
         assert s.ended_at is None
+        # Slice 5 config defaults: gated, 8-step budget, no time bound.
+        assert s.free_launch is False
+        assert s.max_steps == 8
+        assert s.max_seconds is None
+
+
+def test_create_session_persists_budget_config() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(
+            session,
+            finding_id=fid,
+            model="m",
+            free_launch=True,
+            max_steps=20,
+            max_seconds=300,
+        )
+        assert s.free_launch is True
+        assert s.max_steps == 20
+        assert s.max_seconds == 300
 
 
 def test_append_event_assigns_monotonic_seq() -> None:
@@ -278,6 +299,168 @@ def test_budget_exhaustion_gives_up() -> None:
     assert s.verdict_status == "inconclusive"
     assert len(box.commands) == 1  # the over-budget command never ran
     assert box.stopped
+
+
+def test_free_launch_auto_runs_command_to_verdict() -> None:
+    """In free-launch, start_and_step drives the command to a verdict — no human decision."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True)
+        box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        # start_and_step's own _drive_auto loop runs before this returns.
+        start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.verdict_status == "still_open"
+    assert len(box.commands) == 1  # the command ran, unattended
+    approvals = [e for e in events if e["kind"] == SessionEventKind.COMMAND_APPROVED.value]
+    assert len(approvals) == 1
+    assert all(e["payload"].get("auto") is True for e in approvals)
+    # No human approval/rejection events were needed to reach the verdict.
+    assert not any(e["kind"] == SessionEventKind.COMMAND_REJECTED.value for e in events)
+
+
+def test_free_launch_still_gates_plan_changes() -> None:
+    """A set_plan proposal halts the free-launch loop: plan changes are always gated."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True)
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+
+        start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
+        session.refresh(s)
+    # The first proposal is a plan → the auto-loop stops and waits for approval.
+    assert s.status == RetestSessionStatus.AWAITING_PLAN.value
+    assert box.commands == []  # nothing ran: the plan was never approved
+
+
+def test_free_launch_step_budget_gives_up() -> None:
+    """The step budget still bounds a free-launch session that never concludes."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True, max_steps=1)
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
+
+        start_and_step(
+            session, registry, s.id, agent, box, "Retest.", free_launch=True, max_steps=1
+        )
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.GIVEN_UP.value
+    assert s.verdict_status == "inconclusive"
+    assert s.verdict_rationale == "budget exhausted"
+    assert len(box.commands) == 1  # exactly one step ran before the budget bit
+    assert box.stopped
+
+
+def test_free_launch_time_budget_gives_up() -> None:
+    """The wall-clock budget force-concludes a free-launch session at a step boundary."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    # One injected clock feeds BOTH the started_at baseline (first call, inside
+    # start_and_step) and the drive loop's budget check (later calls): 0.0 then
+    # 10_000.0 → elapsed 10_000 > max_seconds 1 on the first boundary, before
+    # any command runs. Deterministic; never touches real time.
+    clock = iter([0.0, 10_000.0, 10_000.0, 10_000.0]).__next__
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True, max_seconds=1)
+        box = FakeSandbox([])  # nothing scripted: the time budget bites before any command
+        agent = build_retest_agent(FunctionModel(script_always_propose))
+
+        start_and_step(
+            session,
+            registry,
+            s.id,
+            agent,
+            box,
+            "Retest.",
+            free_launch=True,
+            max_seconds=1,
+            clock=clock,
+        )
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.GIVEN_UP.value
+    assert s.verdict_status == "inconclusive"
+    assert s.verdict_rationale == "time budget exhausted"
+    assert box.commands == []  # gave up before running anything
+    assert box.stopped
+
+
+def test_enable_free_launch_auto_approves_pending_command() -> None:
+    """Turning free-launch on with a command pending drives it to a verdict."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+
+        # Start gated: the first command proposal waits for a decision.
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        assert _pending_cid(registry, s.id)  # a command is pending
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
+
+        rs.set_free_launch(session, registry, s.id, True)
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.free_launch is True
+    assert len(box.commands) == 1  # auto-approved and run without a human decision
+    assert SessionEventKind.FREE_LAUNCH_CHANGED.value in [e["kind"] for e in events]
+    approvals = [e for e in events if e["kind"] == SessionEventKind.COMMAND_APPROVED.value]
+    assert approvals and all(e["payload"].get("auto") is True for e in approvals)
+
+
+def test_disable_free_launch_records_event_on_live_session() -> None:
+    """Turning free-launch off on a live (parked-at-plan) session records the toggle."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+
+        # Free-launch on, but the first proposal is a plan → it parks (still live).
+        start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
+        assert registry.get(s.id) is not None  # still live at the plan gate
+
+        rs.set_free_launch(session, registry, s.id, False)
+        live = registry.get(s.id)
+        assert live is not None
+        assert live.free_launch is False
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.free_launch is False
+    toggles = [e for e in events if e["kind"] == SessionEventKind.FREE_LAUNCH_CHANGED.value]
+    assert toggles[-1]["payload"] == {"enabled": False}
+
+
+def test_set_free_launch_noop_when_not_live() -> None:
+    """Toggling a session that is not live is a no-op (no raise, record untouched)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()  # nothing registered
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.set_free_launch(session, registry, s.id, True)  # no live session → no-op
+        session.refresh(s)
+        assert s.free_launch is False
 
 
 def test_is_terminal_matches_the_terminal_statuses() -> None:
