@@ -96,6 +96,7 @@ from revalid.retest_session import (
     end_session,
     is_terminal,
     load_events_after,
+    set_free_launch,
     start_and_step,
     submit_human_command,
     submit_message,
@@ -332,6 +333,20 @@ class MessageRequest(BaseModel):
     """Body for an operator chat message to the agent (FR-17 Slice 4)."""
 
     text: str = Field(min_length=1)
+
+
+class StartSessionRequest(BaseModel):
+    """Optional body for starting a session: free-launch + budget config (FR-17 Slice 5)."""
+
+    free_launch: bool = False
+    max_steps: int = Field(default=8, ge=1)
+    max_seconds: int | None = Field(default=None, ge=1)
+
+
+class FreeLaunchRequest(BaseModel):
+    """Body for the live free-launch toggle (FR-17 Slice 5)."""
+
+    enabled: bool
 
 
 class ImportResult(BaseModel):
@@ -625,7 +640,21 @@ def run_first_step(
         sandbox: Sandbox | None = None
         try:
             sandbox = make_sandbox(session_id)
-            start_and_step(session, registry, session_id, agent, sandbox, prompt)
+            record = session.get(RetestSessionRecord, session_id)
+            free_launch = record.free_launch if record else False
+            max_steps = record.max_steps if record else 8
+            max_seconds = float(record.max_seconds) if record and record.max_seconds else None
+            start_and_step(
+                session,
+                registry,
+                session_id,
+                agent,
+                sandbox,
+                prompt,
+                max_steps=max_steps,
+                free_launch=free_launch,
+                max_seconds=max_seconds,
+            )
         except Exception as exc:  # broad on purpose: no failure may strand the session
             if sandbox is not None:
                 with contextlib.suppress(Exception):  # best-effort teardown only
@@ -693,6 +722,27 @@ def run_message(
     """
     with sessions() as session:
         submit_message(session, registry, session_id, text)
+
+
+def run_free_launch(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    enabled: bool,
+) -> None:
+    """Toggle free-launch on a session (FR-17 Slice 5 background task).
+
+    Runs in the background because enabling may drive the auto-approve loop
+    (successive agent turns). A no-op if the session is no longer live.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The retest session to toggle.
+        enabled: The new free-launch state.
+    """
+    with sessions() as session:
+        set_free_launch(session, registry, session_id, enabled)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1149,11 +1199,24 @@ def _register_session_routes(
         session: SessionDep,
         agent: RetestAgentDep,
         make_sandbox: SandboxFactoryDep,
+        body: StartSessionRequest | None = None,
     ) -> RetestSessionOut:
-        """Open an agentic retest session and schedule its first agent step (FR-17)."""
+        """Open an agentic retest session and schedule its first agent step (FR-17).
+
+        An optional body sets the free-launch mode + budget config (FR-17 Slice
+        5); with no body the session is gated with the default step budget.
+        """
+        cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
         prompt = _finding_prompt(version.to_domain())
-        record = create_session(session, finding_id=finding_id, model=agent_model_name(agent))
+        record = create_session(
+            session,
+            finding_id=finding_id,
+            model=agent_model_name(agent),
+            free_launch=cfg.free_launch,
+            max_steps=cfg.max_steps,
+            max_seconds=cfg.max_seconds,
+        )
         background.add_task(
             run_first_step, sessions, registry, record.id, agent, make_sandbox, prompt
         )
@@ -1216,6 +1279,31 @@ def _register_session_routes(
         """Operator-initiated end: tear down and mark the session ended (FR-17)."""
         end_session(session, registry, session_id)
         return {"status": "ended"}
+
+
+def _register_free_launch_route(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the FR-17 Slice 5 free-launch toggle route.
+
+    Split from :func:`_register_session_routes` to keep each registration
+    function's nested-route count under the mccabe gate (see
+    :func:`_register_core_routes`): adding an eighth route to the shared
+    registrar would trip it.
+    """
+
+    @router.post("/retest-sessions/{session_id}/free-launch", status_code=202)
+    def set_free_launch_route(
+        session_id: int, body: FreeLaunchRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Toggle free-launch mode on a live session (FR-17 Slice 5).
+
+        Enabling auto-approves a pending command and lets the agent's commands
+        auto-run (plan changes stay gated); disabling re-arms the per-command
+        gate. Runs in the background; a no-op if the session is no longer live.
+        """
+        background.add_task(run_free_launch, sessions, registry, session_id, body.enabled)
+        return {"status": "accepted"}
 
 
 def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1369,6 +1457,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_plan_routes(api, sessions)
     _register_retest_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
+    _register_free_launch_route(api, sessions, registry)
     _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)

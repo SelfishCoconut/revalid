@@ -255,3 +255,50 @@ def test_retest_session_message_delivered_on_next_decision() -> None:
 
         final = client.get(f"/api/retest-sessions/{sid}").json()
         assert final["verdict_rationale"] == "saw-message"
+
+
+def test_start_session_in_free_launch_auto_runs_to_verdict() -> None:
+    """Starting with free_launch drives the command to a verdict, no approval (FR-17 Slice 5)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session", json={"free_launch": True, "max_steps": 5}
+        )
+        assert started.status_code == 202
+        sid = started.json()["id"]
+        # TestClient runs background tasks to completion before POST returns, so
+        # the free-launch loop has already driven to a verdict.
+        got = client.get(f"/api/retest-sessions/{sid}").json()
+        assert got["free_launch"] is True
+        assert got["max_steps"] == 5
+        assert got["status"] == "concluded"
+        approvals = [e for e in got["events"] if e["kind"] == "command_approved"]
+        assert approvals and all(e["payload"].get("auto") is True for e in approvals)
+
+
+def test_free_launch_toggle_endpoint_drives_pending_command() -> None:
+    """The live toggle auto-approves a pending command and records the change (FR-17 Slice 5)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+
+        resp = client.post(f"/api/retest-sessions/{sid}/free-launch", json={"enabled": True})
+        assert resp.status_code == 202
+        assert resp.json() == {"status": "accepted"}
+
+        got = client.get(f"/api/retest-sessions/{sid}").json()
+        assert got["free_launch"] is True
+        assert got["status"] == "concluded"  # the toggle drove the pending command
+        assert any(e["kind"] == "free_launch_changed" for e in got["events"])
+
+
+def test_get_session_returns_budget_defaults() -> None:
+    """A default-started session reports gated mode + the default step budget (FR-17 Slice 5)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        got = client.get(f"/api/retest-sessions/{sid}").json()
+        assert got["free_launch"] is False
+        assert got["max_steps"] == 8
+        assert got["max_seconds"] is None
