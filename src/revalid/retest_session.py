@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -414,6 +415,9 @@ def start_and_step(
     finding_prompt: str,
     *,
     max_steps: int = 8,
+    free_launch: bool = False,
+    max_seconds: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Start the sandbox and run the retest agent's first step.
 
@@ -427,9 +431,22 @@ def start_and_step(
         finding_prompt: The user prompt describing the finding to retest.
         max_steps: Maximum number of approved commands before the session is
             force-concluded ``inconclusive`` (the budget backstop).
+        free_launch: Whether the agent's commands auto-run without a per-command
+            human approval (FR-17 Slice 5). Plan changes stay gated regardless.
+        max_seconds: Wall-clock budget in seconds (free-launch only); ``None`` =
+            no time bound.
+        clock: Monotonic clock stamping the wall-clock budget's origin and used
+            by the free-launch loop's budget check (injectable for tests).
     """
     sandbox.start()
-    live = LiveSession(agent=agent, sandbox=sandbox, max_steps=max_steps)
+    live = LiveSession(
+        agent=agent,
+        sandbox=sandbox,
+        max_steps=max_steps,
+        free_launch=free_launch,
+        max_seconds=max_seconds,
+        started_at=clock(),
+    )
     registry.put(session_id, live)
     set_status(session, session_id, RetestSessionStatus.STARTING)
     deps = _make_deps(session, session_id, live)
@@ -439,12 +456,39 @@ def start_and_step(
         _fail(session, registry, session_id, str(exc))
         return
     _dispatch_output(session, registry, session_id, result)
+    # In free-launch, drive the auto-approve loop from here; gated mode no-ops.
+    _drive_auto(session, registry, session_id, clock=clock)
 
 
 def _step_budget_exhausted(live: LiveSession) -> bool:
     """Count one more approved command and report whether the budget is now exceeded."""
     live.step_count += 1
     return live.step_count > live.max_steps
+
+
+def _time_budget_exhausted(live: LiveSession, clock: Callable[[], float]) -> bool:
+    """Report whether a free-launch session has exceeded its wall-clock budget.
+
+    Checked only at step boundaries (the orchestrator holds control between agent
+    turns, never mid-turn) and only in free-launch mode — in gated mode the
+    elapsed time would include human think-time and trip falsely. ``None``
+    ``max_seconds`` means no time bound.
+    """
+    if live.max_seconds is None:
+        return False
+    return clock() - live.started_at > live.max_seconds
+
+
+def _give_up(session: Session, registry: SessionRegistry, session_id: int, reason: str) -> None:
+    """Force-conclude a session ``inconclusive`` with a give-up ``reason`` and tear down.
+
+    The shared exit for both budget backstops (step and wall-clock): record an
+    ``inconclusive`` verdict citing the reason, mark the session ``given_up``,
+    and stop the sandbox.
+    """
+    record_verdict(session, session_id, VerdictStatus.INCONCLUSIVE, reason)
+    _mark_given_up(session, session_id)
+    _teardown(registry, session_id)
 
 
 def _consume_pending_call(live: LiveSession, command_id: str) -> str | None:
@@ -505,9 +549,7 @@ def _resume_with_decision(
     """
     is_command = live.pending_kind == "command"
     if approved and is_command and _step_budget_exhausted(live):
-        record_verdict(session, session_id, VerdictStatus.INCONCLUSIVE, "budget exhausted")
-        _mark_given_up(session, session_id)
-        _teardown(registry, session_id)
+        _give_up(session, registry, session_id, "budget exhausted")
         return
 
     transient = RetestSessionStatus.RUNNING_COMMAND if is_command else RetestSessionStatus.THINKING
@@ -535,6 +577,56 @@ def _resume_with_decision(
         _fail(session, registry, session_id, str(exc))
         return
     _dispatch_output(session, registry, session_id, result)
+
+
+def _drive_auto(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Auto-approve successive command proposals while free-launch is on (FR-17 Slice 5).
+
+    The free-launch loop. Iterative on purpose — one :func:`_resume_with_decision`
+    call per pass, never recursing through :func:`apply_decision` — so a large
+    ``max_steps`` cannot blow the stack. Each auto-approval goes through the same
+    compare-and-swap (:func:`_consume_pending_call`) and step-budget check as a
+    human approval, and is recorded as a ``command_approved`` event flagged
+    ``{"auto": True}`` so the transcript stays honest about what a human vetted.
+
+    The loop stops when: the session is torn down (concluded / gave up), the
+    agent proposes a ``set_plan`` (``pending_kind != "command"`` — plan changes
+    are **always** gated), free-launch is turned off, or a budget bound trips.
+    In gated mode the first guard returns immediately, so callers can invoke this
+    unconditionally.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The retest session to drive.
+        clock: Monotonic clock for the wall-clock budget check (injectable for
+            tests); shares the origin stamped by :func:`start_and_step`.
+    """
+    while True:
+        live = registry.get(session_id)
+        if (
+            live is None
+            or not live.free_launch
+            or live.pending_kind != "command"
+            or live.pending_call_id is None
+        ):
+            return
+        if _time_budget_exhausted(live, clock):
+            _give_up(session, registry, session_id, "time budget exhausted")
+            return
+        call_id = _consume_pending_call(live, live.pending_call_id)
+        if call_id is None:
+            return  # a concurrent human decision took the pending command
+        append_event(session, session_id, SessionEventKind.COMMAND_APPROVED, {"auto": True})
+        _resume_with_decision(
+            session, registry, session_id, live, call_id, approved=True, reason=""
+        )
 
 
 def apply_decision(
@@ -585,6 +677,9 @@ def apply_decision(
     _resume_with_decision(
         session, registry, session_id, live, call_id, approved=approved, reason=reason
     )
+    # In free-launch, a human decision that yields a new command proposal is then
+    # auto-driven; in gated mode _drive_auto returns immediately (unchanged path).
+    _drive_auto(session, registry, session_id)
 
 
 def _summarize_human_command(command: str, result: CommandResult) -> str:
