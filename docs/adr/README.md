@@ -32,3 +32,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0026](0026-operator-manual-commands-no-shared-pty.md) | Operator manual commands (`!`) via discrete exec — not a shared PTY; agent observes them on its next turn | proposed | 2026-07-16 |
 | [0027](0027-agentic-retest-guiding-plan.md) | Agentic retest guiding plan: a gated `set_plan` tool (every plan change human-approved, reuses the command gate, budget-exempt) | proposed | 2026-07-16 |
 | [0028](0028-agentic-retest-chat-steering.md) | Agentic retest chat steering & Q&A: pure-queue messages delivered as a first-class user turn on the next decision; non-gated `respond` tool for prose | proposed | 2026-07-16 |
+| [0029](0029-agentic-retest-free-launch.md) | Agentic retest free-launch mode + budgets: auto-approve commands via the same gate (plan changes stay gated), configurable step budget + free-launch-only wall-clock budget, distinct give-up state | proposed | 2026-07-17 |
