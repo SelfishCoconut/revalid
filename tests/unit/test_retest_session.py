@@ -190,6 +190,49 @@ def test_record_verdict_on_unknown_session_is_a_noop() -> None:
         rs.record_verdict(session, 999, VerdictStatus.FIXED, "n/a")  # must not raise
 
 
+def test_record_verdict_captures_last_command_as_evidence() -> None:
+    """The agentic verdict's evidence is the real last command output (Slice 6b-i)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        sid = rs.create_session(session, finding_id=fid, model="m").id
+        rs.append_event(
+            session,
+            sid,
+            SessionEventKind.COMMAND_OUTPUT,
+            {
+                "command": "curl -s http://lab/login",
+                "stdout": "{token}",
+                "stderr": "",
+                "exit_code": 0,
+                "elapsed_ms": 12,
+            },
+        )
+        rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
+        [row] = session.scalars(select(VerdictRecord)).all()
+        assert row.evidence is not None
+        assert row.evidence["explanation"] == "auth still bypassable"
+        assert row.evidence["command"] == "curl -s http://lab/login"
+        assert row.evidence["output"].startswith("{token}")
+        assert row.evidence["exit_code"] == 0
+        assert row.evidence["elapsed_ms"] == 12
+
+
+def test_record_verdict_evidence_is_explanation_only_without_a_command() -> None:
+    """A verdict reached with no command run is explanation-only, still valid (Slice 6b-i)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        sid = rs.create_session(session, finding_id=fid, model="m").id
+        rs.record_verdict(session, sid, VerdictStatus.INCONCLUSIVE, "cannot tell")
+        [row] = session.scalars(select(VerdictRecord)).all()
+        assert row.evidence is not None
+        assert row.evidence["explanation"] == "cannot tell"
+        assert row.evidence["command"] == ""
+        assert row.evidence["output"] == ""
+        assert row.evidence["exit_code"] is None
+
+
 def test_record_verdict_auto_persists_agentic_verdict() -> None:
     """Concluding a session writes a queryable agentic VerdictRecord (FR-09 wiring, Slice 6a)."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
@@ -205,7 +248,14 @@ def test_record_verdict_auto_persists_agentic_verdict() -> None:
         assert row.session_id == sid
         assert row.status == "still_open"
         assert row.rationale == "auth still bypassable"
-        assert row.evidence is None
+        # Slice 6b-i: with no command run, evidence is explanation-only (not null).
+        assert row.evidence == {
+            "explanation": "auth still bypassable",
+            "command": "",
+            "output": "",
+            "exit_code": None,
+            "elapsed_ms": 0.0,
+        }
 
 
 def test_budget_give_up_auto_persists_inconclusive_agentic_verdict() -> None:

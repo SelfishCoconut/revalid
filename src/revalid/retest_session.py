@@ -35,7 +35,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from revalid.db import RetestSessionRecord, SessionEventRecord, VerdictRecord
-from revalid.domain import RetestSessionStatus, SessionEventKind, VerdictStatus
+from revalid.domain import (
+    AgenticEvidence,
+    RetestSessionStatus,
+    SessionEventKind,
+    VerdictStatus,
+)
 from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, format_observations
 from revalid.sandbox import CommandResult, Sandbox
 
@@ -137,6 +142,47 @@ def set_status(session: Session, session_id: int, status: RetestSessionStatus) -
     append_event(session, session_id, SessionEventKind.STATE_CHANGE, {"to": status.value})
 
 
+# Cap a captured command's output in a verdict's evidence, mirroring the HTTP
+# probe body cap (retest._BODY_EXCERPT_LIMIT): a chatty tool must not bloat a row.
+_OUTPUT_EXCERPT_LIMIT = 16_384
+
+
+def _last_command_output(session: Session, session_id: int) -> dict[str, Any] | None:
+    """Return the session's most recent ``command_output`` payload, or ``None``."""
+    rows = session.scalars(
+        select(SessionEventRecord)
+        .where(
+            SessionEventRecord.session_id == session_id,
+            SessionEventRecord.kind == SessionEventKind.COMMAND_OUTPUT.value,
+        )
+        .order_by(SessionEventRecord.seq)
+    ).all()
+    return dict(rows[-1].payload) if rows else None
+
+
+def _build_agentic_evidence(session: Session, session_id: int, rationale: str) -> AgenticEvidence:
+    """Assemble the agent's verdict proof: its rationale + the real last command output.
+
+    The proof is the *actual* captured output of the decisive command (the last
+    one the agent ran), not the model restating it — so it stays consistent with
+    the transcript the FR-10 audit checks. Explanation-only when no command ran.
+    """
+    last = _last_command_output(session, session_id)
+    if last is None:
+        return AgenticEvidence(explanation=rationale)
+    stdout = str(last.get("stdout", ""))
+    stderr = str(last.get("stderr", ""))
+    output = stdout if not stderr else f"{stdout}\n--- stderr ---\n{stderr}"
+    exit_code = last.get("exit_code")
+    return AgenticEvidence(
+        explanation=rationale,
+        command=str(last.get("command", "")),
+        output=output[:_OUTPUT_EXCERPT_LIMIT],
+        exit_code=exit_code if isinstance(exit_code, int) else None,
+        elapsed_ms=float(last.get("elapsed_ms", 0.0)),
+    )
+
+
 def record_verdict(
     session: Session, session_id: int, status: VerdictStatus, rationale: str
 ) -> None:
@@ -191,6 +237,7 @@ def record_verdict(
             rationale=rationale,
             actor="agent",
             reason_code="agentic_conclusion",
+            evidence=_build_agentic_evidence(session, session_id, rationale).model_dump(),
         )
     )
     session.commit()
