@@ -892,3 +892,53 @@ def test_respond_emits_agent_message_through_the_orchestrator() -> None:
     assert len(prose) == 1
     assert prose[0]["payload"]["text"] == "the 500 was the WAF rejecting the payload"
     assert s.status == RetestSessionStatus.CONCLUDED.value
+
+
+def test_set_goal_records_plan_updated_and_queues_for_agent() -> None:
+    """A live goal edit appends a plan_updated event and queues the goal for the agent (6b-ii)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(FunctionModel(script_always_propose))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+
+        rs.set_goal(session, registry, s.id, ["Check the login endpoint", "Confirm the token"])
+        live = registry.get(s.id)
+        assert live is not None
+        assert live.pending_goal == ["Check the login endpoint", "Confirm the token"]
+        events = rs.load_events_after(session, s.id, 0)
+    updates = [e for e in events if e["kind"] == SessionEventKind.PLAN_UPDATED.value]
+    assert updates[-1]["payload"] == {"steps": ["Check the login endpoint", "Confirm the token"]}
+
+
+def test_set_goal_is_noop_when_not_live() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.set_goal(session, registry, s.id, ["x"])  # not live -> no raise, no event
+        assert rs.load_events_after(session, s.id, 0) == []
+
+
+def test_queued_goal_is_injected_into_the_next_turn() -> None:
+    """A queued goal reaches the agent as a user turn on the next approval (6b-ii)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        cid = _pending_cid(registry, s.id)
+        rs.set_goal(session, registry, s.id, ["focus on the admin endpoint"])
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)
+        session.refresh(s)
+    # The goal injection is delivered as a user turn -> the model reports "saw-message".
+    assert s.verdict_rationale == "saw-message"
