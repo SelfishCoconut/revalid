@@ -19,6 +19,14 @@ from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest
 from revalid.sandbox import CommandResult, FakeSandbox
 
 
+def test_agent_exposes_no_set_plan_tool() -> None:
+    """6b-ii: the agent no longer proposes plans — set_plan is gone; run_command stays."""
+    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+    tools = agent._function_toolset.tools
+    assert "set_plan" not in tools
+    assert "run_command" in tools
+
+
 def test_deferred_gate_cycle_runs_command_then_concludes() -> None:
     """Approving the deferred call runs it in the sandbox; the model then concludes."""
     box = FakeSandbox([CommandResult(stdout="{token: ...}", stderr="", exit_code=0, elapsed_ms=12)])
