@@ -25,14 +25,16 @@ from sqlalchemy.orm import Session
 
 from revalid import __version__
 from revalid.db import FindingRecord, PlanRecord, ReportRecord, VerdictRecord
-from revalid.domain import Evidence, Finding, Probe, VerdictStatus
+from revalid.domain import AgenticEvidence, Evidence, Finding, Probe, VerdictStatus
 from revalid.findings import list_notes, list_versions
 
 # Export-format version (independent of the tool's release version). Bump on any
 # breaking change to the RunExport shape; the JSON Schema carries the same value.
 # 1.2: VerdictExport flattened to carry verdict fields + source/session_id + optional
 # evidence, so it covers agentic verdicts (FR-17 Slice 6a) as well as batch ones.
-SCHEMA_VERSION = "1.2"
+# 1.3: VerdictExport.evidence carries flexible AgenticEvidence for agentic verdicts
+# (FR-17 Slice 6b-i) — the agent's explanation + a command's real output.
+SCHEMA_VERSION = "1.3"
 
 
 class Generator(BaseModel):
@@ -146,7 +148,7 @@ class VerdictExport(BaseModel):
     reason_code: str
     rationale: str
     matched_indicators: tuple[str, ...]
-    evidence: Evidence | None
+    evidence: Evidence | AgenticEvidence | None
 
 
 class RunMetrics(BaseModel):
@@ -240,6 +242,15 @@ def _plan_export(record: PlanRecord) -> PlanExport:
     )
 
 
+def _evidence_export(record: VerdictRecord) -> Evidence | AgenticEvidence | None:
+    """Build the right evidence shape for a verdict row (batch HTTP vs agentic)."""
+    if record.evidence is None:
+        return None
+    if record.source == "agentic":
+        return AgenticEvidence(**record.evidence)
+    return Evidence(**record.evidence)
+
+
 def _verdict_export(record: VerdictRecord) -> VerdictExport:
     return VerdictExport(
         id=record.id,
@@ -255,7 +266,7 @@ def _verdict_export(record: VerdictRecord) -> VerdictExport:
         reason_code=record.reason_code,
         rationale=record.rationale,
         matched_indicators=tuple(record.matched_indicators),
-        evidence=Evidence(**record.evidence) if record.evidence is not None else None,
+        evidence=_evidence_export(record),
     )
 
 
