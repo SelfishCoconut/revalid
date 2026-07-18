@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from revalid.domain import Evidence, Finding, Severity, Verdict, VerdictStatus
+from revalid.domain import Evidence, Finding, Severity, VerdictStatus
 from revalid.eval import GroundTruth, GroundTruthEntry, evaluate, format_table
 from revalid.export import (
     FindingExport,
+    FindingVersionExport,
     Generator,
     RunExport,
     RunMetrics,
@@ -29,8 +30,23 @@ _NOW = datetime(2026, 7, 15, tzinfo=UTC)
 
 
 def _finding(fid: int, title: str) -> FindingExport:
+    finding = Finding(title=title, severity=Severity.HIGH)
     return FindingExport(
-        id=fid, report_id=None, finding=Finding(title=title, severity=Severity.HIGH)
+        id=fid,
+        report_id=None,
+        version=1,
+        finding=finding,
+        versions=(
+            FindingVersionExport(
+                version=1,
+                origin="extraction",
+                edited_by=None,
+                reason="",
+                created_at=_NOW,
+                finding=finding,
+            ),
+        ),
+        notes=(),
     )
 
 
@@ -49,7 +65,13 @@ def _verdict(vid: int, fid: int, status: VerdictStatus, ms: float) -> VerdictExp
         plan_version=1,
         actor="executor",
         created_at=_NOW,
-        verdict=Verdict(status=status, reason_code="demo", evidence=evidence),
+        source="batch",
+        session_id=None,
+        status=status,
+        reason_code="demo",
+        rationale="",
+        matched_indicators=(),
+        evidence=evidence,
     )
 
 

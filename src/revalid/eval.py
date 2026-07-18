@@ -270,7 +270,13 @@ def evaluate(export: RunExport, ground_truth: GroundTruth) -> EvalReport:
             continue
         matched_keys.add(key)
         verdict = latest.get(finding.id)
-        actual = verdict.verdict.status if verdict is not None else None
+        actual = verdict.status if verdict is not None else None
+        # Agentic verdicts carry no single-request evidence (timing is in the transcript).
+        elapsed_ms = (
+            verdict.evidence.elapsed_ms
+            if verdict is not None and verdict.evidence is not None
+            else 0.0
+        )
         rows.append(
             EvalRow(
                 finding=entry.finding,
@@ -278,7 +284,7 @@ def evaluate(export: RunExport, ground_truth: GroundTruth) -> EvalReport:
                 actual=actual,
                 ambiguous=entry.ambiguous,
                 classification=classify(entry.expected, actual, ambiguous=entry.ambiguous),
-                elapsed_ms=verdict.verdict.evidence.elapsed_ms if verdict is not None else 0.0,
+                elapsed_ms=elapsed_ms,
             )
         )
 

@@ -217,6 +217,7 @@ class SessionEventKind(enum.StrEnum):
     STATE_CHANGE = "state_change"
     FREE_LAUNCH_CHANGED = "free_launch_changed"
     VERDICT = "verdict"
+    VERDICT_ADJUDICATED = "verdict_adjudicated"
     ERROR = "error"
 
 

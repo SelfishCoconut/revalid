@@ -13,6 +13,9 @@ const verdict: Verdict = {
   reason_code: "AUTH_BYPASS_TOKEN_RETURNED",
   rationale: "Login bypass succeeded and returned a JWT.",
   matched_indicators: ["authentication", "token"],
+  source: "batch",
+  session_id: null,
+  actor: "executor",
   evidence: {
     request_method: "POST",
     request_url: "http://lab.local/rest/user/login",
@@ -37,5 +40,19 @@ describe("EvidenceView", () => {
       screen.getByText('{"authentication":{"token":"eyJ..."}}'),
     ).toBeInTheDocument();
     expect(screen.getByText("authentication, token")).toBeInTheDocument();
+  });
+
+  it("shows a transcript note instead of a drill-down for an agentic verdict", () => {
+    const agentic: Verdict = {
+      ...verdict,
+      source: "agentic",
+      session_id: 9,
+      actor: "agent",
+      evidence: null,
+    };
+    render(<EvidenceView verdict={agentic} />);
+
+    expect(screen.getByText(/agentic retest session/i)).toBeInTheDocument();
+    expect(screen.queryByText(/http:\/\/lab\.local/)).not.toBeInTheDocument();
   });
 });

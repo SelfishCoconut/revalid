@@ -21,9 +21,10 @@ import httpx
 from jsonschema import validate
 
 from revalid.approval import approve_plan, execute_approved_plan, save_generated_plan
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Finding, Probe, RetestPlan, Severity
 from revalid.export import build_export
+from revalid.findings import create_finding
 from revalid.plan import PlanResult
 
 _SCHEMA = Path(__file__).resolve().parents[2] / "docs/reference/schemas/run-export.schema.json"
@@ -45,7 +46,7 @@ def _plan() -> PlanResult:
 def main() -> int:
     """Build a run, export it, and validate the document against the published schema."""
     session = session_factory(create_db_engine(IN_MEMORY))()
-    session.add(FindingRecord.from_domain(Finding(title="SQLi login", severity=Severity.CRITICAL)))
+    create_finding(session, Finding(title="SQLi login", severity=Severity.CRITICAL))
     session.commit()
     save_generated_plan(session, 1, _plan())
     approve_plan(session, 1)

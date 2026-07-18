@@ -256,6 +256,22 @@ export function endRetestSession(id: number): Promise<{ status: string }> {
 }
 
 /**
+ * Adjudicate a concluded session's verdict (FR-17 Slice 6a): accept the agent's
+ * call (pass its own status) or override it (a different status). Appends a
+ * superseding operator verdict; the agent's record is never mutated.
+ */
+export function adjudicateSession(
+  id: number,
+  status: string,
+  rationale: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/adjudicate`,
+    jsonInit("POST", { status, rationale }),
+  );
+}
+
+/**
  * Run a manual operator command (`!`) in the session's sandbox — ungated,
  * discrete exec (FR-17 Slice 2). Its output lands in the shared terminal and
  * the agent observes it on its next turn.

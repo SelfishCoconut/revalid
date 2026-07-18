@@ -59,6 +59,9 @@ function verdict(): Verdict {
     reason_code: "auth_bypass",
     rationale: "token returned",
     matched_indicators: [],
+    source: "batch",
+    session_id: null,
+    actor: "executor",
     evidence,
   };
 }

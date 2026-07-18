@@ -159,7 +159,13 @@ export interface Verdict {
   reason_code: string;
   rationale: string;
   matched_indicators: string[];
-  evidence: Evidence;
+  // "batch" verdicts carry the single request/response they were derived from;
+  // "agentic" verdicts (FR-17) are justified by a session transcript, so evidence
+  // is null and session_id links the session (FR-17 Slice 6a).
+  source: string;
+  session_id: number | null;
+  actor: string;
+  evidence: Evidence | null;
 }
 
 export interface Settings {

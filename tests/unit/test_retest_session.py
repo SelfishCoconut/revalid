@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from tests._retest_helpers import (
     has_command_result,
@@ -26,7 +27,7 @@ from tests._retest_helpers import (
 )
 
 from revalid import retest_session as rs
-from revalid.db import IN_MEMORY, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, VerdictRecord, create_db_engine, session_factory
 from revalid.domain import (
     Finding,
     RetestSessionStatus,
@@ -187,6 +188,103 @@ def test_record_verdict_on_unknown_session_is_a_noop() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     with sessions() as session:
         rs.record_verdict(session, 999, VerdictStatus.FIXED, "n/a")  # must not raise
+
+
+def test_record_verdict_auto_persists_agentic_verdict() -> None:
+    """Concluding a session writes a queryable agentic VerdictRecord (FR-09 wiring, Slice 6a)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        sid = s.id
+        rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
+        [row] = session.scalars(select(VerdictRecord)).all()
+        assert row.source == "agentic"
+        assert row.actor == "agent"
+        assert row.finding_id == fid
+        assert row.session_id == sid
+        assert row.status == "still_open"
+        assert row.rationale == "auth still bypassable"
+        assert row.evidence is None
+
+
+def test_budget_give_up_auto_persists_inconclusive_agentic_verdict() -> None:
+    """A budget give-up also persists an agentic verdict (inconclusive) (Slice 6a)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
+        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=1)
+        apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
+        # A second approval exceeds the budget → give up (inconclusive) → auto-persist.
+        apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
+        rows = session.scalars(select(VerdictRecord)).all()
+    assert len(rows) == 1
+    assert rows[0].source == "agentic"
+    assert rows[0].actor == "agent"
+    assert rows[0].status == "inconclusive"
+
+
+def test_adjudicate_appends_event_and_superseding_operator_record() -> None:
+    """Adjudicating a concluded session appends an event + a superseding operator row (Slice 6a)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        sid = s.id
+        rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "agent says still open")
+        rs.adjudicate_verdict(session, sid, VerdictStatus.FIXED, "human confirms patched")
+
+        rows = session.scalars(select(VerdictRecord).order_by(VerdictRecord.id)).all()
+        agent_row, operator_row = rows
+        assert agent_row.actor == "agent"
+        assert agent_row.status == "still_open"  # the agent's record is never mutated
+        assert operator_row.actor == "operator"
+        assert operator_row.source == "agentic"
+        assert operator_row.reason_code == "operator_adjudication"
+        assert operator_row.status == "fixed"
+        assert operator_row.id > agent_row.id  # supersedes: latest-per-finding wins
+        assert operator_row.session_id == sid
+
+        events = rs.load_events_after(session, sid, after_seq=0)
+        adjudications = [
+            e for e in events if e["kind"] == SessionEventKind.VERDICT_ADJUDICATED.value
+        ]
+        assert adjudications == [
+            {
+                "seq": adjudications[0]["seq"],
+                "kind": "verdict_adjudicated",
+                "payload": {"status": "fixed", "rationale": "human confirms patched"},
+            }
+        ]
+        session.refresh(s)
+        assert s.verdict_status == "fixed"  # session row reflects the final call
+        assert s.verdict_rationale == "human confirms patched"
+
+
+def test_adjudicate_is_noop_without_a_verdict() -> None:
+    """A session with no agent verdict yet cannot be adjudicated (Slice 6a)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.adjudicate_verdict(session, s.id, VerdictStatus.FIXED, "premature")
+        assert session.scalars(select(VerdictRecord)).all() == []
+
+
+def test_adjudicate_unknown_session_is_a_noop() -> None:
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        rs.adjudicate_verdict(session, 999, VerdictStatus.FIXED, "n/a")  # must not raise
 
 
 def test_full_cycle_proposes_runs_and_concludes() -> None:

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from revalid.domain import Evidence, Finding, Severity, Verdict, VerdictStatus
+from revalid.domain import Evidence, Finding, Severity, VerdictStatus
 from revalid.eval import (
     GROUND_TRUTH_TODO,
     Classification,
@@ -74,7 +74,13 @@ def _verdict(vid: int, fid: int, status: VerdictStatus, ms: float = 10.0) -> Ver
         plan_version=1,
         actor="executor",
         created_at=_NOW,
-        verdict=Verdict(status=status, reason_code="demo", evidence=evidence),
+        source="batch",
+        session_id=None,
+        status=status,
+        reason_code="demo",
+        rationale="",
+        matched_indicators=(),
+        evidence=evidence,
     )
 
 
@@ -125,7 +131,7 @@ def test_latest_verdict_wins() -> None:
     export = _export((_finding(1, "a"),), (_verdict(1, 1, _F), _verdict(2, 1, _S)))
     latest = latest_verdict_by_finding(export)
     assert latest[1].id == 2
-    assert latest[1].verdict.status is _S
+    assert latest[1].status is _S
 
 
 def test_latest_verdict_keeps_highest_id_regardless_of_order() -> None:
@@ -141,7 +147,7 @@ def test_load_export_round_trips(tmp_path: Path) -> None:
     path.write_text(export.model_dump_json())
     loaded = load_export(path)
     assert loaded.findings[0].finding.title == "SQLi login"
-    assert loaded.verdicts[0].verdict.status is _S
+    assert loaded.verdicts[0].status is _S
 
 
 def test_evaluate_buckets_and_nfr01_pass() -> None:

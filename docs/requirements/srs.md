@@ -152,7 +152,11 @@ non-lab targets, destructive exploitation.
   - [x] **AC10**: free-launch is settable at session start (`POST /retest-session` body) and toggleable live (`POST /retest-sessions/{id}/free-launch`); enabling mid-session auto-approves any pending command; every toggle is a `free_launch_changed` transcript event and each auto-approval is marked `{"auto": true}`.
   - [x] **AC11**: `max_steps` (both modes) and `max_seconds` (free-launch only, checked at step boundaries) force-conclude the session `given_up`/`inconclusive` with a budget-exhausted reason; both bounds are visible in the SPA.
   - [x] **AC12**: the given-up state renders distinctly from an operator-ended or concluded session.
-- **Deferred to later slices** (tracked in epic #87): verdict adjudication UI + FR-09/FR-10/FR-12 integration and retirement of the old batch path (Slice 6).
+- **Acceptance criteria — Slice 6a** (met — issue #102, ADR-0030 proposed, 2026-07-18):
+  - [x] **AC13**: a concluded (or given-up) session's verdict is auto-persisted as an agentic `VerdictRecord` (`actor="agent"`, `source="agentic"`, evidence-free, session-linked) with no human action, so it is queryable at `GET /api/verdicts`, appears in the FR-12 export, and re-derives under the FR-10 audit — without touching the frozen domain `Verdict`/`Evidence` type (polymorphic storage).
+  - [x] **AC14**: the operator can accept or override the agent's verdict (`POST /retest-sessions/{id}/adjudicate`); adjudication appends a `verdict_adjudicated` transcript event **and** a superseding operator verdict (`actor="operator"`, higher id ⇒ latest-per-finding), never mutating the agent's record (append-only; FR-10 intact).
+  - [x] **AC15**: FR-10 re-derivation reproduces an agentic verdict from its session transcript (the `verdict` event for the agent's record, the latest `verdict_adjudicated` for an operator record) and flags a stored row that has drifted from it; FR-12 `VerdictExport` flattens to one shape (+ `source`/`session_id`/optional `evidence`), `SCHEMA_VERSION` 1.1 → 1.2.
+- **Deferred to Slice 6b** (tracked in epic #87): retirement of the old FR-04/05/07-09 batch-plan path.
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. Supersedes FR-04/FR-05/FR-07/FR-08/FR-09 over time (both paths coexist until Slice 5); NFR-02's reproducibility claim shifts from deterministic re-derivation to a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements

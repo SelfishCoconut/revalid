@@ -30,6 +30,9 @@ function makeVerdict(overrides: Partial<Verdict>): Verdict {
     reason_code: "CODE",
     rationale: "",
     matched_indicators: [],
+    source: "batch",
+    session_id: null,
+    actor: "executor",
     evidence: {
       request_method: "GET",
       request_url: "http://lab.local/",

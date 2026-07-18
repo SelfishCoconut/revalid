@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import {
+  adjudicateSession,
   approveCommand,
   endRetestSession,
   getRetestSession,
@@ -27,6 +28,10 @@ import {
   stepsUsed,
 } from "../lib/sessionBudget";
 import { STATUS_META, type KnownStatus } from "../lib/status";
+import type { VerdictStatus } from "../api/types";
+
+/** The three verdicts a human can adjudicate to (FR-09 / FR-17 Slice 6a). */
+const VERDICT_STATUSES: readonly VerdictStatus[] = ["still_open", "fixed", "inconclusive"];
 
 /**
  * Terminal lines are built from *executed* commands only — each `command_output`
@@ -190,6 +195,16 @@ export function RetestSession() {
   const toggleMutation = useMutation({
     mutationFn: (enabled: boolean) => setFreeLaunch(id, enabled),
   });
+  // Human adjudication of a concluded session's verdict (FR-17 Slice 6a): Accept
+  // records the agent's own call; Override records a different one. Either way it
+  // appends a superseding operator verdict; the agent's record is never mutated.
+  const adjudicateMutation = useMutation({
+    mutationFn: (v: { status: string; rationale: string }) =>
+      adjudicateSession(id, v.status, v.rationale),
+  });
+  const [overriding, setOverriding] = useState(false);
+  const [overrideStatus, setOverrideStatus] = useState<VerdictStatus>("fixed");
+  const [overrideRationale, setOverrideRationale] = useState("");
 
   const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
   const stepsDone = stepsUsed(events);
@@ -205,6 +220,15 @@ export function RetestSession() {
     .find((event) => event.kind === "command_proposed" || event.kind === "plan_proposed");
   const awaitingApproval =
     (status === "awaiting_command" || status === "awaiting_plan") && latestProposal !== undefined;
+
+  // A concluded/given-up session carries an agent verdict the operator may
+  // adjudicate. The panel closes once adjudicated — detected from the transcript
+  // (a `verdict_adjudicated` event, present after a reload's WS replay) or from
+  // the just-succeeded mutation (the WS stream is already closed at that point).
+  const adjudicatedEvent = [...events].reverse().find((e) => e.kind === "verdict_adjudicated");
+  const canAdjudicate = verdict !== null && (status === "concluded" || status === "given_up");
+  const adjudicated = adjudicatedEvent !== undefined || adjudicateMutation.isSuccess;
+  const finalVerdict = adjudicatedEvent?.payload ?? adjudicateMutation.variables;
 
   // Shared approve/reject block for a pending command or plan proposal.
   const renderApproval = (toolCallId: string, note: string) => (
@@ -423,6 +447,110 @@ export function RetestSession() {
                 <p className="text-sm text-fg">{verdict.rationale}</p>
               </div>
             )
+          )}
+          {canAdjudicate && verdict && (
+            <div
+              aria-label="adjudication"
+              className="rounded-lg border border-line bg-panel-2/30 p-4"
+            >
+              <Eyebrow>Adjudication</Eyebrow>
+              {adjudicated ? (
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
+                  <span className="text-dim">Final verdict (operator):</span>
+                  {typeof finalVerdict?.status === "string" &&
+                    isKnownStatus(finalVerdict.status) && (
+                      <StatusBadge status={finalVerdict.status} />
+                    )}
+                  {typeof finalVerdict?.rationale === "string" && finalVerdict.rationale && (
+                    <span>— {finalVerdict.rationale}</span>
+                  )}
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-dim">
+                    Accept the agent&rsquo;s verdict, or override it with your own determination.
+                  </p>
+                  {overriding ? (
+                    <div className="mt-2 space-y-2">
+                      <select
+                        aria-label="override status"
+                        value={overrideStatus}
+                        onChange={(e) => {
+                          setOverrideStatus(e.target.value as VerdictStatus);
+                        }}
+                        className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                      >
+                        {VERDICT_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {STATUS_META[s].label}
+                          </option>
+                        ))}
+                      </select>
+                      <textarea
+                        aria-label="override rationale"
+                        value={overrideRationale}
+                        onChange={(e) => {
+                          setOverrideRationale(e.target.value);
+                        }}
+                        placeholder="Why you override the agent's verdict…"
+                        className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                        rows={2}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="accent"
+                          disabled={adjudicateMutation.isPending}
+                          onClick={() => {
+                            adjudicateMutation.mutate({
+                              status: overrideStatus,
+                              rationale: overrideRationale,
+                            });
+                          }}
+                        >
+                          Submit override
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            setOverriding(false);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        variant="positive"
+                        disabled={adjudicateMutation.isPending}
+                        onClick={() => {
+                          adjudicateMutation.mutate({
+                            status: verdict.status,
+                            rationale: verdict.rationale,
+                          });
+                        }}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setOverriding(true);
+                        }}
+                      >
+                        Override…
+                      </Button>
+                    </div>
+                  )}
+                  {adjudicateMutation.isError && (
+                    <p className="mt-2 text-xs text-danger">
+                      {errorMessage(adjudicateMutation.error)}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>

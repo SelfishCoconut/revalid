@@ -62,6 +62,7 @@ from revalid.db import (
     session_factory,
 )
 from revalid.domain import (
+    Evidence,
     Finding,
     FindingStage,
     Probe,
@@ -70,7 +71,7 @@ from revalid.domain import (
     RetestSessionStatus,
     Settings,
     Severity,
-    Verdict,
+    VerdictStatus,
 )
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
@@ -91,6 +92,7 @@ from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest
 from revalid.retest_session import (
     SessionRegistry,
     _fail,
+    adjudicate_verdict,
     apply_decision,
     create_session,
     end_session,
@@ -208,13 +210,47 @@ class NoteOut(BaseModel):
         )
 
 
-class VerdictOut(Verdict):
-    """A persisted verdict as returned by the API (domain model + linkage)."""
+class VerdictOut(BaseModel):
+    """A persisted verdict as returned by the API (FR-09/FR-17).
+
+    Flat over both a ``batch`` verdict (evidence-backed) and an ``agentic`` one
+    (session-backed, ``evidence`` is ``None``) — the same shape as the FR-12
+    :class:`~revalid.export.VerdictExport`. A superset of the pre-Slice-6a batch
+    fields (it adds ``source``/``session_id``/``actor``), so existing batch
+    consumers still read ``status``/``reason_code``/``rationale``/``evidence`` at
+    the top level.
+    """
 
     id: int
     finding_id: int
     probe_kind: str
     plan_version: int | None = None
+    source: str
+    session_id: int | None
+    actor: str
+    status: VerdictStatus
+    reason_code: str
+    rationale: str
+    matched_indicators: tuple[str, ...]
+    evidence: Evidence | None
+
+    @classmethod
+    def from_record(cls, record: VerdictRecord) -> "VerdictOut":
+        """Build the API view from a stored verdict row (batch or agentic)."""
+        return cls(
+            id=record.id,
+            finding_id=record.finding_id,
+            probe_kind=record.probe_kind,
+            plan_version=record.plan_version,
+            source=record.source,
+            session_id=record.session_id,
+            actor=record.actor,
+            status=VerdictStatus(record.status),
+            reason_code=record.reason_code,
+            rationale=record.rationale,
+            matched_indicators=tuple(record.matched_indicators),
+            evidence=Evidence(**record.evidence) if record.evidence is not None else None,
+        )
 
 
 class DiscrepancyOut(BaseModel):
@@ -347,6 +383,17 @@ class FreeLaunchRequest(BaseModel):
     """Body for the live free-launch toggle (FR-17 Slice 5)."""
 
     enabled: bool
+
+
+class AdjudicateRequest(BaseModel):
+    """Body for a human verdict adjudication of a concluded session (FR-17 Slice 6a).
+
+    ``status`` is the human's call — equal to the agent's when accepting, or a
+    different value when overriding; ``rationale`` is their justification.
+    """
+
+    status: VerdictStatus
+    rationale: str = ""
 
 
 class ImportResult(BaseModel):
@@ -835,16 +882,7 @@ def _retest_finding(
         ) from exc
     except BrowserProbeUnavailableError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
-    return [
-        VerdictOut(
-            id=r.id,
-            finding_id=r.finding_id,
-            probe_kind=r.probe_kind,
-            plan_version=r.plan_version,
-            **r.to_domain().model_dump(),
-        )
-        for r in records
-    ]
+    return [VerdictOut.from_record(r) for r in records]
 
 
 def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1110,18 +1148,9 @@ def _register_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) 
 
     @router.get("/verdicts", response_model=list[VerdictOut])
     def list_verdicts(session: SessionDep) -> list[VerdictOut]:
-        """List all persisted verdicts (FR-09)."""
+        """List all persisted verdicts, batch and agentic (FR-09/FR-17)."""
         records = session.scalars(select(VerdictRecord).order_by(VerdictRecord.id))
-        return [
-            VerdictOut(
-                id=r.id,
-                finding_id=r.finding_id,
-                probe_kind=r.probe_kind,
-                plan_version=r.plan_version,
-                **r.to_domain().model_dump(),
-            )
-            for r in records
-        ]
+        return [VerdictOut.from_record(r) for r in records]
 
     @router.get("/audit", response_model=AuditOut)
     def audit_rederive(session: SessionDep) -> AuditOut:
@@ -1306,6 +1335,34 @@ def _register_free_launch_route(
         return {"status": "accepted"}
 
 
+def _register_adjudicate_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-17 Slice 6a verdict-adjudication route.
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`. Runs **inline** (not a background
+    task): adjudication is a quick, registry-free DB write, and running it inline
+    means the superseding verdict + transcript event exist by the time the
+    response returns, so a follow-up ``GET /verdicts`` or ``/export`` sees them.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/retest-sessions/{session_id}/adjudicate", status_code=200)
+    def adjudicate(session_id: int, body: AdjudicateRequest, session: SessionDep) -> dict[str, str]:
+        """Accept or override a concluded session's agent verdict (FR-17 Slice 6a).
+
+        Appends a superseding operator verdict + a ``verdict_adjudicated``
+        transcript event (append-only; the agent's record is untouched). A no-op
+        if the session doesn't exist or has no agent verdict yet.
+        """
+        adjudicate_verdict(session, session_id, body.status, body.rationale)
+        return {"status": "adjudicated"}
+
+
 def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-17 WS transcript-tail route.
 
@@ -1458,6 +1515,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_retest_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
+    _register_adjudicate_route(api, sessions)
     _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)
