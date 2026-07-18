@@ -310,7 +310,9 @@ def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
         assert verdicts[0]["source"] == "agentic"
         assert verdicts[0]["actor"] == "agent"
         assert verdicts[0]["status"] == "still_open"
-        assert verdicts[0]["evidence"] is None
+        # Slice 6b-i: the agent pins the decisive command's real output as proof.
+        assert verdicts[0]["evidence"] is not None
+        assert verdicts[0]["evidence"]["explanation"]
         # FR-10: the agentic verdict re-derives from its transcript.
         assert client.get("/api/audit").json()["ok"] is True
 

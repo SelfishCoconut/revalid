@@ -62,6 +62,7 @@ from revalid.db import (
     session_factory,
 )
 from revalid.domain import (
+    AgenticEvidence,
     Evidence,
     Finding,
     FindingStage,
@@ -210,6 +211,15 @@ class NoteOut(BaseModel):
         )
 
 
+def _verdict_out_evidence(record: VerdictRecord) -> Evidence | AgenticEvidence | None:
+    """Build the right evidence shape for the API view (batch HTTP vs agentic)."""
+    if record.evidence is None:
+        return None
+    if record.source == "agentic":
+        return AgenticEvidence(**record.evidence)
+    return Evidence(**record.evidence)
+
+
 class VerdictOut(BaseModel):
     """A persisted verdict as returned by the API (FR-09/FR-17).
 
@@ -232,7 +242,7 @@ class VerdictOut(BaseModel):
     reason_code: str
     rationale: str
     matched_indicators: tuple[str, ...]
-    evidence: Evidence | None
+    evidence: Evidence | AgenticEvidence | None
 
     @classmethod
     def from_record(cls, record: VerdictRecord) -> "VerdictOut":
@@ -249,7 +259,7 @@ class VerdictOut(BaseModel):
             reason_code=record.reason_code,
             rationale=record.rationale,
             matched_indicators=tuple(record.matched_indicators),
-            evidence=Evidence(**record.evidence) if record.evidence is not None else None,
+            evidence=_verdict_out_evidence(record),
         )
 
 
