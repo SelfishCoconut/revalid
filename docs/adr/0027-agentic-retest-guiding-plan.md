@@ -1,7 +1,7 @@
 # 0027. Agentic retest guiding plan — a gated `set_plan` tool
 
 Date: 2026-07-16
-Status: proposed
+Status: superseded by [ADR-0032](0032-user-owned-goal.md) (FR-17 6b-ii — the plan becomes user-owned; `set_plan` removed)
 
 ## Context
 
