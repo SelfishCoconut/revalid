@@ -296,6 +296,24 @@ export function submitMessage(id: number, text: string): Promise<{ status: strin
 }
 
 /**
+ * Set the user-owned goal for a session (FR-17 6b-ii). Updates the "Current goal"
+ * panel and is delivered to the agent on its next turn (pure-queue).
+ */
+export function setSessionGoal(id: number, steps: string[]): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/goal`,
+    jsonInit("POST", { steps }),
+  );
+}
+
+/** Regenerate the goal for a session's finding via the LLM (FR-17 6b-ii). */
+export function regenerateSessionGoal(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/goal/regenerate`, {
+    method: "POST",
+  });
+}
+
+/**
  * Build the absolute WS(S) URL for a session's live transcript stream.
  * WebSocket has no relative-URL form, so this resolves against the current
  * page's origin/protocol the way `fetch`'s relative `API_BASE` paths do

@@ -8,8 +8,10 @@ import {
   approveCommand,
   endRetestSession,
   getRetestSession,
+  regenerateSessionGoal,
   rejectCommand,
   setFreeLaunch,
+  setSessionGoal,
   submitHumanCommand,
   submitMessage,
   type SessionEvent,
@@ -200,6 +202,16 @@ export function RetestSession() {
   const [overriding, setOverriding] = useState(false);
   const [overrideStatus, setOverrideStatus] = useState<VerdictStatus>("fixed");
   const [overrideRationale, setOverrideRationale] = useState("");
+  // The user-owned goal (FR-17 6b-ii): edit the steps as text (one per line) or
+  // regenerate them via the LLM. Both deliver to the agent on its next turn.
+  const goalMutation = useMutation({
+    mutationFn: (steps: string[]) => setSessionGoal(id, steps),
+  });
+  const regenerateGoalMutation = useMutation({
+    mutationFn: () => regenerateSessionGoal(id),
+  });
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
 
   const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
   const stepsDone = stepsUsed(events);
@@ -376,19 +388,82 @@ export function RetestSession() {
         </div>
       </div>
 
-      {/* Goal — the guiding checklist the agent works to (user-owned in 6b-ii). */}
+      {/* Current goal — the user-owned checklist the agent works to (FR-17 6b-ii). */}
       <Panel className="shrink-0">
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <Eyebrow>Plan</Eyebrow>
+          <Eyebrow>Current goal</Eyebrow>
           <span className="font-mono text-[11px] text-faint">
             {planSteps.length} {planSteps.length === 1 ? "step" : "steps"}
           </span>
         </div>
-        <div className="p-4">
-          {planSteps.length > 0 ? (
-            <StepList steps={planSteps} />
+        <div className="space-y-3 p-4">
+          {editingGoal ? (
+            <div className="space-y-2">
+              <textarea
+                aria-label="goal steps"
+                value={goalDraft}
+                onChange={(e) => {
+                  setGoalDraft(e.target.value);
+                }}
+                rows={4}
+                className="w-full rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
+                placeholder="One step per line…"
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="accent"
+                  disabled={goalMutation.isPending}
+                  onClick={() => {
+                    const steps = goalDraft
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    goalMutation.mutate(steps);
+                    setEditingGoal(false);
+                  }}
+                >
+                  Save goal
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setEditingGoal(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
           ) : (
-            <p className="text-sm text-dim">No goal set yet.</p>
+            <>
+              {planSteps.length > 0 ? (
+                <StepList steps={planSteps} />
+              ) : (
+                <p className="text-sm text-dim">No goal set yet.</p>
+              )}
+              {!sessionOver && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setGoalDraft(planSteps.join("\n"));
+                      setEditingGoal(true);
+                    }}
+                  >
+                    Edit goal
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={regenerateGoalMutation.isPending}
+                    onClick={() => {
+                      regenerateGoalMutation.mutate();
+                    }}
+                  >
+                    Regenerate goal
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </Panel>
