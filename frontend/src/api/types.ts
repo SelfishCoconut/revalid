@@ -148,6 +148,15 @@ export interface Evidence {
   elapsed_ms: number;
 }
 
+/** Flexible, tool-agnostic proof for an agentic verdict (FR-17 Slice 6b-i). */
+export interface AgenticEvidence {
+  explanation: string;
+  command: string;
+  output: string;
+  exit_code: number | null;
+  elapsed_ms: number;
+}
+
 export type VerdictStatus = "still_open" | "fixed" | "inconclusive";
 
 export interface Verdict {
@@ -165,7 +174,7 @@ export interface Verdict {
   source: string;
   session_id: number | null;
   actor: string;
-  evidence: Evidence | null;
+  evidence: Evidence | AgenticEvidence | null;
 }
 
 export interface Settings {

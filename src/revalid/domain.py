@@ -249,6 +249,33 @@ class Evidence(BaseModel):
     elapsed_ms: float = 0.0
 
 
+class AgenticEvidence(BaseModel):
+    """Flexible proof backing an agentic verdict (FR-17 Slice 6b) — tool-agnostic.
+
+    An agentic retest runs arbitrary tooling (not just HTTP probes), so its
+    evidence is the agent's explanation plus the decisive command's real output,
+    not a structured request/response. The orchestrator captures it on conclude
+    from the transcript's last ``command_output`` (real data, not the model
+    restating it); ``command``/``output`` are empty when the agent concluded
+    without running a command.
+
+    Attributes:
+        explanation: The agent's account of what proves the verdict (its rationale).
+        command: The decisive command the agent ran.
+        output: That command's captured stdout/stderr excerpt (truncated).
+        exit_code: The command's exit status, or ``None`` when no command ran.
+        elapsed_ms: The command's wall-clock time in milliseconds.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    explanation: str
+    command: str = ""
+    output: str = ""
+    exit_code: int | None = None
+    elapsed_ms: float = 0.0
+
+
 class VerdictStatus(enum.StrEnum):
     """Outcome of retesting a finding (FR-09)."""
 

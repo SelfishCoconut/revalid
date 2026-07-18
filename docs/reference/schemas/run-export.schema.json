@@ -1,5 +1,46 @@
 {
   "$defs": {
+    "AgenticEvidence": {
+      "description": "Flexible proof backing an agentic verdict (FR-17 Slice 6b) \u2014 tool-agnostic.\n\nAn agentic retest runs arbitrary tooling (not just HTTP probes), so its\nevidence is the agent's explanation plus the decisive command's real output,\nnot a structured request/response. The orchestrator captures it on conclude\nfrom the transcript's last ``command_output`` (real data, not the model\nrestating it); ``command``/``output`` are empty when the agent concluded\nwithout running a command.\n\nAttributes:\n    explanation: The agent's account of what proves the verdict (its rationale).\n    command: The decisive command the agent ran.\n    output: That command's captured stdout/stderr excerpt (truncated).\n    exit_code: The command's exit status, or ``None`` when no command ran.\n    elapsed_ms: The command's wall-clock time in milliseconds.",
+      "properties": {
+        "command": {
+          "default": "",
+          "title": "Command",
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "default": 0.0,
+          "title": "Elapsed Ms",
+          "type": "number"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "output": {
+          "default": "",
+          "title": "Output",
+          "type": "string"
+        }
+      },
+      "required": [
+        "explanation"
+      ],
+      "title": "AgenticEvidence",
+      "type": "object"
+    },
     "Evidence": {
       "description": "Captured request/response of one executed probe step (FR-07).\n\nEvery field a verdict is justified by is recorded here so the verdict can\nbe re-derived and audited. ``response_status`` is ``0`` when the target was\nunreachable and no HTTP response was received.\n\nAttributes:\n    request_method: Method actually sent.\n    request_url: URL actually requested.\n    request_body: Serialized request body (empty string if none).\n    response_status: HTTP status code, or ``0`` if no response arrived.\n    response_headers: Response headers as received.\n    response_body_excerpt: Leading slice of the response body.\n    elapsed_ms: Wall-clock round-trip time in milliseconds.",
       "properties": {
@@ -494,9 +535,13 @@
               "$ref": "#/$defs/Evidence"
             },
             {
+              "$ref": "#/$defs/AgenticEvidence"
+            },
+            {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Evidence"
         },
         "finding_id": {
           "title": "Finding Id",

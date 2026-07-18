@@ -283,14 +283,16 @@ class VerdictRecord(Base):
         rationale: str,
         actor: str,
         reason_code: str,
+        evidence: dict[str, Any] | None = None,
     ) -> VerdictRecord:
         """Build an ``agentic`` row for a retest session's verdict (FR-17 Slice 6a).
 
         Bypasses the evidence-required :meth:`from_domain`: an agentic verdict is
-        justified by the session's transcript, not a single request/response, so
-        ``evidence`` is ``None`` and ``session_id`` links the transcript. ``actor``
-        is ``"agent"`` for the auto-persisted conclusion or ``"operator"`` for a
-        human adjudication that supersedes it.
+        justified by the session's transcript, linked via ``session_id``. ``evidence``
+        is the flexible :class:`~revalid.domain.AgenticEvidence` proof the agent
+        pinned on conclude (Slice 6b-i), or ``None`` when unavailable (e.g. a human
+        adjudication). ``actor`` is ``"agent"`` for the auto-persisted conclusion or
+        ``"operator"`` for a human adjudication that supersedes it.
         """
         return cls(
             finding_id=finding_id,
@@ -299,7 +301,7 @@ class VerdictRecord(Base):
             reason_code=reason_code,
             rationale=rationale,
             matched_indicators=[],
-            evidence=None,
+            evidence=evidence,
             source="agentic",
             session_id=session_id,
             actor=actor,

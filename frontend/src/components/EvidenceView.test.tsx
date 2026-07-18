@@ -42,17 +42,24 @@ describe("EvidenceView", () => {
     expect(screen.getByText("authentication, token")).toBeInTheDocument();
   });
 
-  it("shows a transcript note instead of a drill-down for an agentic verdict", () => {
+  it("renders the explanation + command + output for an agentic verdict", () => {
     const agentic: Verdict = {
       ...verdict,
       source: "agentic",
       session_id: 9,
       actor: "agent",
-      evidence: null,
+      evidence: {
+        explanation: "login bypass still returns a token",
+        command: "curl -s http://lab.local/rest/user/login",
+        output: '{"authentication":{"token":"eyJ..."}}',
+        exit_code: 0,
+        elapsed_ms: 42,
+      },
     };
     render(<EvidenceView verdict={agentic} />);
 
-    expect(screen.getByText(/agentic retest session/i)).toBeInTheDocument();
-    expect(screen.queryByText(/http:\/\/lab\.local/)).not.toBeInTheDocument();
+    expect(screen.getByText(/login bypass still returns a token/)).toBeInTheDocument();
+    expect(screen.getByText("curl -s http://lab.local/rest/user/login")).toBeInTheDocument();
+    expect(screen.getByText('{"authentication":{"token":"eyJ..."}}')).toBeInTheDocument();
   });
 });

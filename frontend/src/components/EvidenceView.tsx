@@ -1,4 +1,4 @@
-import type { Verdict } from "../api/types";
+import type { AgenticEvidence, Verdict } from "../api/types";
 
 function Field({
   label,
@@ -25,16 +25,34 @@ function Field({
  * Expandable request/response evidence captured for a verdict: what was sent,
  * what came back, timing, and which indicators matched.
  */
+function AgenticEvidenceView({ evidence }: { evidence: AgenticEvidence }) {
+  return (
+    <details className="group mt-3 overflow-hidden rounded-lg border border-line bg-panel-2/50">
+      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-dim transition-colors hover:text-fg">
+        Evidence
+      </summary>
+      <dl className="space-y-2.5 border-t border-line px-3 py-3">
+        <Field label="Explanation" value={evidence.explanation} />
+        {evidence.command && <Field label="Command" value={evidence.command} mono />}
+        {evidence.output && <Field label="Output" value={evidence.output} mono />}
+        {evidence.exit_code !== null && (
+          <Field label="Exit code" value={String(evidence.exit_code)} />
+        )}
+        <Field label="Elapsed" value={`${String(evidence.elapsed_ms)} ms`} />
+      </dl>
+    </details>
+  );
+}
+
 export function EvidenceView({ verdict }: { verdict: Verdict }) {
   const { evidence } = verdict;
-  // An agentic verdict (FR-17) has no single request/response — it is justified by
-  // its session transcript, so there is nothing to drill into here.
   if (evidence === null) {
-    return (
-      <p className="mt-3 text-[13px] text-faint">
-        No single-request evidence — this verdict came from an agentic retest session.
-      </p>
-    );
+    return null;
+  }
+  // An agentic verdict (FR-17) carries flexible command-output proof, not an
+  // HTTP request/response — render its explanation + command + output.
+  if ("explanation" in evidence) {
+    return <AgenticEvidenceView evidence={evidence} />;
   }
   return (
     <details className="group mt-3 overflow-hidden rounded-lg border border-line bg-panel-2/50">

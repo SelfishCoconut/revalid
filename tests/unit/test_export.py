@@ -115,14 +115,26 @@ def test_export_assembles_run_and_metrics() -> None:
 
 
 def test_export_carries_agentic_verdict() -> None:
-    """An agentic session's verdict exports with source/session_id + null evidence (Slice 6a)."""
+    """An agentic verdict exports its flexible command-output evidence (Slice 6b-i)."""
     from revalid import retest_session as rs
-    from revalid.domain import VerdictStatus
+    from revalid.domain import AgenticEvidence, SessionEventKind, VerdictStatus
 
     session = session_factory(create_db_engine(IN_MEMORY))()
     create_finding(session, Finding(title="SQLi login", severity=Severity.HIGH))
     session.commit()
     sid = rs.create_session(session, finding_id=1, model="m").id
+    rs.append_event(
+        session,
+        sid,
+        SessionEventKind.COMMAND_OUTPUT,
+        {
+            "command": "curl -s http://lab/x",
+            "stdout": "{token}",
+            "stderr": "",
+            "exit_code": 0,
+            "elapsed_ms": 9,
+        },
+    )
     rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "agent says still open")
 
     export = build_export(session, generated_at=datetime(2026, 7, 18, tzinfo=UTC))
@@ -131,10 +143,12 @@ def test_export_carries_agentic_verdict() -> None:
     assert verdict.session_id == sid
     assert verdict.actor == "agent"
     assert verdict.status.value == "still_open"
-    assert verdict.evidence is None
-    # Agentic verdicts count in the status tally but contribute no round-trip timing.
+    assert isinstance(verdict.evidence, AgenticEvidence)
+    assert verdict.evidence.explanation == "agent says still open"
+    assert verdict.evidence.command == "curl -s http://lab/x"
+    # The captured command's timing now counts in the run metrics.
     assert export.metrics.verdicts_by_status["still_open"] == 1
-    assert export.metrics.total_elapsed_ms == 0.0
+    assert export.metrics.total_elapsed_ms == 9.0
     validate(instance=export.model_dump(mode="json"), schema=export_schema())
 
 

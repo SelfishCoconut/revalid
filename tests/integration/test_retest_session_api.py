@@ -310,7 +310,9 @@ def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
         assert verdicts[0]["source"] == "agentic"
         assert verdicts[0]["actor"] == "agent"
         assert verdicts[0]["status"] == "still_open"
-        assert verdicts[0]["evidence"] is None
+        # Slice 6b-i: the agent pins the decisive command's real output as proof.
+        assert verdicts[0]["evidence"] is not None
+        assert verdicts[0]["evidence"]["explanation"]
         # FR-10: the agentic verdict re-derives from its transcript.
         assert client.get("/api/audit").json()["ok"] is True
 
@@ -336,6 +338,12 @@ def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
         assert latest["source"] == "agentic"
         # FR-10 still clean after adjudication (operator row checked vs its event).
         assert client.get("/api/audit").json()["ok"] is True
+
+        # The operator's adjudication ran no command, so its verdict has no evidence
+        # (Slice 6b-i): /verdicts surfaces that null cleanly.
+        listed = client.get("/api/verdicts").json()
+        operator = next(v for v in listed if v["actor"] == "operator")
+        assert operator["evidence"] is None
 
 
 def test_adjudicate_rejects_an_invalid_status() -> None:

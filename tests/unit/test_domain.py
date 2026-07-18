@@ -1,6 +1,28 @@
 """Tests for domain enums and schemas."""
 
-from revalid.domain import RetestSessionStatus, SessionEventKind
+from revalid.domain import AgenticEvidence, RetestSessionStatus, SessionEventKind
+
+
+def test_agentic_evidence_defaults_to_explanation_only() -> None:
+    ev = AgenticEvidence(explanation="login bypass still returns a token")
+    assert ev.explanation == "login bypass still returns a token"
+    assert ev.command == ""
+    assert ev.output == ""
+    assert ev.exit_code is None
+    assert ev.elapsed_ms == 0.0
+
+
+def test_agentic_evidence_carries_command_proof() -> None:
+    ev = AgenticEvidence(
+        explanation="200 + JWT",
+        command="curl -s http://lab/rest/user/login",
+        output='{"authentication":{"token":"eyJ..."}}',
+        exit_code=0,
+        elapsed_ms=42.0,
+    )
+    assert ev.command.startswith("curl")
+    assert ev.exit_code == 0
+    assert ev.model_config["frozen"] is True
 
 
 def test_retest_session_status_terminal_set() -> None:
