@@ -14,19 +14,37 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from tests._retest_helpers import (
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
 )
 
-from revalid.app import create_app, get_retest_agent, get_sandbox_factory
+from revalid.app import create_app, get_goal_agent, get_retest_agent, get_sandbox_factory
 from revalid.db import IN_MEMORY, create_db_engine
+from revalid.plan import build_goal_agent
 from revalid.retest_agent import build_retest_agent
 from revalid.sandbox import CommandResult, FakeSandbox
 
 pytestmark = pytest.mark.integration
+
+# The seeded goal the stand-in goal agent emits for every session in these tests.
+_GOAL_STEPS = ["Re-check the login endpoint", "Confirm the token"]
+
+
+def _override_goal_agent(app: FastAPI) -> None:
+    """Override the FR-17 goal agent with a stand-in that emits ``_GOAL_STEPS``."""
+
+    def gen(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"steps": _GOAL_STEPS})]
+        )
+
+    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(FunctionModel(gen))
+
 
 _IMPORT: dict[str, Any] = {
     "scan_type": "Manual pentest",
@@ -46,9 +64,20 @@ def _client() -> TestClient:
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
         FunctionModel(script_run_then_conclude)
     )
+    _override_goal_agent(app)
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     return TestClient(app)
+
+
+def test_session_start_seeds_a_goal() -> None:
+    """Starting a session generates a goal and shows it as the first plan_updated (6b-ii)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        goal = next(e for e in state["events"] if e["kind"] == "plan_updated")
+        assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
 def test_retest_session_flow_proposes_then_concludes_on_approval() -> None:
@@ -125,6 +154,7 @@ def test_retest_session_ends_in_error_when_sandbox_factory_raises() -> None:
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
         FunctionModel(script_run_then_conclude)
     )
+    _override_goal_agent(app)
 
     def _boom(_session_id: int) -> FakeSandbox:
         raise RuntimeError("docker daemon unreachable")
@@ -147,6 +177,7 @@ def _echo_client() -> TestClient:
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
         FunctionModel(script_run_then_conclude)
     )
+    _override_goal_agent(app)
     box = FakeSandbox(
         lambda cmd: CommandResult(stdout=f"out:{cmd}", stderr="", exit_code=0, elapsed_ms=1)
     )
@@ -209,6 +240,7 @@ def test_retest_session_message_delivered_on_next_decision() -> None:
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
         FunctionModel(script_run_then_conclude_noting_message)
     )
+    _override_goal_agent(app)
     box = FakeSandbox(
         lambda cmd: CommandResult(stdout=f"out:{cmd}", stderr="", exit_code=0, elapsed_ms=1)
     )
