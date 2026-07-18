@@ -476,44 +476,8 @@
       "title": "Severity",
       "type": "string"
     },
-    "Verdict": {
-      "description": "A retest outcome for a finding, bound to the evidence that justifies it.\n\nEnforces the FR-09 invariants at the type level: a verdict cannot be built\nwithout ``evidence`` (no verdict without linked evidence) and always carries\na machine-readable ``reason_code`` (required for inconclusive results).\n\nAttributes:\n    status: still-open / fixed / inconclusive.\n    reason_code: Machine-readable justification token\n        (e.g. ``sqli_auth_bypass_succeeded``, ``endpoint_changed``).\n    rationale: Human-readable explanation of the verdict.\n    matched_indicators: Indicator tokens observed in the evidence.\n    evidence: The request/response the verdict is derived from.",
-      "properties": {
-        "evidence": {
-          "$ref": "#/$defs/Evidence"
-        },
-        "matched_indicators": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Matched Indicators",
-          "type": "array"
-        },
-        "rationale": {
-          "default": "",
-          "title": "Rationale",
-          "type": "string"
-        },
-        "reason_code": {
-          "minLength": 1,
-          "title": "Reason Code",
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/$defs/VerdictStatus"
-        }
-      },
-      "required": [
-        "status",
-        "reason_code",
-        "evidence"
-      ],
-      "title": "Verdict",
-      "type": "object"
-    },
     "VerdictExport": {
-      "description": "A verdict with its evidence and audit stamps (FR-09/FR-10).",
+      "description": "A verdict with its audit stamps (FR-09/FR-10/FR-17).\n\nCarries the verdict fields directly (rather than embedding the domain\n:class:`~revalid.domain.Verdict`) so one flat shape covers both a ``batch``\nverdict \u2014 ``evidence`` is the single request/response it was derived from \u2014 and\nan ``agentic`` verdict \u2014 ``evidence`` is ``None``, ``session_id`` links the\nretest session whose transcript justifies it (FR-17 Slice 6a).",
       "properties": {
         "actor": {
           "title": "Actor",
@@ -524,6 +488,16 @@
           "title": "Created At",
           "type": "string"
         },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "finding_id": {
           "title": "Finding Id",
           "type": "integer"
@@ -531,6 +505,13 @@
         "id": {
           "title": "Id",
           "type": "integer"
+        },
+        "matched_indicators": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Indicators",
+          "type": "array"
         },
         "plan_id": {
           "anyOf": [
@@ -558,8 +539,31 @@
           "title": "Probe Kind",
           "type": "string"
         },
-        "verdict": {
-          "$ref": "#/$defs/Verdict"
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reason_code": {
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Session Id"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/VerdictStatus"
         }
       },
       "required": [
@@ -570,7 +574,13 @@
         "plan_version",
         "actor",
         "created_at",
-        "verdict"
+        "source",
+        "session_id",
+        "status",
+        "reason_code",
+        "rationale",
+        "matched_indicators",
+        "evidence"
       ],
       "title": "VerdictExport",
       "type": "object"

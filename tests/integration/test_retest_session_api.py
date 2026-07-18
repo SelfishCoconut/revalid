@@ -293,6 +293,77 @@ def test_free_launch_toggle_endpoint_drives_pending_command() -> None:
         assert any(e["kind"] == "free_launch_changed" for e in got["events"])
 
 
+def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
+    """Concluding wires the verdict into /verdicts + /export; adjudication supersedes it (6a)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post("/api/findings/1/retest-session", json={"free_launch": True})
+        sid = started.json()["id"]
+
+        concluded = client.get(f"/api/retest-sessions/{sid}").json()
+        assert concluded["status"] == "concluded"
+        assert concluded["verdict_status"] == "still_open"
+
+        # FR-09 wiring: the agent's verdict is now queryable (agentic, evidence-free).
+        verdicts = client.get("/api/verdicts").json()
+        assert len(verdicts) == 1
+        assert verdicts[0]["source"] == "agentic"
+        assert verdicts[0]["actor"] == "agent"
+        assert verdicts[0]["status"] == "still_open"
+        assert verdicts[0]["evidence"] is None
+        # FR-10: the agentic verdict re-derives from its transcript.
+        assert client.get("/api/audit").json()["ok"] is True
+
+        # Human overrides: fixed.
+        adj = client.post(
+            f"/api/retest-sessions/{sid}/adjudicate",
+            json={"status": "fixed", "rationale": "confirmed patched"},
+        )
+        assert adj.status_code == 200
+        assert adj.json() == {"status": "adjudicated"}
+
+        after = client.get(f"/api/retest-sessions/{sid}").json()
+        assert after["verdict_status"] == "fixed"  # the session view shows the final call
+        assert any(e["kind"] == "verdict_adjudicated" for e in after["events"])
+
+        # FR-12: the export's latest verdict for the finding is the operator's override.
+        export = client.get("/api/export").json()
+        finding_verdicts = [v for v in export["verdicts"] if v["finding_id"] == 1]
+        assert len(finding_verdicts) == 2  # agent + operator, both retained (append-only)
+        latest = max(finding_verdicts, key=lambda v: v["id"])
+        assert latest["actor"] == "operator"
+        assert latest["status"] == "fixed"
+        assert latest["source"] == "agentic"
+        # FR-10 still clean after adjudication (operator row checked vs its event).
+        assert client.get("/api/audit").json()["ok"] is True
+
+
+def test_adjudicate_rejects_an_invalid_status() -> None:
+    """A body with a non-VerdictStatus value is a 422 (FR-17 Slice 6a)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post("/api/findings/1/retest-session", json={"free_launch": True})
+        sid = started.json()["id"]
+        resp = client.post(
+            f"/api/retest-sessions/{sid}/adjudicate",
+            json={"status": "definitely-not-a-status", "rationale": "x"},
+        )
+        assert resp.status_code == 422
+
+
+def test_adjudicate_without_a_verdict_is_a_noop() -> None:
+    """Adjudicating a session that has no agent verdict yet writes nothing (FR-17 Slice 6a)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]  # gated: awaiting_command
+        resp = client.post(
+            f"/api/retest-sessions/{sid}/adjudicate",
+            json={"status": "fixed", "rationale": "premature"},
+        )
+        assert resp.status_code == 200
+        assert client.get("/api/verdicts").json() == []  # nothing to supersede → no row written
+
+
 def test_get_session_returns_budget_defaults() -> None:
     """A default-started session reports gated mode + the default step budget (FR-17 Slice 5)."""
     with _client() as client:

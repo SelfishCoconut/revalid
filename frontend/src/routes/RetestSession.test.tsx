@@ -160,6 +160,50 @@ describe("RetestSession", () => {
     expect(screen.getByText(/still open/i)).toBeInTheDocument();
   });
 
+  function mockConcluded(): void {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 2, kind: "verdict", payload: { status: "still_open", rationale: "bypassable" } }],
+      status: "concluded",
+      verdict: { status: "still_open", rationale: "bypassable" },
+      connected: true,
+    });
+  }
+
+  it("adjudication panel is absent while the session is live", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    renderAt(1);
+    expect(screen.queryByText(/adjudication/i)).not.toBeInTheDocument();
+  });
+
+  it("Accept records the agent's own verdict (FR-17 Slice 6a)", async () => {
+    mockConcluded();
+    vi.mocked(client.adjudicateSession).mockResolvedValue({ status: "adjudicated" });
+
+    renderAt(1);
+    expect(screen.getByText(/adjudication/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^accept$/i }));
+    expect(client.adjudicateSession).toHaveBeenCalledWith(1, "still_open", "bypassable");
+  });
+
+  it("Override submits a different verdict and rationale (FR-17 Slice 6a)", async () => {
+    mockConcluded();
+    vi.mocked(client.adjudicateSession).mockResolvedValue({ status: "adjudicated" });
+
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /override/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/override status/i), "inconclusive");
+    await userEvent.type(screen.getByLabelText(/override rationale/i), "need more evidence");
+    await userEvent.click(screen.getByRole("button", { name: /submit override/i }));
+
+    expect(client.adjudicateSession).toHaveBeenCalledWith(1, "inconclusive", "need more evidence");
+  });
+
   it("ends the session", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],

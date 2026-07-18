@@ -34,7 +34,7 @@ from pydantic_ai.messages import ModelMessage
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from revalid.db import RetestSessionRecord, SessionEventRecord
+from revalid.db import RetestSessionRecord, SessionEventRecord, VerdictRecord
 from revalid.domain import RetestSessionStatus, SessionEventKind, VerdictStatus
 from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, format_observations
 from revalid.sandbox import CommandResult, Sandbox
@@ -179,6 +179,67 @@ def record_verdict(
     record.verdict_status = status.value
     record.verdict_rationale = rationale
     record.ended_at = func.now()
+    # FR-09/Slice 6a: the agent's conclusion becomes a queryable agentic verdict
+    # (actor="agent"), so a session's outcome reaches the `verdicts` table, the
+    # FR-10 audit, and the FR-12 export with no human action. The give-up caller
+    # routes through here too, so a budget give-up persists an inconclusive one.
+    session.add(
+        VerdictRecord.agentic(
+            finding_id=record.finding_id,
+            session_id=session_id,
+            status=status,
+            rationale=rationale,
+            actor="agent",
+            reason_code="agentic_conclusion",
+        )
+    )
+    session.commit()
+
+
+def adjudicate_verdict(
+    session: Session, session_id: int, status: VerdictStatus, rationale: str
+) -> None:
+    """Record a human adjudication of a concluded session's verdict (FR-17 Slice 6a).
+
+    The human accepts or overrides the agent's conclusion. Either way this
+    **appends** a superseding agentic verdict (``actor="operator"``) — the agent's
+    record is never mutated (append-only; FR-10 intact) — plus a
+    ``verdict_adjudicated`` transcript event, and updates the session row so its
+    view shows the final call. Latest-per-finding (highest verdict id) is
+    authoritative, so the operator record supersedes the agent's.
+
+    A pure DB operation: the session is already terminal (torn down), so the live
+    registry is never touched. A no-op if the session doesn't exist or has no
+    agent verdict yet (nothing to adjudicate) — the guard also makes a premature
+    or duplicate call safe.
+
+    Args:
+        session: Active DB session for this call.
+        session_id: The concluded retest session being adjudicated.
+        status: The human's verdict (may equal or differ from the agent's).
+        rationale: The human's justification.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or record.verdict_status is None:
+        return
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.VERDICT_ADJUDICATED,
+        {"status": status.value, "rationale": rationale},
+    )
+    session.add(
+        VerdictRecord.agentic(
+            finding_id=record.finding_id,
+            session_id=session_id,
+            status=status,
+            rationale=rationale,
+            actor="operator",
+            reason_code="operator_adjudication",
+        )
+    )
+    record.verdict_status = status.value
+    record.verdict_rationale = rationale
     session.commit()
 
 

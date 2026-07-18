@@ -27,6 +27,15 @@ function Field({
  */
 export function EvidenceView({ verdict }: { verdict: Verdict }) {
   const { evidence } = verdict;
+  // An agentic verdict (FR-17) has no single request/response — it is justified by
+  // its session transcript, so there is nothing to drill into here.
+  if (evidence === null) {
+    return (
+      <p className="mt-3 text-[13px] text-faint">
+        No single-request evidence — this verdict came from an agentic retest session.
+      </p>
+    );
+  }
   return (
     <details className="group mt-3 overflow-hidden rounded-lg border border-line bg-panel-2/50">
       <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-dim transition-colors hover:text-fg">

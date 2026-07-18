@@ -215,9 +215,14 @@ class PlanRecord(Base):
 class VerdictRecord(Base):
     """Persisted retest verdict linked to the finding it retested (FR-09).
 
-    The ``finding_id`` foreign key and the non-null ``evidence`` column enforce
-    the FR-09 invariant in storage: every verdict row references a finding and
-    carries the evidence it was derived from.
+    The ``finding_id`` foreign key ties every verdict to a finding. ``source``
+    discriminates the two verdict shapes this one table holds (FR-17 Slice 6a):
+    a ``"batch"`` verdict (FR-09) carries the single request/response ``evidence``
+    it was derived from; an ``"agentic"`` verdict is the human-adjudicated
+    conclusion of a whole retest session — its justification is that session's
+    append-only transcript, so ``session_id`` is set and ``evidence`` is ``NULL``.
+    The frozen domain :class:`~revalid.domain.Verdict` (evidence-required) is
+    left untouched; only this storage row absorbs the variance.
     """
 
     __tablename__ = "verdicts"
@@ -229,10 +234,16 @@ class VerdictRecord(Base):
     reason_code: Mapped[str] = mapped_column(String(64))
     rationale: Mapped[str]
     matched_indicators: Mapped[list[str]] = mapped_column(JSON)
-    evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # NULL for an agentic verdict (justified by the transcript, not one request).
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)
     plan_version: Mapped[int | None] = mapped_column(default=None)
-    # Audit trail (FR-10): when the retest ran and who ran it (the executor).
+    # "batch" (FR-09 evidence-backed) or "agentic" (FR-17 session-backed).
+    source: Mapped[str] = mapped_column(String(16), default="batch")
+    # Set for agentic rows: the retest session whose transcript justifies the verdict.
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("retest_sessions.id"), default=None)
+    # Audit trail (FR-10): when the retest ran and who ran it (the executor for a
+    # batch verdict; "agent" / "operator" for an agentic conclusion + adjudication).
     actor: Mapped[str] = mapped_column(String(32), default="executor")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -247,7 +258,7 @@ class VerdictRecord(Base):
         plan_version: int | None = None,
         actor: str = "executor",
     ) -> VerdictRecord:
-        """Build a row from a domain verdict against ``finding_id`` (FR-10 actor)."""
+        """Build a ``batch`` row from a domain verdict against ``finding_id`` (FR-10 actor)."""
         return cls(
             finding_id=finding_id,
             probe_kind=probe_kind,
@@ -258,11 +269,55 @@ class VerdictRecord(Base):
             evidence=verdict.evidence.model_dump(),
             plan_id=plan_id,
             plan_version=plan_version,
+            source="batch",
+            actor=actor,
+        )
+
+    @classmethod
+    def agentic(
+        cls,
+        *,
+        finding_id: int,
+        session_id: int,
+        status: VerdictStatus,
+        rationale: str,
+        actor: str,
+        reason_code: str,
+    ) -> VerdictRecord:
+        """Build an ``agentic`` row for a retest session's verdict (FR-17 Slice 6a).
+
+        Bypasses the evidence-required :meth:`from_domain`: an agentic verdict is
+        justified by the session's transcript, not a single request/response, so
+        ``evidence`` is ``None`` and ``session_id`` links the transcript. ``actor``
+        is ``"agent"`` for the auto-persisted conclusion or ``"operator"`` for a
+        human adjudication that supersedes it.
+        """
+        return cls(
+            finding_id=finding_id,
+            probe_kind="agentic",
+            status=status.value,
+            reason_code=reason_code,
+            rationale=rationale,
+            matched_indicators=[],
+            evidence=None,
+            source="agentic",
+            session_id=session_id,
             actor=actor,
         )
 
     def to_domain(self) -> Verdict:
-        """Convert this row back to a domain verdict."""
+        """Convert a ``batch`` row back to a domain verdict.
+
+        Only valid for ``source="batch"`` rows: an agentic row has no ``evidence``,
+        so callers must branch on ``source`` before calling this (see
+        :mod:`revalid.export` / :mod:`revalid.audit`).
+
+        Raises:
+            ValueError: If called on an agentic (evidence-free) row.
+        """
+        if self.evidence is None:
+            msg = "to_domain() is batch-only; an agentic verdict has no evidence"
+            raise ValueError(msg)
         return Verdict(
             status=VerdictStatus(self.status),
             reason_code=self.reason_code,

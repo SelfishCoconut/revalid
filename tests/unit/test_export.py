@@ -101,15 +101,41 @@ def test_export_assembles_run_and_metrics() -> None:
     verdict = export.verdicts[0]
     assert verdict.finding_id == 1
     assert verdict.actor == "executor"
-    assert verdict.verdict.status.value == "still_open"
+    assert verdict.source == "batch"
+    assert verdict.status.value == "still_open"
     assert verdict.plan_version == 1
+    assert verdict.evidence is not None
 
     assert export.metrics.findings == 1
     assert export.metrics.plans == 1
     assert export.metrics.verdicts == 1
     assert export.metrics.verdicts_by_status["still_open"] == 1
-    assert export.metrics.total_elapsed_ms == verdict.verdict.evidence.elapsed_ms
+    assert export.metrics.total_elapsed_ms == verdict.evidence.elapsed_ms
     assert export.metrics.mean_elapsed_ms == export.metrics.total_elapsed_ms
+
+
+def test_export_carries_agentic_verdict() -> None:
+    """An agentic session's verdict exports with source/session_id + null evidence (Slice 6a)."""
+    from revalid import retest_session as rs
+    from revalid.domain import VerdictStatus
+
+    session = session_factory(create_db_engine(IN_MEMORY))()
+    create_finding(session, Finding(title="SQLi login", severity=Severity.HIGH))
+    session.commit()
+    sid = rs.create_session(session, finding_id=1, model="m").id
+    rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "agent says still open")
+
+    export = build_export(session, generated_at=datetime(2026, 7, 18, tzinfo=UTC))
+    [verdict] = export.verdicts
+    assert verdict.source == "agentic"
+    assert verdict.session_id == sid
+    assert verdict.actor == "agent"
+    assert verdict.status.value == "still_open"
+    assert verdict.evidence is None
+    # Agentic verdicts count in the status tally but contribute no round-trip timing.
+    assert export.metrics.verdicts_by_status["still_open"] == 1
+    assert export.metrics.total_elapsed_ms == 0.0
+    validate(instance=export.model_dump(mode="json"), schema=export_schema())
 
 
 def test_export_carries_finding_versions_and_notes() -> None:

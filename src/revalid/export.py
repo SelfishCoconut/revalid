@@ -25,12 +25,14 @@ from sqlalchemy.orm import Session
 
 from revalid import __version__
 from revalid.db import FindingRecord, PlanRecord, ReportRecord, VerdictRecord
-from revalid.domain import Finding, Probe, Verdict, VerdictStatus
+from revalid.domain import Evidence, Finding, Probe, VerdictStatus
 from revalid.findings import list_notes, list_versions
 
 # Export-format version (independent of the tool's release version). Bump on any
 # breaking change to the RunExport shape; the JSON Schema carries the same value.
-SCHEMA_VERSION = "1.1"
+# 1.2: VerdictExport flattened to carry verdict fields + source/session_id + optional
+# evidence, so it covers agentic verdicts (FR-17 Slice 6a) as well as batch ones.
+SCHEMA_VERSION = "1.2"
 
 
 class Generator(BaseModel):
@@ -120,7 +122,14 @@ class PlanExport(BaseModel):
 
 
 class VerdictExport(BaseModel):
-    """A verdict with its evidence and audit stamps (FR-09/FR-10)."""
+    """A verdict with its audit stamps (FR-09/FR-10/FR-17).
+
+    Carries the verdict fields directly (rather than embedding the domain
+    :class:`~revalid.domain.Verdict`) so one flat shape covers both a ``batch``
+    verdict — ``evidence`` is the single request/response it was derived from — and
+    an ``agentic`` verdict — ``evidence`` is ``None``, ``session_id`` links the
+    retest session whose transcript justifies it (FR-17 Slice 6a).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -131,7 +140,13 @@ class VerdictExport(BaseModel):
     plan_version: int | None
     actor: str
     created_at: datetime
-    verdict: Verdict
+    source: str
+    session_id: int | None
+    status: VerdictStatus
+    reason_code: str
+    rationale: str
+    matched_indicators: tuple[str, ...]
+    evidence: Evidence | None
 
 
 class RunMetrics(BaseModel):
@@ -234,7 +249,13 @@ def _verdict_export(record: VerdictRecord) -> VerdictExport:
         plan_version=record.plan_version,
         actor=record.actor,
         created_at=record.created_at,
-        verdict=record.to_domain(),
+        source=record.source,
+        session_id=record.session_id,
+        status=VerdictStatus(record.status),
+        reason_code=record.reason_code,
+        rationale=record.rationale,
+        matched_indicators=tuple(record.matched_indicators),
+        evidence=Evidence(**record.evidence) if record.evidence is not None else None,
     )
 
 
@@ -246,8 +267,10 @@ def _metrics(
 ) -> RunMetrics:
     by_status = {status.value: 0 for status in VerdictStatus}
     for verdict in verdicts:
-        by_status[verdict.verdict.status.value] += 1
-    total_ms = sum(v.verdict.evidence.elapsed_ms for v in verdicts)
+        by_status[verdict.status.value] += 1
+    # Agentic verdicts carry no single-request evidence — their timing lives in the
+    # transcript — so sum round-trip time only over evidence-backed (batch) verdicts.
+    total_ms = sum(v.evidence.elapsed_ms for v in verdicts if v.evidence is not None)
     return RunMetrics(
         reports=len(reports),
         findings=len(findings),
