@@ -111,6 +111,7 @@ from revalid.retest_session import (
     is_terminal,
     load_events_after,
     set_free_launch,
+    set_goal,
     start_and_step,
     submit_human_command,
     submit_message,
@@ -404,6 +405,12 @@ class FreeLaunchRequest(BaseModel):
     """Body for the live free-launch toggle (FR-17 Slice 5)."""
 
     enabled: bool
+
+
+class GoalRequest(BaseModel):
+    """Body for a user-owned goal edit (FR-17 6b-ii)."""
+
+    steps: list[str]
 
 
 class AdjudicateRequest(BaseModel):
@@ -791,6 +798,26 @@ def run_human_command(
     """
     with sessions() as session:
         submit_human_command(session, registry, session_id, command)
+
+
+def run_goal(
+    sessions: sessionmaker[Session], registry: SessionRegistry, session_id: int, steps: list[str]
+) -> None:
+    """Set the user-owned goal on a session (FR-17 6b-ii background task)."""
+    with sessions() as session:
+        set_goal(session, registry, session_id, steps)
+
+
+def run_regenerate_goal(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    goal_agent: Agent[None, GeneratedGoal],
+    finding: Finding,
+) -> None:
+    """Regenerate + set the goal for a session (FR-17 6b-ii background task)."""
+    with sessions() as session:
+        set_goal(session, registry, session_id, list(generate_goal(goal_agent, finding)))
 
 
 def run_message(
@@ -1385,6 +1412,52 @@ def _register_free_launch_route(
         return {"status": "accepted"}
 
 
+def _register_goal_routes(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the FR-17 6b-ii user-owned goal routes (edit + regenerate).
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/retest-sessions/{session_id}/goal", status_code=202)
+    def set_goal_route(
+        session_id: int, body: GoalRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Set the user-owned goal on a live session (FR-17 6b-ii).
+
+        Updates the "Current goal" panel and is delivered to the agent on its next
+        turn (pure-queue). Runs in the background; a no-op if the session is no
+        longer live.
+        """
+        background.add_task(run_goal, sessions, registry, session_id, body.steps)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/goal/regenerate", status_code=202)
+    def regenerate_goal_route(
+        session_id: int,
+        session: SessionDep,
+        goal_agent: GoalAgentDep,
+        background: BackgroundTasks,
+    ) -> dict[str, str]:
+        """Regenerate the goal for a session's finding and set it (FR-17 6b-ii)."""
+        record = session.get(RetestSessionRecord, session_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown session")
+        finding = _current_or_404(session, record.finding_id).to_domain()
+        background.add_task(
+            run_regenerate_goal, sessions, registry, session_id, goal_agent, finding
+        )
+        return {"status": "accepted"}
+
+
 def _register_adjudicate_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-17 Slice 6a verdict-adjudication route.
 
@@ -1565,6 +1638,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_retest_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
+    _register_goal_routes(api, sessions, registry)
     _register_adjudicate_route(api, sessions)
     _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)

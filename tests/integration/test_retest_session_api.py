@@ -80,6 +80,31 @@ def test_session_start_seeds_a_goal() -> None:
         assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
+def test_set_goal_endpoint_updates_the_panel_event() -> None:
+    """A user goal edit appends a fresh plan_updated event (FR-17 6b-ii)."""
+    with _echo_client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        resp = client.post(f"/api/retest-sessions/{sid}/goal", json={"steps": ["Only test /admin"]})
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        updates = [e for e in state["events"] if e["kind"] == "plan_updated"]
+        assert updates[-1]["payload"]["steps"] == ["Only test /admin"]
+
+
+def test_regenerate_goal_endpoint_reseeds() -> None:
+    """Regenerating re-runs the goal agent and emits a fresh plan_updated (FR-17 6b-ii)."""
+    with _echo_client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        client.post(f"/api/retest-sessions/{sid}/goal", json={"steps": ["stale"]})
+        resp = client.post(f"/api/retest-sessions/{sid}/goal/regenerate")
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        updates = [e for e in state["events"] if e["kind"] == "plan_updated"]
+        assert updates[-1]["payload"]["steps"] == _GOAL_STEPS
+
+
 def test_retest_session_flow_proposes_then_concludes_on_approval() -> None:
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
