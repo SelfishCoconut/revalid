@@ -191,7 +191,6 @@ class RetestSessionStatus(enum.StrEnum):
 
     STARTING = "starting"
     THINKING = "thinking"
-    AWAITING_PLAN = "awaiting_plan"
     AWAITING_COMMAND = "awaiting_command"
     RUNNING_COMMAND = "running_command"
     CONCLUDED = "concluded"
@@ -210,9 +209,7 @@ class SessionEventKind(enum.StrEnum):
     COMMAND_OUTPUT = "command_output"
     HUMAN_COMMAND = "human_command"
     HUMAN_MESSAGE = "human_message"
-    PLAN_PROPOSED = "plan_proposed"
-    PLAN_APPROVED = "plan_approved"
-    PLAN_REJECTED = "plan_rejected"
+    # The current guiding goal (FR-17 6b-ii: user-owned; formerly the agent's set_plan).
     PLAN_UPDATED = "plan_updated"
     STATE_CHANGE = "state_change"
     FREE_LAUNCH_CHANGED = "free_launch_changed"

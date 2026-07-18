@@ -136,12 +136,7 @@ function HumanTurn({ text, queued }: { text: string; queued: boolean }) {
 
 /** Seq of the latest approve/reject; a human_message after it hasn't been delivered yet. */
 function lastDecisionSeq(events: SessionEvent[]): number {
-  const decisions = new Set([
-    "command_approved",
-    "command_rejected",
-    "plan_approved",
-    "plan_rejected",
-  ]);
+  const decisions = new Set(["command_approved", "command_rejected"]);
   const latest = [...events].reverse().find((event) => decisions.has(event.kind));
   return latest ? latest.seq : 0;
 }
@@ -215,11 +210,8 @@ export function RetestSession() {
   const decisionSeq = lastDecisionSeq(events);
   // A pending approval is for either a command or a plan change; both gate on the
   // same tool_call_id, so they share the approve/reject mutations below.
-  const latestProposal = [...events]
-    .reverse()
-    .find((event) => event.kind === "command_proposed" || event.kind === "plan_proposed");
-  const awaitingApproval =
-    (status === "awaiting_command" || status === "awaiting_plan") && latestProposal !== undefined;
+  const latestProposal = [...events].reverse().find((event) => event.kind === "command_proposed");
+  const awaitingApproval = status === "awaiting_command" && latestProposal !== undefined;
 
   // A concluded/given-up session carries an agent verdict the operator may
   // adjudicate. The panel closes once adjudicated — detected from the transcript
@@ -324,24 +316,11 @@ export function RetestSession() {
         </AgentTurn>,
       ];
     }
-    if (event.kind === "plan_proposed") {
-      const isPending = awaitingApproval && event.seq === latestProposal?.seq;
-      return [
-        <AgentTurn key={event.seq}>
-          <Eyebrow>{planSteps.length > 0 ? "Plan revision" : "Proposed plan"}</Eyebrow>
-          <p className="mt-1 text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
-          <StepList steps={payloadSteps(event.payload)} />
-          {isPending &&
-            renderApproval(String(event.payload.tool_call_id), "the plan changes only if you approve")}
-        </AgentTurn>,
-      ];
-    }
-    if (event.kind === "command_rejected" || event.kind === "plan_rejected") {
-      const what = event.kind === "plan_rejected" ? "plan" : "command";
+    if (event.kind === "command_rejected") {
       const reason = String(event.payload.reason ?? "");
       return [
         <p key={event.seq} className="pl-5 text-[12px] text-faint">
-          ✗ {what} rejected{reason ? `: ${reason}` : ""}
+          ✗ command rejected{reason ? `: ${reason}` : ""}
         </p>,
       ];
     }
@@ -397,7 +376,7 @@ export function RetestSession() {
         </div>
       </div>
 
-      {/* Plan — the agent's guiding checklist; every change is human-approved. */}
+      {/* Goal — the guiding checklist the agent works to (user-owned in 6b-ii). */}
       <Panel className="shrink-0">
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
           <Eyebrow>Plan</Eyebrow>
@@ -409,9 +388,7 @@ export function RetestSession() {
           {planSteps.length > 0 ? (
             <StepList steps={planSteps} />
           ) : (
-            <p className="text-sm text-dim">
-              The agent proposes a guiding plan first — approve it and it appears here.
-            </p>
+            <p className="text-sm text-dim">No goal set yet.</p>
           )}
         </div>
       </Panel>

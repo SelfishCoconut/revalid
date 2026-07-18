@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy.orm import Session
-from tests._retest_helpers import script_plan_then_run_then_conclude
+from tests._retest_helpers import script_run_then_conclude
 
 from revalid.db import IN_MEMORY, RetestSessionRecord, create_db_engine, session_factory
 from revalid.domain import Finding, Severity
@@ -58,19 +58,16 @@ def _run_scripted_session(
             CommandResult(stdout='{"status":"ok"}', stderr="", exit_code=0, elapsed_ms=42),
         ]
     )
-    agent = build_retest_agent(FunctionModel(script_plan_then_run_then_conclude))
+    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
 
     record = create_session(session, finding_id=finding_id, model="function-model:demo")
     start_and_step(
         session, registry, record.id, agent, box, "Retest the SQLi login-bypass finding."
     )
-    # 1. The agent proposes a guiding plan first (gated) — approve it.
-    apply_decision(
-        session, registry, record.id, approved=True, command_id=_pending_cid(session, record.id)
-    )
-    # 2. The operator takes over and runs a manual command (ungated) before deciding.
+    # 1. The operator runs a manual command (ungated) while the agent's proposal awaits.
     submit_human_command(session, registry, record.id, "whoami")
-    # 3. The agent then proposes a command (gated) — approve it; it runs and concludes.
+    # 2. Approve the agent's proposed command — it runs, the agent observes the
+    #    operator's `!whoami`, and concludes with a verdict.
     apply_decision(
         session, registry, record.id, approved=True, command_id=_pending_cid(session, record.id)
     )
@@ -81,11 +78,7 @@ def _run_scripted_session(
 def _pending_cid(session: Session, session_id: int) -> str:
     """Resolve the latest proposal's ``tool_call_id`` — the ``cid`` the UI approves against."""
     events = load_events_after(session, session_id, after_seq=0)
-    proposal = next(
-        event
-        for event in reversed(events)
-        if event["kind"] in ("command_proposed", "plan_proposed")
-    )
+    proposal = next(event for event in reversed(events) if event["kind"] == "command_proposed")
     return str(proposal["payload"]["tool_call_id"])
 
 

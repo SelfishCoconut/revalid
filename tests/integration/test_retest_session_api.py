@@ -17,7 +17,6 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.models.function import FunctionModel
 from tests._retest_helpers import (
-    script_plan_then_run_then_conclude,
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
 )
@@ -178,34 +177,6 @@ def test_retest_session_human_command_rejects_empty() -> None:
 
         resp = client.post(f"/api/retest-sessions/{sid}/human-command", json={"command": ""})
         assert resp.status_code == 422
-
-
-def test_retest_session_plan_flow_over_http() -> None:
-    """The agent proposes a plan first; approving it (same endpoint) sets the current plan."""
-    app = create_app(engine=create_db_engine(IN_MEMORY))
-    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_plan_then_run_then_conclude)
-    )
-    box = FakeSandbox(
-        lambda cmd: CommandResult(stdout=f"out:{cmd}", stderr="", exit_code=0, elapsed_ms=1)
-    )
-    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
-    with TestClient(app) as client:
-        client.post("/api/findings/import", json=_IMPORT)
-        sid = client.post("/api/findings/1/retest-session").json()["id"]
-
-        state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "awaiting_plan"
-        proposed = next(e for e in state["events"] if e["kind"] == "plan_proposed")
-        assert proposed["payload"]["steps"]
-        cid = proposed["payload"]["tool_call_id"]
-
-        # The plan uses the same gated approve endpoint as commands.
-        assert client.post(f"/api/retest-sessions/{sid}/commands/{cid}/approve").status_code == 202
-
-        after = client.get(f"/api/retest-sessions/{sid}").json()
-        assert any(e["kind"] == "plan_updated" for e in after["events"])
-        assert after["status"] == "awaiting_command"
 
 
 def test_retest_session_message_recorded_and_buffered() -> None:

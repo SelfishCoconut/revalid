@@ -125,49 +125,6 @@ def script_respond_then_conclude(messages: list[ModelMessage], info: AgentInfo) 
     )
 
 
-def script_plan_then_run_then_conclude(
-    messages: list[ModelMessage], info: AgentInfo
-) -> ModelResponse:
-    """Stateful scripted model: propose a plan, then a command, then conclude (FR-17 Slice 3).
-
-    Drives the full Slice 3 flow: ``set_plan`` (gated) first, then ``run_command``
-    (gated) once the plan is in effect, then the ``ConcludeOutput`` verdict once
-    the command has returned.
-    """
-    if not has_tool_result(messages, "set_plan"):
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name="set_plan",
-                    args={
-                        "steps": ["Retry the login-bypass payload", "Baseline with valid creds"],
-                        "rationale": "confirm the SQLi still bypasses auth",
-                    },
-                )
-            ]
-        )
-    if not has_tool_result(messages, "run_command"):
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name="run_command",
-                    args={
-                        "command": "curl -s http://revalid-juice-shop:3000/rest/user/login",
-                        "rationale": "retry the login-bypass payload",
-                    },
-                )
-            ]
-        )
-    return ModelResponse(
-        parts=[
-            ToolCallPart(
-                tool_name=info.output_tools[0].name,
-                args={"status": "still_open", "rationale": "auth still bypassable"},
-            )
-        ]
-    )
-
-
 def operator_message_count(messages: list[ModelMessage]) -> int:
     """Count user-turn messages in history.
 
