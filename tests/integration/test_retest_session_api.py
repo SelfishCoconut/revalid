@@ -80,6 +80,35 @@ def test_session_start_seeds_a_goal() -> None:
         assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
+def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
+    """A goal-generation failure degrades to an empty goal without blocking start (6b-ii)."""
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        FunctionModel(script_run_then_conclude)
+    )
+
+    def boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise UnexpectedModelBehavior("no goal")
+
+    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(FunctionModel(boom))
+    box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    with TestClient(app) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        # No goal was seeded, but the session still started normally.
+        assert not any(e["kind"] == "plan_updated" for e in state["events"])
+        assert state["status"] == "awaiting_command"
+
+
+def test_regenerate_goal_unknown_session_is_404() -> None:
+    with _client() as client:
+        assert client.post("/api/retest-sessions/999/goal/regenerate").status_code == 404
+
+
 def test_set_goal_endpoint_updates_the_panel_event() -> None:
     """A user goal edit appends a fresh plan_updated event (FR-17 6b-ii)."""
     with _echo_client() as client:
