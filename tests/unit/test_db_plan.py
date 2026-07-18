@@ -101,6 +101,27 @@ def test_to_domain_rejects_agentic_row() -> None:
         record.to_domain()
 
 
+def test_agentic_constructor_stores_evidence() -> None:
+    """The agentic() constructor persists a flexible evidence dict (Slice 6b-i)."""
+    from revalid.domain import AgenticEvidence
+
+    evidence = AgenticEvidence(
+        explanation="still open", command="curl -s http://lab/x", output="{token}", exit_code=0
+    )
+    record = VerdictRecord.agentic(
+        finding_id=1,
+        session_id=5,
+        status=VerdictStatus.STILL_OPEN,
+        rationale="still open",
+        actor="agent",
+        reason_code="agentic_conclusion",
+        evidence=evidence.model_dump(),
+    )
+    assert record.evidence is not None
+    assert record.evidence["command"] == "curl -s http://lab/x"
+    assert record.evidence["explanation"] == "still open"
+
+
 def test_agentic_row_persists_with_null_evidence() -> None:
     """An agentic row commits with a NULL ``evidence`` column (nullability, Slice 6a)."""
     with _session() as session:
