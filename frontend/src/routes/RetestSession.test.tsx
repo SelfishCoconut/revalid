@@ -408,7 +408,7 @@ describe("RetestSession", () => {
     expect(screen.getByText(/2 steps/)).toBeInTheDocument();
   });
 
-  it("shows a placeholder in the plan panel before any plan exists", () => {
+  it("shows a placeholder in the goal panel before any goal exists", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "starting",
@@ -418,31 +418,7 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByText(/proposes a guiding plan first/i)).toBeInTheDocument();
-  });
-
-  it("renders a proposed plan as an approval card and approves it via the same gate", async () => {
-    vi.mocked(hook.useRetestSession).mockReturnValue({
-      events: [
-        {
-          seq: 1,
-          kind: "plan_proposed",
-          payload: { steps: ["Probe the login endpoint"], rationale: "confirm the SQLi", tool_call_id: "plan-1" },
-        },
-      ],
-      status: "awaiting_plan",
-      verdict: null,
-      connected: true,
-    });
-    vi.mocked(client.approveCommand).mockResolvedValue({ status: "approved" });
-
-    renderAt(1);
-
-    expect(screen.getByText("Probe the login endpoint")).toBeInTheDocument();
-    expect(screen.getByText(/confirm the SQLi/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: /approve/i }));
-    expect(client.approveCommand).toHaveBeenCalledWith(1, "plan-1");
+    expect(screen.getByText(/no goal set yet/i)).toBeInTheDocument();
   });
 
   it("shows the step-budget meter (steps used / max)", async () => {
