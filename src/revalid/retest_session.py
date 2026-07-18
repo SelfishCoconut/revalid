@@ -373,6 +373,23 @@ class LiveSession:
             self.human_messages.clear()
             return drained
 
+    #: The current goal (FR-17 6b-ii) queued by an operator edit since the agent's
+    #: last turn, delivered as a user turn on the next resume (like human_messages).
+    #: ``None`` means no pending change. Guarded by ``lock``.
+    pending_goal: list[str] | None = None
+
+    def set_pending_goal(self, steps: list[str]) -> None:
+        """Queue a goal change for the agent's next turn (thread-safe)."""
+        with self.lock:
+            self.pending_goal = list(steps)
+
+    def drain_goal(self) -> list[str] | None:
+        """Atomically return and clear the queued goal change (thread-safe)."""
+        with self.lock:
+            drained = self.pending_goal
+            self.pending_goal = None
+            return drained
+
 
 class SessionRegistry:
     """Process-local registry of live sessions (one per app instance)."""
@@ -610,6 +627,19 @@ def _decision_event_kind(*, approved: bool) -> SessionEventKind:
     return SessionEventKind.COMMAND_APPROVED if approved else SessionEventKind.COMMAND_REJECTED
 
 
+def _resume_prompt(goal: list[str] | None, messages: list[str]) -> str | None:
+    """Combine a queued goal change + queued operator messages into one user turn (6b-ii).
+
+    Both are delivered on the next agent resume; ``None`` when neither is pending.
+    """
+    parts: list[str] = []
+    if goal:
+        steps = "\n".join(f"- {s}" for s in goal)
+        parts.append(f"The operator set the goal to:\n{steps}")
+    parts.extend(messages)
+    return "\n\n".join(parts) if parts else None
+
+
 def _resume_with_decision(
     session: Session,
     registry: SessionRegistry,
@@ -643,8 +673,7 @@ def _resume_with_decision(
         # message here — the agent still observes what the human did.
         results.approvals[call_id] = ToolDenied(reason + format_observations(live.drain()))
     deps = _make_deps(session, session_id, live)
-    queued = live.drain_messages()
-    user_prompt = "\n".join(queued) if queued else None
+    user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages())
     try:
         result = live.agent.run_sync(
             user_prompt,
@@ -871,6 +900,30 @@ def submit_message(session: Session, registry: SessionRegistry, session_id: int,
         return
     append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
     live.receive_message(text)
+
+
+def set_goal(
+    session: Session, registry: SessionRegistry, session_id: int, steps: list[str]
+) -> None:
+    """Set the user-owned goal on a live session (FR-17 6b-ii).
+
+    Appends a ``plan_updated`` transcript event (so the "Current goal" panel updates
+    and it replays) and queues the goal on the live session; it is delivered to the
+    agent as a first-class user turn on the next approve/reject
+    (:func:`_resume_with_decision`) — pure-queue, never interrupting a run. A no-op
+    if the session is not live (terminal / never started).
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry (holds the goal buffer).
+        session_id: The retest session whose goal to set.
+        steps: The operator's goal steps (replaces the whole goal).
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    append_event(session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": list(steps)})
+    live.set_pending_goal(steps)
 
 
 def end_session(session: Session, registry: SessionRegistry, session_id: int) -> None:

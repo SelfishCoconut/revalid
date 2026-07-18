@@ -421,6 +421,52 @@ describe("RetestSession", () => {
     expect(screen.getByText(/no goal set yet/i)).toBeInTheDocument();
   });
 
+  function mockLiveGoal(steps: string[]): void {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "plan_updated", payload: { steps } }],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+  }
+
+  it("edits the current goal (FR-17 6b-ii)", async () => {
+    mockLiveGoal(["Old step"]);
+    vi.mocked(client.setSessionGoal).mockResolvedValue({ status: "accepted" });
+
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /edit goal/i }));
+    const box = screen.getByLabelText(/goal steps/i);
+    await userEvent.clear(box);
+    await userEvent.type(box, "Check /admin\nConfirm 200");
+    await userEvent.click(screen.getByRole("button", { name: /save goal/i }));
+
+    expect(client.setSessionGoal).toHaveBeenCalledWith(1, ["Check /admin", "Confirm 200"]);
+  });
+
+  it("regenerates the goal (FR-17 6b-ii)", async () => {
+    mockLiveGoal(["Old step"]);
+    vi.mocked(client.regenerateSessionGoal).mockResolvedValue({ status: "accepted" });
+
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /regenerate goal/i }));
+
+    expect(client.regenerateSessionGoal).toHaveBeenCalledWith(1);
+  });
+
+  it("hides goal edit controls once the session is over", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "plan_updated", payload: { steps: ["done"] } }],
+      status: "concluded",
+      verdict: { status: "fixed", rationale: "patched" },
+      connected: true,
+    });
+
+    renderAt(1);
+
+    expect(screen.queryByRole("button", { name: /edit goal/i })).not.toBeInTheDocument();
+  });
+
   it("shows the step-budget meter (steps used / max)", async () => {
     mockRecord({ max_steps: 5 });
     vi.mocked(hook.useRetestSession).mockReturnValue({

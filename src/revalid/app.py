@@ -70,6 +70,7 @@ from revalid.domain import (
     ReportStatus,
     RetestPlan,
     RetestSessionStatus,
+    SessionEventKind,
     Settings,
     Severity,
     VerdictStatus,
@@ -87,19 +88,30 @@ from revalid.findings import (
 from revalid.ingest import IngestError, map_defectdojo_export
 from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
-from revalid.plan import PlannedAction, PlanResult, RejectedAction, build_plan_agent, generate_plan
+from revalid.plan import (
+    GeneratedGoal,
+    PlannedAction,
+    PlanResult,
+    RejectedAction,
+    build_goal_agent,
+    build_plan_agent,
+    generate_goal,
+    generate_plan,
+)
 from revalid.retest import build_probe_client, lab_base_url
 from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
 from revalid.retest_session import (
     SessionRegistry,
     _fail,
     adjudicate_verdict,
+    append_event,
     apply_decision,
     create_session,
     end_session,
     is_terminal,
     load_events_after,
     set_free_launch,
+    set_goal,
     start_and_step,
     submit_human_command,
     submit_message,
@@ -395,6 +407,12 @@ class FreeLaunchRequest(BaseModel):
     enabled: bool
 
 
+class GoalRequest(BaseModel):
+    """Body for a user-owned goal edit (FR-17 6b-ii)."""
+
+    steps: list[str]
+
+
 class AdjudicateRequest(BaseModel):
     """Body for a human verdict adjudication of a concluded session (FR-17 Slice 6a).
 
@@ -512,6 +530,11 @@ def get_plan_agent(settings: SettingsDep) -> Agent[None, list[PlannedAction]]:
     return build_plan_agent(build_model(settings))
 
 
+def get_goal_agent(settings: SettingsDep) -> Agent[None, GeneratedGoal]:
+    """Yield the FR-17 retest-goal agent built from the persisted setting (ADR-0021)."""
+    return build_goal_agent(build_model(settings))
+
+
 def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFinding]]:
     """Yield the FR-03 extraction agent built from the persisted setting (ADR-0021)."""
     return build_extraction_agent(build_model(settings))
@@ -539,6 +562,7 @@ def get_sandbox_factory() -> SandboxFactory:
 ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]
 BrowserRunnerDep = Annotated[BrowserRunner, Depends(get_browser_runner)]
 PlanAgentDep = Annotated[Agent[None, list[PlannedAction]], Depends(get_plan_agent)]
+GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
@@ -671,7 +695,8 @@ def run_first_step(
     session_id: int,
     agent: RetestAgent,
     make_sandbox: SandboxFactory,
-    prompt: str,
+    finding: Finding,
+    goal_agent: Agent[None, GeneratedGoal],
 ) -> None:
     """Build the sandbox and run the retest agent's first step (FR-17 background task).
 
@@ -682,8 +707,12 @@ def run_first_step(
     Docker error) and :func:`~revalid.retest_session.start_and_step` calls
     ``sandbox.start()`` outside its own guard, so both are wrapped here. On any
     failure the sandbox (if one was created) is best-effort torn down and the
-    session is settled to ``error`` — never stranded in ``starting`` (Task 5
-    review correction).
+    session is settled to ``error`` — never stranded in ``starting``.
+
+    It also **seeds the goal** (FR-17 6b-ii): the goal agent generates a generic
+    retest goal, which is emitted as the initial ``plan_updated`` (the "Current
+    goal" panel) and prepended to the agent's prompt. Goal generation is
+    best-effort — a failure degrades to an empty goal, never blocking start.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -691,7 +720,8 @@ def run_first_step(
         session_id: The already-created (``starting``) retest session to drive.
         agent: The built retest agent (a stand-in model in tests).
         make_sandbox: The session-scoped sandbox factory.
-        prompt: The finding goal prompt the agent retests against.
+        finding: The finding to retest — the agent's goal is derived from it.
+        goal_agent: The FR-17 goal agent (a stand-in model in tests).
     """
     with sessions() as session:
         sandbox: Sandbox | None = None
@@ -701,13 +731,20 @@ def run_first_step(
             free_launch = record.free_launch if record else False
             max_steps = record.max_steps if record else 8
             max_seconds = float(record.max_seconds) if record and record.max_seconds else None
+            goal: tuple[str, ...] = ()
+            with contextlib.suppress(Exception):  # goal gen is best-effort; never blocks start
+                goal = generate_goal(goal_agent, finding)
+            if goal:
+                append_event(
+                    session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": list(goal)}
+                )
             start_and_step(
                 session,
                 registry,
                 session_id,
                 agent,
                 sandbox,
-                prompt,
+                _goal_prompt(goal, finding),
                 max_steps=max_steps,
                 free_launch=free_launch,
                 max_seconds=max_seconds,
@@ -761,6 +798,26 @@ def run_human_command(
     """
     with sessions() as session:
         submit_human_command(session, registry, session_id, command)
+
+
+def run_goal(
+    sessions: sessionmaker[Session], registry: SessionRegistry, session_id: int, steps: list[str]
+) -> None:
+    """Set the user-owned goal on a session (FR-17 6b-ii background task)."""
+    with sessions() as session:
+        set_goal(session, registry, session_id, steps)
+
+
+def run_regenerate_goal(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    goal_agent: Agent[None, GeneratedGoal],
+    finding: Finding,
+) -> None:
+    """Regenerate + set the goal for a session (FR-17 6b-ii background task)."""
+    with sessions() as session:
+        set_goal(session, registry, session_id, list(generate_goal(goal_agent, finding)))
 
 
 def run_message(
@@ -817,6 +874,15 @@ def _finding_prompt(finding: Finding) -> str:
         steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
         lines.append(f"Reproduction steps:\n{steps}")
     return "\n".join(lines)
+
+
+def _goal_prompt(goal: tuple[str, ...], finding: Finding) -> str:
+    """Prepend the current goal (if any) to the finding context for the agent (FR-17 6b-ii)."""
+    base = _finding_prompt(finding)
+    if not goal:
+        return base
+    steps = "\n".join(f"- {s}" for s in goal)
+    return f"Current goal:\n{steps}\n\n{base}"
 
 
 def _edit_plan(session: Session, finding_id: int, actions: list[PlannedAction]) -> PlanOut:
@@ -1238,6 +1304,7 @@ def _register_session_routes(
         session: SessionDep,
         agent: RetestAgentDep,
         make_sandbox: SandboxFactoryDep,
+        goal_agent: GoalAgentDep,
         body: StartSessionRequest | None = None,
     ) -> RetestSessionOut:
         """Open an agentic retest session and schedule its first agent step (FR-17).
@@ -1247,7 +1314,7 @@ def _register_session_routes(
         """
         cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
-        prompt = _finding_prompt(version.to_domain())
+        finding = version.to_domain()
         record = create_session(
             session,
             finding_id=finding_id,
@@ -1257,7 +1324,7 @@ def _register_session_routes(
             max_seconds=cfg.max_seconds,
         )
         background.add_task(
-            run_first_step, sessions, registry, record.id, agent, make_sandbox, prompt
+            run_first_step, sessions, registry, record.id, agent, make_sandbox, finding, goal_agent
         )
         return RetestSessionOut.from_record(record, [])
 
@@ -1342,6 +1409,52 @@ def _register_free_launch_route(
         gate. Runs in the background; a no-op if the session is no longer live.
         """
         background.add_task(run_free_launch, sessions, registry, session_id, body.enabled)
+        return {"status": "accepted"}
+
+
+def _register_goal_routes(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the FR-17 6b-ii user-owned goal routes (edit + regenerate).
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/retest-sessions/{session_id}/goal", status_code=202)
+    def set_goal_route(
+        session_id: int, body: GoalRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Set the user-owned goal on a live session (FR-17 6b-ii).
+
+        Updates the "Current goal" panel and is delivered to the agent on its next
+        turn (pure-queue). Runs in the background; a no-op if the session is no
+        longer live.
+        """
+        background.add_task(run_goal, sessions, registry, session_id, body.steps)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/goal/regenerate", status_code=202)
+    def regenerate_goal_route(
+        session_id: int,
+        session: SessionDep,
+        goal_agent: GoalAgentDep,
+        background: BackgroundTasks,
+    ) -> dict[str, str]:
+        """Regenerate the goal for a session's finding and set it (FR-17 6b-ii)."""
+        record = session.get(RetestSessionRecord, session_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown session")
+        finding = _current_or_404(session, record.finding_id).to_domain()
+        background.add_task(
+            run_regenerate_goal, sessions, registry, session_id, goal_agent, finding
+        )
         return {"status": "accepted"}
 
 
@@ -1525,6 +1638,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_retest_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
+    _register_goal_routes(api, sessions, registry)
     _register_adjudicate_route(api, sessions)
     _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)

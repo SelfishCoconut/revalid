@@ -8,13 +8,40 @@ enforcement, non-destructive methods, and the schema-validation gate.
 from typing import Any
 
 import pytest
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from revalid.allowlist import TargetGuard
 from revalid.domain import Finding, Severity
 from revalid.llm import DEFAULT_MODEL
-from revalid.plan import build_plan_agent, generate_plan
+from revalid.plan import build_goal_agent, build_plan_agent, generate_goal, generate_plan
+
+
+def _goal_model(steps: list[str]) -> FunctionModel:
+    def gen(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"steps": steps})]
+        )
+
+    return FunctionModel(gen)
+
+
+def test_generate_goal_returns_generic_steps() -> None:
+    agent = build_goal_agent(
+        _goal_model(["Re-exercise the reported condition", "Observe whether it still occurs"])
+    )
+    steps = generate_goal(agent, Finding(title="Broken access control", severity=Severity.HIGH))
+    assert steps == ("Re-exercise the reported condition", "Observe whether it still occurs")
+
+
+def test_generate_goal_degrades_to_empty_on_model_failure() -> None:
+    def boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise UnexpectedModelBehavior("model unavailable")
+
+    agent = build_goal_agent(FunctionModel(boom))
+    assert generate_goal(agent, Finding(title="X", severity=Severity.LOW)) == ()
+
 
 _BASE_URL = "http://localhost:3000"
 _GUARD = TargetGuard(frozenset({"http://localhost:3000/*"}))
