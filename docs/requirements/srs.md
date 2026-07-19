@@ -100,9 +100,9 @@ non-lab targets, destructive exploitation.
 
 ### FR-11 — Results dashboard (web UI)
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The React SPA shall provide: report/run overview, finding list with verdicts, drill-down to evidence and audit trail, and the plan-approval workflow (FR-05). Served by FastAPI on localhost only.
+- **Description**: The React SPA shall provide: report/run overview, finding list with verdicts, drill-down to evidence and audit trail, and the agentic retest console (FR-17). Served by FastAPI on localhost only.
 - **Acceptance criteria**:
-  - [x] The full evaluation flow (ingest → approve → execute → verdicts with evidence) is operable from the UI alone. *(ADR-0013: Vite/React/TS/Tailwind SPA served by FastAPI at `/`, API under `/api`; PDF upload runs FR-01→FR-03 as a background job the UI polls. Verified end-to-end in a real browser on a live Ollama backend — upload → 4 findings → plan → approve → retest → evidence-backed verdict — plus unit/integration coverage of the `/api` chain.)*
+  - [x] The full evaluation flow (extract → goal → retest → verdict) is operable from the UI alone. *(ADR-0013: Vite/React/TS/Tailwind SPA served by FastAPI at `/`, API under `/api`; PDF upload runs FR-01→FR-03 as a background job the UI polls. Originally verified end-to-end in a real browser on a live Ollama backend on the FR-04/05 batch flow (upload → 4 findings → plan → approve → retest → evidence-backed verdict); the flow was reshaped around the FR-17 agentic console in Slice 6b-iii-b (ADR-0033, 2026-07-19) — extract → goal (editable pre-start draft) → agentic retest session → verdict — plus unit/integration coverage of the `/api` chain.)*
 
 ### FR-12 — Machine-readable results export
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -171,7 +171,14 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 6b-iii-a** (met — issue #110, ADR-0033 proposed, 2026-07-19):
   - [x] **AC20**: the batch execution path is deleted end-to-end (backend) — `approval.py`/`retest.py`/`sanity.py`/`browser.py`, the batch plan/approve/retest REST endpoints, the batch domain types (`Probe`/`RetestPlan`/`PlanStatus`/`Verdict`/`Evidence`), and `PlanRecord` — with the full gate green; FR-09/10/12 now have exactly one (agentic) implementation.
   - [x] **AC21**: `VerdictRecord`, `VerdictExport`, and the FR-10 audit collapse from polymorphic (batch/agentic) to a single agentic shape — the `source` discriminator and batch-only columns are gone, the audit re-derives only from the transcript; the FR-12 export drops `plans`, `SCHEMA_VERSION` 1.3 → 1.4 (regenerated + drift-tested).
-- **Remaining — Slice 6b-iii-b**: the SPA finding-flow reshape (Extract → Goal → Agentic retest → Verdict), including editing the goal *before* a session starts. Kali-tooling sandbox image tracked separately (#105).
+- **Acceptance criteria — Slice 6b-iii-b** (met — issue #110, ADR-0033, 2026-07-19):
+  - [x] **AC22**: the finding flow is **extract → goal → retest → verdict**; no batch
+    stage/hook/client-fn/`Plan` type remains and the SPA calls no removed endpoint. The
+    Goal stage generates an editable pre-start draft goal (no session), and **Start retest**
+    launches a session seeded with it; the console is the only retest path, relaid out as
+    chat + right-editable goal + bottom terminal, with live goal edit, the command gate, chat
+    steering, and adjudication intact and an in-progress session surviving reload.
+- **Remaining — Slice 6b-iii-b**: **done**. FR-17 is now feature-complete; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements
