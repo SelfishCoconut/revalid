@@ -4,11 +4,12 @@ An ephemeral Docker container on an ``--internal`` network (no host/internet
 route) in which the retest agent runs one approved command at a time. The pure
 surface (``CommandResult``, ``FakeSandbox``, helpers) is unit-tested; the live
 ``DockerSandbox`` needs the optional ``sandbox`` extra and is covered only by
-the nightly system test — mirroring ``browser.py``.
+the nightly system test.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
@@ -22,6 +23,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 DEFAULT_SANDBOX_IMAGE = "curlimages/curl:8.11.1"
 #: The lab container name to attach to the internal network (lab/docker-compose.yml).
 DEFAULT_LAB_CONTAINER = "revalid-juice-shop"
+#: Env var overriding the lab target base URL (host-side polling in system tests).
+LAB_BASE_URL_ENV = "REVALID_LAB_BASE_URL"
+#: Default lab target base URL (the local Juice Shop; see lab/docker-compose.yml).
+DEFAULT_LAB_BASE_URL = "http://localhost:3000"
 
 
 class CommandResult(BaseModel):
@@ -65,6 +70,11 @@ def internal_network_name(session_id: int) -> str:
 def egress_probe_command(host: str) -> str:
     """Return a command that fails iff ``host`` is unreachable (egress-lock test)."""
     return f"curl --max-time 5 --silent --show-error --output /dev/null https://{host}"
+
+
+def lab_base_url() -> str:
+    """Return the lab target base URL (``$REVALID_LAB_BASE_URL`` or the default)."""
+    return os.environ.get(LAB_BASE_URL_ENV, DEFAULT_LAB_BASE_URL)
 
 
 class FakeSandbox:

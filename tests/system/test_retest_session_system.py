@@ -2,10 +2,9 @@
 
 Requires a running Docker daemon AND the lab (`make lab-up`) AND the sandbox
 extra (`uv sync --extra sandbox`). Skips gracefully when Docker OR the lab is
-missing — mirroring the ``test_browser_xss_system.py`` precedent — so a
-developer without the full setup still gets a green suite; CI
+missing — so a developer without the full setup still gets a green suite; CI
 (system-tests.yml) provisions both. The acceptance: a real ``DockerSandbox``
-can reach the allowlisted lab target but NOT the public internet (the egress
+can reach the lab target but NOT the public internet (the egress
 lock, FR-17 AC4 / NFR-03).
 """
 
@@ -16,8 +15,7 @@ import time
 import httpx
 import pytest
 
-from revalid.retest import lab_base_url
-from revalid.sandbox import DockerSandbox, egress_probe_command
+from revalid.sandbox import DockerSandbox, egress_probe_command, lab_base_url
 
 pytestmark = pytest.mark.system
 

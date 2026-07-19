@@ -10,50 +10,48 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
 from fastapi.testclient import TestClient
 from jsonschema import validate
 from jsonschema.protocols import Validator
 from sqlalchemy.orm import Session
 
-from revalid.approval import approve_plan, execute_approved_plan, save_generated_plan
+from revalid import retest_session as rs
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
-from revalid.domain import Finding, FindingStage, Probe, RetestPlan, Severity
+from revalid.domain import (
+    AgenticEvidence,
+    Finding,
+    FindingStage,
+    SessionEventKind,
+    Severity,
+    VerdictStatus,
+)
 from revalid.export import SCHEMA_VERSION, build_export, export_schema
 from revalid.findings import add_note, add_version, create_finding
-from revalid.plan import PlanResult
 
 _PUBLISHED_SCHEMA = (
     Path(__file__).resolve().parents[2] / "docs/reference/schemas/run-export.schema.json"
 )
 
 
-def _plan() -> PlanResult:
-    probe = Probe(
-        kind="sqli-login-bypass",
-        method="POST",
-        url="http://localhost:3000/rest/user/login",
-        json_body={"email": "' OR 1=1--", "password": "x"},
-    )
-    plan = RetestPlan(
-        finding_title="SQLi login", actions=(probe,), raw={"finding_title": "SQLi login"}
-    )
-    return PlanResult(plan=plan)
-
-
 def _session_with_verdict() -> Session:
-    """Build an in-memory run: finding -> approved plan -> one stored verdict."""
+    """Build an in-memory run: finding -> agentic session -> one concluded verdict."""
     session = session_factory(create_db_engine(IN_MEMORY))()
     create_finding(session, Finding(title="SQLi login", severity=Severity.CRITICAL))
     session.commit()
-    save_generated_plan(session, 1, _plan())
-    approve_plan(session, 1)
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"authentication": {"token": "t"}})
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        execute_approved_plan(session, client, 1)
+    sid = rs.create_session(session, finding_id=1, model="m").id
+    rs.append_event(
+        session,
+        sid,
+        SessionEventKind.COMMAND_OUTPUT,
+        {
+            "command": "curl -s http://lab/login",
+            "stdout": "{token}",
+            "stderr": "",
+            "exit_code": 0,
+            "elapsed_ms": 12,
+        },
+    )
+    rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
     return session
 
 
@@ -96,59 +94,32 @@ def test_export_assembles_run_and_metrics() -> None:
     assert export.generator.tool == "revalid"
     assert len(export.findings) == 1
     assert export.findings[0].finding.title == "SQLi login"
-    assert len(export.plans) == 1 and export.plans[0].status == "approved"
     assert len(export.verdicts) == 1
     verdict = export.verdicts[0]
     assert verdict.finding_id == 1
-    assert verdict.actor == "executor"
-    assert verdict.source == "batch"
+    assert verdict.actor == "agent"
     assert verdict.status.value == "still_open"
-    assert verdict.plan_version == 1
     assert verdict.evidence is not None
 
     assert export.metrics.findings == 1
-    assert export.metrics.plans == 1
     assert export.metrics.verdicts == 1
     assert export.metrics.verdicts_by_status["still_open"] == 1
     assert export.metrics.total_elapsed_ms == verdict.evidence.elapsed_ms
     assert export.metrics.mean_elapsed_ms == export.metrics.total_elapsed_ms
 
 
-def test_export_carries_agentic_verdict() -> None:
-    """An agentic verdict exports its flexible command-output evidence (Slice 6b-i)."""
-    from revalid import retest_session as rs
-    from revalid.domain import AgenticEvidence, SessionEventKind, VerdictStatus
-
-    session = session_factory(create_db_engine(IN_MEMORY))()
-    create_finding(session, Finding(title="SQLi login", severity=Severity.HIGH))
-    session.commit()
-    sid = rs.create_session(session, finding_id=1, model="m").id
-    rs.append_event(
-        session,
-        sid,
-        SessionEventKind.COMMAND_OUTPUT,
-        {
-            "command": "curl -s http://lab/x",
-            "stdout": "{token}",
-            "stderr": "",
-            "exit_code": 0,
-            "elapsed_ms": 9,
-        },
-    )
-    rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "agent says still open")
-
+def test_export_carries_agentic_verdict_evidence() -> None:
+    """An agentic verdict exports its flexible command-output evidence (FR-17 6b-i)."""
+    session = _session_with_verdict()
     export = build_export(session, generated_at=datetime(2026, 7, 18, tzinfo=UTC))
     [verdict] = export.verdicts
-    assert verdict.source == "agentic"
-    assert verdict.session_id == sid
+    assert verdict.session_id is not None
     assert verdict.actor == "agent"
-    assert verdict.status.value == "still_open"
     assert isinstance(verdict.evidence, AgenticEvidence)
-    assert verdict.evidence.explanation == "agent says still open"
-    assert verdict.evidence.command == "curl -s http://lab/x"
-    # The captured command's timing now counts in the run metrics.
-    assert export.metrics.verdicts_by_status["still_open"] == 1
-    assert export.metrics.total_elapsed_ms == 9.0
+    assert verdict.evidence.explanation == "auth still bypassable"
+    assert verdict.evidence.command == "curl -s http://lab/login"
+    # The captured command's timing counts in the run metrics.
+    assert export.metrics.total_elapsed_ms == 12.0
     validate(instance=export.model_dump(mode="json"), schema=export_schema())
 
 

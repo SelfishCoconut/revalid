@@ -14,19 +14,19 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0008](0008-single-user-threat-model.md) | Single trusted-user threat model: drop the security-auditor agent and PDF bomb-hardening | accepted | 2026-07-13 |
 | [0009](0009-llm-extraction-architecture.md) | LLM finding extraction: per-candidate Pydantic AI with a schema-validation gate | accepted | 2026-07-13 |
 | [0010](0010-model-agnostic-llm-config.md) | Model-agnostic LLM config: `REVALID_LLM_MODEL` env var, Ollama via Pydantic AI | accepted | 2026-07-13 |
-| [0011](0011-retest-plan-generation.md) | Retest-plan generation: LLM-proposed typed actions, deterministically gated | accepted | 2026-07-13 |
-| [0012](0012-server-side-plan-approval-gate.md) | Server-side plan approval gate: versioned plan rows, single execution chokepoint | accepted | 2026-07-14 |
+| [0011](0011-retest-plan-generation.md) | Retest-plan generation: LLM-proposed typed actions, deterministically gated | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-13 |
+| [0012](0012-server-side-plan-approval-gate.md) | Server-side plan approval gate: versioned plan rows, single execution chokepoint | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-14 |
 | [0013](0013-react-spa-architecture.md) | React SPA architecture: PDF-ingest background jobs, `/api` prefix, FastAPI-served SPA | accepted | 2026-07-14 |
-| [0014](0014-execution-sanity-checker.md) | Execution sanity checker: independent verifier — fail-closed plan-deviation block + conservative ambiguity downgrade | accepted | 2026-07-15 |
-| [0015](0015-audit-trail-verdict-rederivation.md) | Audit trail: verdicts re-derivable from stored evidence via a shared pure assessment | accepted | 2026-07-15 |
+| [0014](0014-execution-sanity-checker.md) | Execution sanity checker: independent verifier — fail-closed plan-deviation block + conservative ambiguity downgrade | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-15 |
+| [0015](0015-audit-trail-verdict-rederivation.md) | Audit trail: verdicts re-derivable from stored evidence via a shared pure assessment | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-15 |
 | [0016](0016-versioned-run-export.md) | Versioned run export: Pydantic-generated JSON document + published, drift-tested JSON schema | accepted | 2026-07-15 |
 | [0017](0017-evaluation-harness-nfr01-scoring.md) | Evaluation harness: score an FR-12 export against title-keyed ground truth with conservative NFR-01 buckets | proposed | 2026-07-15 |
-| [0018](0018-browser-driven-probes-playwright.md) | Browser-driven probes via Playwright (optional extra), as a swapped executor under the unchanged FR-08 guard | proposed | 2026-07-15 |
-| [0019](0019-retest-technique-registry.md) | Extensible retest-technique registry: kind-keyed assessors + command rendering, FR-04 kind tagging (scope stays human-validated) | proposed | 2026-07-15 |
+| [0018](0018-browser-driven-probes-playwright.md) | Browser-driven probes via Playwright (optional extra), as a swapped executor under the unchanged FR-08 guard | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-15 |
+| [0019](0019-retest-technique-registry.md) | Extensible retest-technique registry: kind-keyed assessors + command rendering, FR-04 kind tagging (scope stays human-validated) | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-15 |
 | [0020](0020-manual-report-entry.md) | Manual report entry: human ingestion (form + JSON upload) bypassing the LLM | proposed | 2026-07-15 |
 | [0021](0021-user-configurable-model-provider-setting.md) | User-configurable model/provider setting: DB-persisted, runtime-switchable, env-seeded | proposed | 2026-07-15 |
-| [0022](0022-async-plan-generation.md) | Asynchronous plan generation: a persisted `generating` version settled by a background job | proposed | 2026-07-16 |
-| [0023](0023-plan-iteration-instructions-regenerate-revise.md) | Plan iteration: operator instructions + regenerate / revise (go back a step) | proposed | 2026-07-16 |
+| [0022](0022-async-plan-generation.md) | Asynchronous plan generation: a persisted `generating` version settled by a background job | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-16 |
+| [0023](0023-plan-iteration-instructions-regenerate-revise.md) | Plan iteration: operator instructions + regenerate / revise (go back a step) | superseded by [0033](0033-retire-batch-execution-path.md) | 2026-07-16 |
 | [0024](0024-finding-revision-annotation-stage-wizard.md) | Finding revision & annotation; pipeline stage wizard (supersedes ADR-0023's confirm-on-click) | accepted | 2026-07-16 |
 | [0025](0025-agentic-retest-console.md) | Agentic retest console (Slice 0): egress-locked sandbox, deferred-tool gating, transcript audit (supersedes FR-04/05/07-09 over time) | proposed | 2026-07-16 |
 | [0026](0026-operator-manual-commands-no-shared-pty.md) | Operator manual commands (`!`) via discrete exec — not a shared PTY; agent observes them on its next turn | proposed | 2026-07-16 |
@@ -36,3 +36,4 @@ Decision log (MADR format, see the `adr` skill). A decision without an ADR doesn
 | [0030](0030-agentic-verdict-integration.md) | Agentic verdict integration + human adjudication: polymorphic `VerdictRecord` (batch/agentic), auto-persist on conclude, accept/override appends a superseding operator record, FR-10 transcript-integrity audit, FR-12 export flatten (schema 1.2) | proposed | 2026-07-18 |
 | [0031](0031-agentic-evidence.md) | Flexible command-output evidence for agentic verdicts: tool-agnostic `AgenticEvidence` (explanation + real last command output) captured from the transcript on conclude; export schema 1.2 → 1.3 | proposed | 2026-07-18 |
 | [0032](0032-user-owned-goal.md) | The guiding plan becomes a user-owned goal: generic `generate_goal` (repurposed FR-04) seeds it at start, the user edits/regenerates it live (pure-queue injection), and the agent's `set_plan` is removed (supersedes 0027) | proposed | 2026-07-19 |
+| [0033](0033-retire-batch-execution-path.md) | Retire the batch execution path (full deletion): delete approval/retest/sanity/browser + batch endpoints/domain/`PlanRecord`, collapse `VerdictRecord`/export/audit to agentic-only (schema 1.4), drop FR-14; realizes ADR-0025, supersedes 0011/0012/0014/0015/0018/0019/0022/0023 | proposed | 2026-07-19 |

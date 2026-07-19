@@ -364,7 +364,6 @@ def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
         # FR-09 wiring: the agent's verdict is now queryable (agentic, evidence-free).
         verdicts = client.get("/api/verdicts").json()
         assert len(verdicts) == 1
-        assert verdicts[0]["source"] == "agentic"
         assert verdicts[0]["actor"] == "agent"
         assert verdicts[0]["status"] == "still_open"
         # Slice 6b-i: the agent pins the decisive command's real output as proof.
@@ -392,7 +391,6 @@ def test_agentic_verdict_is_queryable_and_adjudicable() -> None:
         latest = max(finding_verdicts, key=lambda v: v["id"])
         assert latest["actor"] == "operator"
         assert latest["status"] == "fixed"
-        assert latest["source"] == "agentic"
         # FR-10 still clean after adjudication (operator row checked vs its event).
         assert client.get("/api/audit").json()["ok"] is True
 

@@ -241,7 +241,6 @@ def test_record_verdict_auto_persists_agentic_verdict() -> None:
         sid = s.id
         rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
         [row] = session.scalars(select(VerdictRecord)).all()
-        assert row.source == "agentic"
         assert row.actor == "agent"
         assert row.finding_id == fid
         assert row.session_id == sid
@@ -278,7 +277,6 @@ def test_budget_give_up_auto_persists_inconclusive_agentic_verdict() -> None:
         )
         rows = session.scalars(select(VerdictRecord)).all()
     assert len(rows) == 1
-    assert rows[0].source == "agentic"
     assert rows[0].actor == "agent"
     assert rows[0].status == "inconclusive"
 
@@ -298,7 +296,6 @@ def test_adjudicate_appends_event_and_superseding_operator_record() -> None:
         assert agent_row.actor == "agent"
         assert agent_row.status == "still_open"  # the agent's record is never mutated
         assert operator_row.actor == "operator"
-        assert operator_row.source == "agentic"
         assert operator_row.reason_code == "operator_adjudication"
         assert operator_row.status == "fixed"
         assert operator_row.id > agent_row.id  # supersedes: latest-per-finding wins

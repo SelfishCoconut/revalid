@@ -47,6 +47,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-04 — Generate executable retest plans
 - **Priority**: Must · **Source**: interview 2026-06-11
+- **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The typed-HTTP-probe plan was retired with the batch execution path; `generate_plan` is deleted. The *plan-generation* intent is repurposed as the generic, user-owned **goal** that seeds an agentic session (`generate_goal`, ADR-0032, under FR-17).
 - **Description**: For each finding, the system shall derive a retest plan: an ordered list of typed, non-destructive HTTP probe actions with expected still-open/fixed indicators, generated from the reproduction steps.
 - **Acceptance criteria**:
   - [ ] Each plan action is a typed object (no free-form commands) referencing only allowlisted targets.
@@ -54,6 +55,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-05 — Human plan review & approval
 - **Priority**: Must · **Source**: interview 2026-06-11
+- **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The batch plan-approval gate (versioned plan rows, single execution chokepoint) is deleted. Human-in-the-loop control is preserved and strengthened under FR-17: the operator approves **every command** before it runs (per-command gate), owns the goal, and can steer or stop the session live.
 - **Description**: The web UI shall present each retest plan for review; the user can approve, reject, or edit per finding (and batch-approve). No plan executes without approval.
 - **Acceptance criteria**:
   - [x] Unapproved plans are not executable through any code path (enforced server-side, not only in UI).
@@ -61,6 +63,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-06 — Target authorization allowlist
 - **Priority**: Must · **Source**: interview 2026-06-11
+- **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19). With the batch HTTP executor retired, egress control now lives **solely in the agentic sandbox's Docker `--internal` network membership** (ADR-0025) — the container can reach only the connected lab target and nothing else, a strictly stronger guarantee than the HTTP-transport allowlist. The `allowlist.py` HTTP guard is orphaned (kept pending a tracked cleanup follow-up).
 - **Description**: The executor shall refuse any action whose target is not on the configured allowlist (default: the lab compose targets). Allowlist changes are explicit configuration, never inferred from report content.
 - **Acceptance criteria**:
   - [ ] An approved plan referencing a non-allowlisted host fails closed with an audit-trail entry.
@@ -68,6 +71,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-07 — HTTP probe executor
 - **Priority**: Must · **Source**: interview 2026-06-11
+- **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The httpx batch executor (`retest.py`) is deleted. Verification now runs as **arbitrary gated commands inside the egress-locked sandbox** — HTTP is one case among many (the agent uses `curl` and any lab CLI), and evidence is the tool-agnostic `AgenticEvidence` (ADR-0031) rather than a fixed request/response record.
 - **Description**: The system shall execute approved plans via HTTP (httpx), capturing full request/response evidence per step. Probes are verification-only: no destructive payloads, no state-damaging operations.
 - **Acceptance criteria**:
   - [ ] Each executed step persists request, response (status/headers/body excerpt), timing, and matched indicators.
@@ -75,6 +79,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-08 — Execution sanity checker
 - **Priority**: Must · **Source**: interview 2026-06-11 (author's design)
+- **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The batch-plan deviation guard (`sanity.py`) is deleted — there is no fixed plan to deviate from once the agent decides each step live. The anti-overconfidence intent is preserved differently: a human approves every command, and conservative *inconclusive* handling now lives in the agentic verdict/adjudication path (FR-17, ADR-0030).
 - **Description**: An independent verifier shall monitor execution against the approved plan and the finding's intent. It shall detect (a) deviation from the approved plan, and (b) ambiguous outcomes — e.g. the model rationalizing between "vulnerability patched" and "endpoint changed/moved" — forcing the verdict to *inconclusive* with a stated reason instead of a guess.
 - **Acceptance criteria**:
   - [x] A plan-deviation test case (executor attempts an action not in the plan) is blocked and logged. *(ADR-0014: `sanity.assert_in_plan` fail-closed — logs + raises `PlanDeviationError` before any request; API maps it to 409.)*
@@ -91,7 +96,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: Every system action (ingestion, extraction, plan generation, approval, each probe, verdict) shall be persisted with timestamp and actor (user / model / executor) such that any verdict can be re-derived from the trail alone.
 - **Acceptance criteria**:
-  - [x] For any completed run, a re-derivation routine reproduces every verdict from stored data only (no re-execution). *(ADR-0015: `audit.rederive_run` recomputes each verdict from its stored evidence via the shared pure `retest.assess_evidence` + FR-08 `review_verdict`; `GET /api/audit` + `make demo-audit`. `VerdictRecord` gained `created_at`/`actor` for the timestamp+actor trail.)*
+  - [x] For any completed run, a re-derivation routine reproduces every verdict from stored data only (no re-execution). *(ADR-0033: `audit.rederive_run` re-derives each agentic verdict from its session transcript — the `verdict` event for the agent's record, the latest `verdict_adjudicated` for an operator record — and flags a stored row that has drifted; `GET /api/audit` + `make demo-audit`. `VerdictRecord` carries `created_at`/`actor` for the timestamp+actor trail. Supersedes ADR-0015's batch evidence-rederivation.)*
 
 ### FR-11 — Results dashboard (web UI)
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -103,7 +108,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall export a complete run (findings, plans, verdicts, evidence references, metrics) as a versioned JSON document; the evaluation harness consumes this format.
 - **Acceptance criteria**:
-  - [x] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it. — `src/revalid/export.py` (ADR-0016): `RunExport` (reports/findings/plans/verdicts+evidence/metrics), versioned by `SCHEMA_VERSION`; schema generated from the model to `docs/reference/schemas/run-export.schema.json` (`make export-schema`, drift-tested); `GET /api/export` + `/api/export/schema`; `make demo-export` validates a run against the published schema.
+  - [x] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it. — `src/revalid/export.py` (ADR-0016): `RunExport` (reports/findings/verdicts+`AgenticEvidence`/metrics), versioned by `SCHEMA_VERSION` (1.4 since ADR-0033 dropped the batch `plans`); schema generated from the model to `docs/reference/schemas/run-export.schema.json` (`make export-schema`, drift-tested); `GET /api/export` + `/api/export/schema`; `make demo-export` validates a run against the published schema.
 
 ### FR-13 — Pluggable LLM backends (Claude primary, local fallback)
 - **Priority**: Should · **Source**: interview 2026-06-11
@@ -114,6 +119,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-14 — Browser-based probes (Playwright)
 - **Priority**: Could · **Source**: interview 2026-06-11
+- **Status**: **dropped, subsumed by FR-17** (ADR-0033, 2026-07-19). The dedicated Playwright browser executor (`browser.py`, ADR-0018) is deleted. DOM/JS-dependent verification is reachable within FR-17: the sandbox agent can run browser-capable tooling as a command, so a distinct browser-probe path is no longer warranted (a Kali-tooling sandbox image is tracked separately, #105).
 - **Description**: For findings not verifiable at HTTP level (DOM/JS-dependent), the executor may support Playwright-driven browser probes under the same approval, allowlist, and audit constraints.
 - **Acceptance criteria**:
   - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser gets a correct verdict. — `src/revalid/browser.py` (ADR-0018): a `browser-xss` Playwright probe (optional `browser` extra) verifies Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` is executor-agnostic; browser verdicts re-derive via the shared `assess_evidence`). Pipeline + assessor unit-tested with a canned runner; the live-lab still-open verdict is asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`). Exemplar is DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalizes.
@@ -162,8 +168,11 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 6b-ii** (met — issue #107, ADR-0032 proposed supersedes ADR-0027, 2026-07-19):
   - [x] **AC18**: the guiding plan is a **user-owned goal** — the agent no longer proposes it (`set_plan` and its `awaiting_plan`/`plan_proposed/approved/rejected` orchestration are removed, 6b-ii-a); a generic, finding-agnostic `generate_goal` seeds it at session start (shown in the "Current goal" panel, given to the agent), degrading to an empty goal on generation failure without blocking start.
   - [x] **AC19**: the operator (alone) edits or regenerates the goal live (`POST /retest-sessions/{id}/goal` + `/goal/regenerate`); the change updates the panel (`plan_updated`) immediately and reaches the agent as a first-class user turn on its next approve/reject (pure-queue), never interrupting a run.
-- **Deferred to Slice 6b-iii** (tracked in epic #87): retirement of the batch *execution* path (FR-05 execute / FR-07 batch run / FR-08 sanity-on-batch / HTTP `Probe` verdicts) + the SPA finding-flow reshape (Extract → Goal → Agentic retest → Verdict), including editing the goal *before* a session starts. Kali-tooling sandbox image tracked separately (#105).
-- **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. Supersedes FR-04/FR-05/FR-07/FR-08/FR-09 over time (both paths coexist until Slice 5); NFR-02's reproducibility claim shifts from deterministic re-derivation to a replayable transcript for agentic sessions (stated in ADR-0025).
+- **Acceptance criteria — Slice 6b-iii-a** (met — issue #110, ADR-0033 proposed, 2026-07-19):
+  - [x] **AC20**: the batch execution path is deleted end-to-end (backend) — `approval.py`/`retest.py`/`sanity.py`/`browser.py`, the batch plan/approve/retest REST endpoints, the batch domain types (`Probe`/`RetestPlan`/`PlanStatus`/`Verdict`/`Evidence`), and `PlanRecord` — with the full gate green; FR-09/10/12 now have exactly one (agentic) implementation.
+  - [x] **AC21**: `VerdictRecord`, `VerdictExport`, and the FR-10 audit collapse from polymorphic (batch/agentic) to a single agentic shape — the `source` discriminator and batch-only columns are gone, the audit re-derives only from the transcript; the FR-12 export drops `plans`, `SCHEMA_VERSION` 1.3 → 1.4 (regenerated + drift-tested).
+- **Remaining — Slice 6b-iii-b**: the SPA finding-flow reshape (Extract → Goal → Agentic retest → Verdict), including editing the goal *before* a session starts. Kali-tooling sandbox image tracked separately (#105).
+- **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements
 

@@ -24,8 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from revalid import __version__
-from revalid.db import FindingRecord, PlanRecord, ReportRecord, VerdictRecord
-from revalid.domain import AgenticEvidence, Evidence, Finding, Probe, VerdictStatus
+from revalid.db import FindingRecord, ReportRecord, VerdictRecord
+from revalid.domain import AgenticEvidence, Finding, VerdictStatus
 from revalid.findings import list_notes, list_versions
 
 # Export-format version (independent of the tool's release version). Bump on any
@@ -34,7 +34,7 @@ from revalid.findings import list_notes, list_versions
 # evidence, so it covers agentic verdicts (FR-17 Slice 6a) as well as batch ones.
 # 1.3: VerdictExport.evidence carries flexible AgenticEvidence for agentic verdicts
 # (FR-17 Slice 6b-i) — the agent's explanation + a command's real output.
-SCHEMA_VERSION = "1.3"
+SCHEMA_VERSION = "1.4"
 
 
 class Generator(BaseModel):
@@ -107,48 +107,27 @@ class FindingExport(BaseModel):
     notes: tuple[NoteExport, ...]
 
 
-class PlanExport(BaseModel):
-    """One retest-plan version with its approval decision (FR-04/FR-05)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    id: int
-    finding_id: int
-    version: int
-    status: str
-    origin: str
-    actions: tuple[Probe, ...]
-    created_at: datetime
-    decided_at: datetime | None
-    decided_by: str | None
-
-
 class VerdictExport(BaseModel):
-    """A verdict with its audit stamps (FR-09/FR-10/FR-17).
+    """An agentic verdict with its audit stamps (FR-09/FR-10/FR-17).
 
-    Carries the verdict fields directly (rather than embedding the domain
-    :class:`~revalid.domain.Verdict`) so one flat shape covers both a ``batch``
-    verdict — ``evidence`` is the single request/response it was derived from — and
-    an ``agentic`` verdict — ``evidence`` is ``None``, ``session_id`` links the
-    retest session whose transcript justifies it (FR-17 Slice 6a).
+    Every verdict is a retest-session conclusion (the batch verdict path retired
+    in FR-17 6b-iii): ``session_id`` links the session, ``evidence`` is the
+    flexible :class:`~revalid.domain.AgenticEvidence` proof (or ``None`` for a
+    human adjudication), and ``actor`` is ``"agent"``/``"operator"``.
     """
 
     model_config = ConfigDict(frozen=True)
 
     id: int
     finding_id: int
-    probe_kind: str
-    plan_id: int | None
-    plan_version: int | None
     actor: str
     created_at: datetime
-    source: str
     session_id: int | None
     status: VerdictStatus
     reason_code: str
     rationale: str
     matched_indicators: tuple[str, ...]
-    evidence: Evidence | AgenticEvidence | None
+    evidence: AgenticEvidence | None
 
 
 class RunMetrics(BaseModel):
@@ -164,7 +143,6 @@ class RunMetrics(BaseModel):
 
     reports: int
     findings: int
-    plans: int
     verdicts: int
     verdicts_by_status: dict[str, int]
     total_elapsed_ms: float
@@ -181,7 +159,6 @@ class RunExport(BaseModel):
     generator: Generator
     reports: tuple[ReportExport, ...]
     findings: tuple[FindingExport, ...]
-    plans: tuple[PlanExport, ...]
     verdicts: tuple[VerdictExport, ...]
     metrics: RunMetrics
 
@@ -228,64 +205,34 @@ def _finding_export(session: Session, record: FindingRecord) -> FindingExport | 
     )
 
 
-def _plan_export(record: PlanRecord) -> PlanExport:
-    return PlanExport(
-        id=record.id,
-        finding_id=record.finding_id,
-        version=record.version,
-        status=record.status,
-        origin=record.origin,
-        actions=record.probes(),
-        created_at=record.created_at,
-        decided_at=record.decided_at,
-        decided_by=record.decided_by,
-    )
-
-
-def _evidence_export(record: VerdictRecord) -> Evidence | AgenticEvidence | None:
-    """Build the right evidence shape for a verdict row (batch HTTP vs agentic)."""
-    if record.evidence is None:
-        return None
-    if record.source == "agentic":
-        return AgenticEvidence(**record.evidence)
-    return Evidence(**record.evidence)
-
-
 def _verdict_export(record: VerdictRecord) -> VerdictExport:
     return VerdictExport(
         id=record.id,
         finding_id=record.finding_id,
-        probe_kind=record.probe_kind,
-        plan_id=record.plan_id,
-        plan_version=record.plan_version,
         actor=record.actor,
         created_at=record.created_at,
-        source=record.source,
         session_id=record.session_id,
         status=VerdictStatus(record.status),
         reason_code=record.reason_code,
         rationale=record.rationale,
         matched_indicators=tuple(record.matched_indicators),
-        evidence=_evidence_export(record),
+        evidence=AgenticEvidence(**record.evidence) if record.evidence is not None else None,
     )
 
 
 def _metrics(
     reports: tuple[ReportExport, ...],
     findings: tuple[FindingExport, ...],
-    plans: tuple[PlanExport, ...],
     verdicts: tuple[VerdictExport, ...],
 ) -> RunMetrics:
     by_status = {status.value: 0 for status in VerdictStatus}
     for verdict in verdicts:
         by_status[verdict.status.value] += 1
-    # Agentic verdicts carry no single-request evidence — their timing lives in the
-    # transcript — so sum round-trip time only over evidence-backed (batch) verdicts.
+    # An agentic verdict's evidence carries the decisive command's round-trip time.
     total_ms = sum(v.evidence.elapsed_ms for v in verdicts if v.evidence is not None)
     return RunMetrics(
         reports=len(reports),
         findings=len(findings),
-        plans=len(plans),
         verdicts=len(verdicts),
         verdicts_by_status=by_status,
         total_elapsed_ms=total_ms,
@@ -294,7 +241,7 @@ def _metrics(
 
 
 def build_export(session: Session, *, generated_at: datetime | None = None) -> RunExport:
-    """Assemble the full run — reports, findings, plans, verdicts — for export (FR-12).
+    """Assemble the full run — reports, findings, verdicts — for export (FR-12).
 
     Reads every entity in id order (deterministic output) and derives the run
     metrics. Purely a read: it opens no network and mutates nothing.
@@ -316,9 +263,6 @@ def build_export(session: Session, *, generated_at: datetime | None = None) -> R
         for r in session.scalars(select(FindingRecord).order_by(FindingRecord.id))
         if (export := _finding_export(session, r)) is not None
     )
-    plans = tuple(
-        _plan_export(r) for r in session.scalars(select(PlanRecord).order_by(PlanRecord.id))
-    )
     verdicts = tuple(
         _verdict_export(r)
         for r in session.scalars(select(VerdictRecord).order_by(VerdictRecord.id))
@@ -329,9 +273,8 @@ def build_export(session: Session, *, generated_at: datetime | None = None) -> R
         generator=Generator(tool="revalid", version=__version__),
         reports=reports,
         findings=findings,
-        plans=plans,
         verdicts=verdicts,
-        metrics=_metrics(reports, findings, plans, verdicts),
+        metrics=_metrics(reports, findings, verdicts),
     )
 
 

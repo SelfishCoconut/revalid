@@ -41,52 +41,6 @@
       "title": "AgenticEvidence",
       "type": "object"
     },
-    "Evidence": {
-      "description": "Captured request/response of one executed probe step (FR-07).\n\nEvery field a verdict is justified by is recorded here so the verdict can\nbe re-derived and audited. ``response_status`` is ``0`` when the target was\nunreachable and no HTTP response was received.\n\nAttributes:\n    request_method: Method actually sent.\n    request_url: URL actually requested.\n    request_body: Serialized request body (empty string if none).\n    response_status: HTTP status code, or ``0`` if no response arrived.\n    response_headers: Response headers as received.\n    response_body_excerpt: Leading slice of the response body.\n    elapsed_ms: Wall-clock round-trip time in milliseconds.",
-      "properties": {
-        "elapsed_ms": {
-          "default": 0.0,
-          "title": "Elapsed Ms",
-          "type": "number"
-        },
-        "request_body": {
-          "default": "",
-          "title": "Request Body",
-          "type": "string"
-        },
-        "request_method": {
-          "title": "Request Method",
-          "type": "string"
-        },
-        "request_url": {
-          "title": "Request Url",
-          "type": "string"
-        },
-        "response_body_excerpt": {
-          "default": "",
-          "title": "Response Body Excerpt",
-          "type": "string"
-        },
-        "response_headers": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Response Headers",
-          "type": "object"
-        },
-        "response_status": {
-          "title": "Response Status",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "request_method",
-        "request_url",
-        "response_status"
-      ],
-      "title": "Evidence",
-      "type": "object"
-    },
     "Finding": {
       "description": "A single pentest finding in the internal model (FR-02/FR-03).\n\nAttributes:\n    title: Short human-readable name of the finding.\n    severity: Normalized severity level.\n    description: Free-text description of the vulnerability.\n    impact: What an attacker gains / the business consequence (FR-03).\n    attack_vector: How the vulnerability is reached and exploited (FR-03).\n    affected_endpoints: URLs or endpoint identifiers the finding applies to.\n    reproduction_steps: Ordered steps to reproduce the issue.\n    raw: Complete source payload as ingested, preserving fields the\n        internal model does not map (FR-02 audit criterion). For\n        LLM-extracted findings it also carries extraction lineage \u2014 model\n        name and source text \u2014 for the audit trail (FR-10 / NFR-02).",
       "properties": {
@@ -293,131 +247,6 @@
       "title": "NoteExport",
       "type": "object"
     },
-    "PlanExport": {
-      "description": "One retest-plan version with its approval decision (FR-04/FR-05).",
-      "properties": {
-        "actions": {
-          "items": {
-            "$ref": "#/$defs/Probe"
-          },
-          "title": "Actions",
-          "type": "array"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "decided_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Decided At"
-        },
-        "decided_by": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Decided By"
-        },
-        "finding_id": {
-          "title": "Finding Id",
-          "type": "integer"
-        },
-        "id": {
-          "title": "Id",
-          "type": "integer"
-        },
-        "origin": {
-          "title": "Origin",
-          "type": "string"
-        },
-        "status": {
-          "title": "Status",
-          "type": "string"
-        },
-        "version": {
-          "title": "Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "finding_id",
-        "version",
-        "status",
-        "origin",
-        "actions",
-        "created_at",
-        "decided_at",
-        "decided_by"
-      ],
-      "title": "PlanExport",
-      "type": "object"
-    },
-    "Probe": {
-      "description": "A single verification-only HTTP action used to retest a finding (FR-07).\n\nProbes are non-destructive: they observe whether a vulnerability is still\npresent, never exploit it for impact. In the walking skeleton exactly one\n``kind`` exists; more join as their finding types land.\n\nAttributes:\n    kind: Stable identifier of the probe type (e.g. ``sqli-login-bypass``).\n    method: HTTP method.\n    url: Absolute target URL; always checked against the allowlist (FR-06)\n        before any socket opens.\n    headers: Request headers to send.\n    json_body: JSON request body, or ``None`` for a body-less request.\n    expected_indicator: Human-readable note on what a still-open result\n        looks like \u2014 documentation, not matching logic.",
-      "properties": {
-        "expected_indicator": {
-          "default": "",
-          "title": "Expected Indicator",
-          "type": "string"
-        },
-        "headers": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Headers",
-          "type": "object"
-        },
-        "json_body": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Json Body"
-        },
-        "kind": {
-          "minLength": 1,
-          "title": "Kind",
-          "type": "string"
-        },
-        "method": {
-          "minLength": 1,
-          "title": "Method",
-          "type": "string"
-        },
-        "url": {
-          "minLength": 1,
-          "title": "Url",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "method",
-        "url"
-      ],
-      "title": "Probe",
-      "type": "object"
-    },
     "ReportExport": {
       "description": "An uploaded report and its ingest outcome (FR-01).",
       "properties": {
@@ -469,10 +298,6 @@
           "title": "Mean Elapsed Ms",
           "type": "number"
         },
-        "plans": {
-          "title": "Plans",
-          "type": "integer"
-        },
         "reports": {
           "title": "Reports",
           "type": "integer"
@@ -496,7 +321,6 @@
       "required": [
         "reports",
         "findings",
-        "plans",
         "verdicts",
         "verdicts_by_status",
         "total_elapsed_ms",
@@ -518,7 +342,7 @@
       "type": "string"
     },
     "VerdictExport": {
-      "description": "A verdict with its audit stamps (FR-09/FR-10/FR-17).\n\nCarries the verdict fields directly (rather than embedding the domain\n:class:`~revalid.domain.Verdict`) so one flat shape covers both a ``batch``\nverdict \u2014 ``evidence`` is the single request/response it was derived from \u2014 and\nan ``agentic`` verdict \u2014 ``evidence`` is ``None``, ``session_id`` links the\nretest session whose transcript justifies it (FR-17 Slice 6a).",
+      "description": "An agentic verdict with its audit stamps (FR-09/FR-10/FR-17).\n\nEvery verdict is a retest-session conclusion (the batch verdict path retired\nin FR-17 6b-iii): ``session_id`` links the session, ``evidence`` is the\nflexible :class:`~revalid.domain.AgenticEvidence` proof (or ``None`` for a\nhuman adjudication), and ``actor`` is ``\"agent\"``/``\"operator\"``.",
       "properties": {
         "actor": {
           "title": "Actor",
@@ -532,16 +356,12 @@
         "evidence": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Evidence"
-            },
-            {
               "$ref": "#/$defs/AgenticEvidence"
             },
             {
               "type": "null"
             }
-          ],
-          "title": "Evidence"
+          ]
         },
         "finding_id": {
           "title": "Finding Id",
@@ -557,32 +377,6 @@
           },
           "title": "Matched Indicators",
           "type": "array"
-        },
-        "plan_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Plan Id"
-        },
-        "plan_version": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Plan Version"
-        },
-        "probe_kind": {
-          "title": "Probe Kind",
-          "type": "string"
         },
         "rationale": {
           "title": "Rationale",
@@ -603,10 +397,6 @@
           ],
           "title": "Session Id"
         },
-        "source": {
-          "title": "Source",
-          "type": "string"
-        },
         "status": {
           "$ref": "#/$defs/VerdictStatus"
         }
@@ -614,12 +404,8 @@
       "required": [
         "id",
         "finding_id",
-        "probe_kind",
-        "plan_id",
-        "plan_version",
         "actor",
         "created_at",
-        "source",
         "session_id",
         "status",
         "reason_code",
@@ -661,13 +447,6 @@
     "metrics": {
       "$ref": "#/$defs/RunMetrics"
     },
-    "plans": {
-      "items": {
-        "$ref": "#/$defs/PlanExport"
-      },
-      "title": "Plans",
-      "type": "array"
-    },
     "reports": {
       "items": {
         "$ref": "#/$defs/ReportExport"
@@ -693,7 +472,6 @@
     "generator",
     "reports",
     "findings",
-    "plans",
     "verdicts",
     "metrics"
   ],

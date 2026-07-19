@@ -46,7 +46,6 @@ from revalid.db import (
 )
 from revalid.domain import (
     AgenticEvidence,
-    Evidence,
     Finding,
     FindingStage,
     ReportStatus,
@@ -197,55 +196,36 @@ class NoteOut(BaseModel):
         )
 
 
-def _verdict_out_evidence(record: VerdictRecord) -> Evidence | AgenticEvidence | None:
-    """Build the right evidence shape for the API view (batch HTTP vs agentic)."""
-    if record.evidence is None:
-        return None
-    if record.source == "agentic":
-        return AgenticEvidence(**record.evidence)
-    return Evidence(**record.evidence)
-
-
 class VerdictOut(BaseModel):
-    """A persisted verdict as returned by the API (FR-09/FR-17).
+    """An agentic verdict as returned by the API (FR-09/FR-17).
 
-    Flat over both a ``batch`` verdict (evidence-backed) and an ``agentic`` one
-    (session-backed, ``evidence`` is ``None``) — the same shape as the FR-12
-    :class:`~revalid.export.VerdictExport`. A superset of the pre-Slice-6a batch
-    fields (it adds ``source``/``session_id``/``actor``), so existing batch
-    consumers still read ``status``/``reason_code``/``rationale``/``evidence`` at
-    the top level.
+    Every verdict is a retest-session conclusion (the batch verdict path retired
+    in FR-17 6b-iii); the shape mirrors the FR-12 :class:`~revalid.export.VerdictExport`.
     """
 
     id: int
     finding_id: int
-    probe_kind: str
-    plan_version: int | None = None
-    source: str
     session_id: int | None
     actor: str
     status: VerdictStatus
     reason_code: str
     rationale: str
     matched_indicators: tuple[str, ...]
-    evidence: Evidence | AgenticEvidence | None
+    evidence: AgenticEvidence | None
 
     @classmethod
     def from_record(cls, record: VerdictRecord) -> "VerdictOut":
-        """Build the API view from a stored verdict row (batch or agentic)."""
+        """Build the API view from a stored verdict row."""
         return cls(
             id=record.id,
             finding_id=record.finding_id,
-            probe_kind=record.probe_kind,
-            plan_version=record.plan_version,
-            source=record.source,
             session_id=record.session_id,
             actor=record.actor,
             status=VerdictStatus(record.status),
             reason_code=record.reason_code,
             rationale=record.rationale,
             matched_indicators=tuple(record.matched_indicators),
-            evidence=_verdict_out_evidence(record),
+            evidence=AgenticEvidence(**record.evidence) if record.evidence is not None else None,
         )
 
 
@@ -265,12 +245,6 @@ class AuditOut(BaseModel):
     reproduced: int
     ok: bool
     discrepancies: list[DiscrepancyOut]
-
-
-class PlanRequest(BaseModel):
-    """Optional body for plan generation: operator guidance for this run (FR-04)."""
-
-    instructions: str = ""
 
 
 class SessionEventOut(BaseModel):

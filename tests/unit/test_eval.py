@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from revalid.domain import Evidence, Finding, Severity, VerdictStatus
+from revalid.domain import AgenticEvidence, Finding, Severity, VerdictStatus
 from revalid.eval import (
     GROUND_TRUTH_TODO,
     Classification,
@@ -63,19 +63,19 @@ def _finding(fid: int, title: str) -> FindingExport:
 
 
 def _verdict(vid: int, fid: int, status: VerdictStatus, ms: float = 10.0) -> VerdictExport:
-    evidence = Evidence(
-        request_method="GET", request_url="http://x/p", response_status=200, elapsed_ms=ms
+    evidence = AgenticEvidence(
+        explanation="demo",
+        command="curl -s http://x/p",
+        output="{token}",
+        exit_code=0,
+        elapsed_ms=ms,
     )
     return VerdictExport(
         id=vid,
         finding_id=fid,
-        probe_kind="demo",
-        plan_id=None,
-        plan_version=1,
-        actor="executor",
+        actor="agent",
         created_at=_NOW,
-        source="batch",
-        session_id=None,
+        session_id=vid,
         status=status,
         reason_code="demo",
         rationale="",
@@ -88,7 +88,6 @@ def _export(findings: tuple[FindingExport, ...], verdicts: tuple[VerdictExport, 
     metrics = RunMetrics(
         reports=0,
         findings=len(findings),
-        plans=0,
         verdicts=len(verdicts),
         verdicts_by_status={"still_open": 0, "fixed": 0, "inconclusive": 0},
         total_elapsed_ms=0.0,
@@ -100,7 +99,6 @@ def _export(findings: tuple[FindingExport, ...], verdicts: tuple[VerdictExport, 
         generator=Generator(tool="revalid", version="test"),
         reports=(),
         findings=findings,
-        plans=(),
         verdicts=verdicts,
         metrics=metrics,
     )
