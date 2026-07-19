@@ -136,14 +136,27 @@ def test_goal_draft_generates_without_a_session() -> None:
         resp = client.post("/api/findings/1/goal/draft")
         assert resp.status_code == 200
         assert resp.json() == {"steps": _GOAL_STEPS}
-        # No session row was created (Task 3 adds a finding-scoped list endpoint;
-        # until then, prove it via the session-lookup 404).
+        # No session row was created — see test_list_finding_sessions_newest_first
+        # for the finding-scoped session list.
         assert client.get("/api/retest-sessions/1").status_code == 404
+        assert client.get("/api/findings/1/retest-sessions").json() == []
 
 
 def test_goal_draft_unknown_finding_is_404() -> None:
     with _client() as client:
         assert client.post("/api/findings/999/goal/draft").status_code == 404
+
+
+def test_list_finding_sessions_newest_first() -> None:
+    """A finding's session list returns newest-first summaries (FR-17 6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        a = client.post("/api/findings/1/retest-session").json()["id"]
+        b = client.post("/api/findings/1/retest-session").json()["id"]
+        rows = client.get("/api/findings/1/retest-sessions").json()
+        assert [r["id"] for r in rows] == [b, a]
+        assert {r["finding_id"] for r in rows} == {1}
+        assert client.get("/api/findings/999/retest-sessions").json() == []
 
 
 def test_set_goal_endpoint_updates_the_panel_event() -> None:

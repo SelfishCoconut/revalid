@@ -288,6 +288,27 @@ class RetestSessionOut(BaseModel):
         )
 
 
+class RetestSessionSummary(BaseModel):
+    """A compact retest-session row for a finding's session list (FR-17 6b-iii-b)."""
+
+    id: int
+    finding_id: int
+    status: str
+    verdict_status: str | None
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: RetestSessionRecord) -> "RetestSessionSummary":
+        """Build the compact list-row view from a full session record."""
+        return cls(
+            id=record.id,
+            finding_id=record.finding_id,
+            status=record.status,
+            verdict_status=record.verdict_status,
+            created_at=record.created_at,
+        )
+
+
 class RejectRequest(BaseModel):
     """Optional body for a command rejection: the operator's reason (FR-17)."""
 
@@ -853,6 +874,16 @@ def _register_finding_retest_routes(router: APIRouter, sessions: sessionmaker[Se
         """Generate a retest-goal draft for the finding — no session, no persistence."""
         finding = _current_or_404(session, finding_id).to_domain()
         return GoalDraftOut(steps=list(generate_goal(goal_agent, finding)))
+
+    @router.get("/findings/{finding_id}/retest-sessions", response_model=list[RetestSessionSummary])
+    def list_finding_sessions(finding_id: int, session: SessionDep) -> list[RetestSessionSummary]:
+        """List a finding's retest sessions, newest first (FR-17 6b-iii-b)."""
+        rows = session.scalars(
+            select(RetestSessionRecord)
+            .where(RetestSessionRecord.finding_id == finding_id)
+            .order_by(RetestSessionRecord.id.desc())
+        )
+        return [RetestSessionSummary.from_record(r) for r in rows]
 
 
 def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
