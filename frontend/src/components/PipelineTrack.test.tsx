@@ -44,6 +44,17 @@ describe("PipelineTrack", () => {
     for (const stage of STAGES) {
       expect(screen.getByText(stage)).toBeInTheDocument();
     }
+    // The final ("verdict") node borrows the verdict's tone (ADR-0024): "fixed"
+    // maps to the "ok" tone (see VERDICT_TONE/STATUS_META in lib/status.ts), so the
+    // node's ring and fill must carry TONE_RING.ok / TONE_FILL.ok — not the plain
+    // "iris" tone used for stages that are merely reached.
+    const verdictLink = screen.getByRole("link", { name: /go to verdict stage/i });
+    const ring = verdictLink.children[0];
+    const fill = ring.children[0];
+    expect(ring).toHaveClass("ring-ok/50");
+    expect(ring).not.toHaveClass("ring-iris/50");
+    expect(fill).toHaveClass("bg-ok");
+    expect(fill).not.toHaveClass("bg-iris");
   });
 
   it("links reached and current stages, leaving not-yet-reached stages inert", () => {
