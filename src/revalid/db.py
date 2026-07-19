@@ -1,7 +1,7 @@
 """SQLite persistence layer via SQLAlchemy 2.0 (ADR-0002).
 
-Single-file zero-ops storage. Findings, plans, runs, and the audit trail
-(FR-10) all live here; only findings exist in the walking skeleton.
+Single-file zero-ops storage. Findings, retest sessions, verdicts, and the
+audit trail (FR-10) all live here; only findings exist in the walking skeleton.
 """
 
 from __future__ import annotations
@@ -53,10 +53,9 @@ class FindingRecord(Base):
     """Stable identity of a finding (FR-16, ADR-0024).
 
     The finding's *content* lives in append-only :class:`FindingVersionRecord`
-    rows; this row is the stable handle that :attr:`PlanRecord.finding_id` and
-    :attr:`VerdictRecord.finding_id` reference, so amending a finding (appending a
-    new version) never orphans its plans or verdicts. Notes link back via
-    :attr:`FindingNoteRecord.finding_id`.
+    rows; this row is the stable handle that :attr:`VerdictRecord.finding_id`
+    references, so amending a finding (appending a new version) never orphans its
+    verdicts. Notes link back via :attr:`FindingNoteRecord.finding_id`.
     """
 
     __tablename__ = "findings"
@@ -71,9 +70,9 @@ class FindingVersionRecord(Base):
 
     Extraction/import lands version 1 (``origin=extraction``); each operator edit
     appends a new version (``origin=edit``). The *current* version is the highest
-    ``version`` — older ones are kept, never mutated, exactly like a
-    :class:`PlanRecord` (ADR-0012). ``edited_by``/``reason`` capture the edit
-    lineage (FR-10); they stay ``None``/empty on the extraction version.
+    ``version`` — older ones are kept, never mutated (append-only version history,
+    FR-16). ``edited_by``/``reason`` capture the edit lineage (FR-10); they stay
+    ``None``/empty on the extraction version.
     """
 
     __tablename__ = "finding_versions"

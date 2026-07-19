@@ -105,8 +105,8 @@ class FindingOut(Finding):
     """A persisted finding as returned by the API — the *current* version's content.
 
     ``version`` is the current version number (extraction = 1); it bumps on every
-    operator edit (FR-16). ``id`` is the stable finding identity plans/verdicts
-    reference.
+    operator edit (FR-16). ``id`` is the stable finding identity verdicts and
+    retest sessions reference.
     """
 
     id: int
@@ -866,7 +866,7 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         ingest a report — e.g. a large report on a small local backend — a person
         supplies the findings by form or JSON upload. Reuses the FR-02 DefectDojo
         mapping per finding, then lands the report ``ready`` with its findings
-        attached, so the FR-04/FR-05 plan→approve→retest flow is identical to an
+        attached, so an agentic retest session (FR-17) starts identically to an
         extracted report's. ``payload`` is ``{"label": str, "findings": [...]}``.
         """
         try:
