@@ -63,7 +63,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-06 — Target authorization allowlist
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19). With the batch HTTP executor retired, egress control now lives **solely in the agentic sandbox's Docker `--internal` network membership** (ADR-0025) — the container can reach only the connected lab target and nothing else, a strictly stronger guarantee than the HTTP-transport allowlist. The `allowlist.py` HTTP guard is orphaned (kept pending a tracked cleanup follow-up).
+- **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19). With the batch HTTP executor retired, egress control now lives **solely in the agentic sandbox's Docker `--internal` network membership** (ADR-0025) — the container can reach only the connected lab target and nothing else, a strictly stronger guarantee than the HTTP-transport allowlist. The `allowlist.py` HTTP guard was removed (FR-17 6b-iii-b).
 - **Description**: The executor shall refuse any action whose target is not on the configured allowlist (default: the lab compose targets). Allowlist changes are explicit configuration, never inferred from report content.
 - **Acceptance criteria**:
   - [ ] An approved plan referencing a non-allowlisted host fails closed with an audit-trail entry.
@@ -100,9 +100,9 @@ non-lab targets, destructive exploitation.
 
 ### FR-11 — Results dashboard (web UI)
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The React SPA shall provide: report/run overview, finding list with verdicts, drill-down to evidence and audit trail, and the plan-approval workflow (FR-05). Served by FastAPI on localhost only.
+- **Description**: The React SPA shall provide: report/run overview, finding list with verdicts, drill-down to evidence and audit trail, and the agentic retest console (FR-17). Served by FastAPI on localhost only.
 - **Acceptance criteria**:
-  - [x] The full evaluation flow (ingest → approve → execute → verdicts with evidence) is operable from the UI alone. *(ADR-0013: Vite/React/TS/Tailwind SPA served by FastAPI at `/`, API under `/api`; PDF upload runs FR-01→FR-03 as a background job the UI polls. Verified end-to-end in a real browser on a live Ollama backend — upload → 4 findings → plan → approve → retest → evidence-backed verdict — plus unit/integration coverage of the `/api` chain.)*
+  - [x] The full evaluation flow (extract → goal → retest → verdict) is operable from the UI alone. *(ADR-0013: Vite/React/TS/Tailwind SPA served by FastAPI at `/`, API under `/api`; PDF upload runs FR-01→FR-03 as a background job the UI polls. Originally verified end-to-end in a real browser on a live Ollama backend on the FR-04/05 batch flow (upload → 4 findings → plan → approve → retest → evidence-backed verdict); the flow was reshaped around the FR-17 agentic console in Slice 6b-iii-b (ADR-0033, 2026-07-19) — extract → goal (editable pre-start draft) → agentic retest session → verdict — plus unit/integration coverage of the `/api` chain.)*
 
 ### FR-12 — Machine-readable results export
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -122,7 +122,7 @@ non-lab targets, destructive exploitation.
 - **Status**: **dropped, subsumed by FR-17** (ADR-0033, 2026-07-19). The dedicated Playwright browser executor (`browser.py`, ADR-0018) is deleted. DOM/JS-dependent verification is reachable within FR-17: the sandbox agent can run browser-capable tooling as a command, so a distinct browser-probe path is no longer warranted (a Kali-tooling sandbox image is tracked separately, #105).
 - **Description**: For findings not verifiable at HTTP level (DOM/JS-dependent), the executor may support Playwright-driven browser probes under the same approval, allowlist, and audit constraints.
 - **Acceptance criteria**:
-  - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser gets a correct verdict. — `src/revalid/browser.py` (ADR-0018): a `browser-xss` Playwright probe (optional `browser` extra) verifies Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` is executor-agnostic; browser verdicts re-derive via the shared `assess_evidence`). Pipeline + assessor unit-tested with a canned runner; the live-lab still-open verdict is asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`). Exemplar is DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalizes.
+  - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser got a correct verdict. — `src/revalid/browser.py` (ADR-0018, deleted in FR-17 6b-iii-a): a `browser-xss` Playwright probe (optional `browser` extra) verified Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` was executor-agnostic; browser verdicts re-derived via the shared `assess_evidence`). Pipeline + assessor were unit-tested with a canned runner; the live-lab still-open verdict was asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`, also deleted). Exemplar was DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalized.
 
 ### FR-15 — Evaluation harness
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -171,7 +171,14 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 6b-iii-a** (met — issue #110, ADR-0033 proposed, 2026-07-19):
   - [x] **AC20**: the batch execution path is deleted end-to-end (backend) — `approval.py`/`retest.py`/`sanity.py`/`browser.py`, the batch plan/approve/retest REST endpoints, the batch domain types (`Probe`/`RetestPlan`/`PlanStatus`/`Verdict`/`Evidence`), and `PlanRecord` — with the full gate green; FR-09/10/12 now have exactly one (agentic) implementation.
   - [x] **AC21**: `VerdictRecord`, `VerdictExport`, and the FR-10 audit collapse from polymorphic (batch/agentic) to a single agentic shape — the `source` discriminator and batch-only columns are gone, the audit re-derives only from the transcript; the FR-12 export drops `plans`, `SCHEMA_VERSION` 1.3 → 1.4 (regenerated + drift-tested).
-- **Remaining — Slice 6b-iii-b**: the SPA finding-flow reshape (Extract → Goal → Agentic retest → Verdict), including editing the goal *before* a session starts. Kali-tooling sandbox image tracked separately (#105).
+- **Acceptance criteria — Slice 6b-iii-b** (met — issue #110, ADR-0033 proposed, 2026-07-19):
+  - [x] **AC22**: the finding flow is **extract → goal → retest → verdict**; no batch
+    stage/hook/client-fn/`Plan` type remains and the SPA calls no removed endpoint. The
+    Goal stage generates an editable pre-start draft goal (no session), and **Start retest**
+    launches a session seeded with it; the console is the only retest path, relaid out as
+    chat + right-editable goal + bottom terminal, with live goal edit, the command gate, chat
+    steering, and adjudication intact and an in-progress session surviving reload.
+- **Remaining — Slice 6b-iii-b**: **done**. FR-17 is now feature-complete; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements

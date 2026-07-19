@@ -4,13 +4,13 @@ import type { VerdictStatus } from "../api/types";
 import { pipelineReach } from "../lib/selectors";
 import { TONE_FILL, TONE_RING, VERDICT_TONE } from "../lib/status";
 
-const STAGES = ["extract", "plan", "approve", "retest", "verdict"] as const;
+const STAGES = ["extract", "goal", "retest", "verdict"] as const;
 
 export type Stage = (typeof STAGES)[number];
 
 /**
  * The revalidation pipeline as a live, walkable stepper (ADR-0024). Every finding
- * travels the same fixed sequence — extract → plan → approve → retest → verdict —
+ * travels the same fixed sequence — extract → goal → retest → verdict —
  * so the order carries real meaning; this shows how far *this* finding has reached
  * (see {@link pipelineReach}). The final node borrows the verdict's colour once a
  * determination exists.
@@ -21,33 +21,31 @@ export type Stage = (typeof STAGES)[number];
  * stages stay inert. `activeStage` marks the page currently open.
  */
 export function PipelineTrack({
-  planned,
-  approved,
-  retested,
+  sessionExists,
+  hasVerdict,
   verdict,
   findingId,
   activeStage,
 }: {
-  planned: boolean;
-  approved: boolean;
-  retested: boolean;
+  sessionExists: boolean;
+  hasVerdict: boolean;
   verdict?: VerdictStatus;
   findingId: number;
   activeStage: Stage;
 }) {
-  const { reached, furthest, current } = pipelineReach({ planned, approved, retested });
+  const { reached, furthest, current } = pipelineReach({ sessionExists, hasVerdict });
 
   return (
     <div className="overflow-x-auto px-1 py-1">
       <div className="relative mx-auto min-w-[26rem]">
-        {/* base rail + progress fill, pinned to the node centres (10%…90%) */}
-        <div className="absolute inset-x-[10%] top-[13px] h-px bg-line" />
+        {/* base rail + progress fill, pinned to the node centres (12.5%…87.5%) */}
+        <div className="absolute inset-x-[12.5%] top-[13px] h-px bg-line" />
         <div
-          className="rev-grow absolute top-[13px] left-[10%] h-px bg-iris/60"
-          style={{ width: `${String(furthest * 20)}%` }}
+          className="rev-grow absolute top-[13px] left-[12.5%] h-px bg-iris/60"
+          style={{ width: `${String((furthest / 3) * 75)}%` }}
         />
 
-        <ol className="relative grid grid-cols-5">
+        <ol className="relative grid grid-cols-4">
           {STAGES.map((stage, i) => {
             const isReached = reached[i];
             const isCurrent = i === current;
@@ -56,7 +54,7 @@ export function PipelineTrack({
             const navigable = isReached || isCurrent;
             let ring = "ring-line";
             let fill = "bg-line-2";
-            if (isReached && i === 4 && verdict) {
+            if (isReached && i === 3 && verdict) {
               const tone = VERDICT_TONE[verdict];
               ring = TONE_RING[tone];
               fill = TONE_FILL[tone];

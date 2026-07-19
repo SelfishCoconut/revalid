@@ -1,8 +1,8 @@
-import type { PlanStatus, ReportStatus, Severity, VerdictStatus } from "../api/types";
+import type { ReportStatus, Severity, VerdictStatus } from "../api/types";
 
 /**
  * The tool's two-voice colour language, as tones. `iris` marks states where the
- * *system* is the actor (extraction running, an AI-proposed plan); the
+ * *system* is the actor (extraction running, an agentic session in progress); the
  * red/amber/green triad (`danger`/`warn`/`ok`) marks reality's outcomes; `high`
  * and `low` extend the triad for severity; `neutral` is the muted default.
  *
@@ -13,20 +13,14 @@ import type { PlanStatus, ReportStatus, Severity, VerdictStatus } from "../api/t
  */
 export type Tone = "iris" | "ok" | "warn" | "danger" | "high" | "low" | "neutral";
 
-/** Every known report/plan/verdict status → its tone and human label. */
-export type KnownStatus = ReportStatus | PlanStatus | VerdictStatus;
+/** Every known report/verdict status → its tone and human label. */
+export type KnownStatus = ReportStatus | VerdictStatus;
 
 export const STATUS_META: Record<KnownStatus, { tone: Tone; label: string }> = {
   // Report — the system is extracting; then reality is ready/failed.
   extracting: { tone: "iris", label: "extracting" },
   ready: { tone: "ok", label: "ready" },
   failed: { tone: "danger", label: "failed" },
-  // Plan — the AI proposes; the human/gate decides.
-  generating: { tone: "iris", label: "generating" },
-  proposed: { tone: "iris", label: "proposed" },
-  approved: { tone: "ok", label: "approved" },
-  rejected: { tone: "danger", label: "rejected" },
-  superseded: { tone: "neutral", label: "superseded" },
   // Verdict — reality's determination.
   still_open: { tone: "danger", label: "still open" },
   fixed: { tone: "ok", label: "fixed" },

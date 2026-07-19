@@ -1,17 +1,16 @@
 import { useOutletContext } from "react-router-dom";
 
-import type { Finding, Plan, Verdict } from "../api/types";
+import type { Finding, RetestSessionSummary, Verdict } from "../api/types";
 import type { Stage } from "../components/PipelineTrack";
 
 /** Everything a stage page needs, shared through the finding layout's Outlet. */
 export interface FindingStageContext {
   finding: Finding;
   findingId: number;
-  plans: Plan[];
-  currentPlan?: Plan;
-  hasPlan: boolean;
-  approved: boolean;
-  retested: boolean;
+  /** This finding's retest sessions, newest first. */
+  sessions: RetestSessionSummary[];
+  /** The newest session, if any (the one the retest stage opens). */
+  latestSession?: RetestSessionSummary;
   /** This finding's verdicts, newest first. */
   verdicts: Verdict[];
   /** The furthest actionable stage — where an index visit lands. */

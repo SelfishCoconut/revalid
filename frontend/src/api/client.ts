@@ -10,11 +10,10 @@ import type {
   FindingVersion,
   ManualReportInput,
   Note,
-  Plan,
-  PlannedAction,
   ProbeInput,
   ProbeResult,
   Report,
+  RetestSessionSummary,
   Settings,
   SettingsUpdate,
   Verdict,
@@ -121,45 +120,7 @@ export function listNotes(findingId: number): Promise<Note[]> {
   return request<Note[]>(`/findings/${String(findingId)}/notes`);
 }
 
-// --- Plans ---------------------------------------------------------------
-
-/**
- * Start async plan generation (backend replies 202 with a `generating` version).
- * `instructions` is optional operator guidance woven into this generation and
- * recorded in the plan's lineage. Re-calling supersedes any live version — an
- * approved one included — so it doubles as "regenerate" (ADR-0022/0023).
- */
-export function generatePlan(findingId: number, instructions = ""): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan`, jsonInit("POST", { instructions }));
-}
-
-/** Replace the proposed plan's actions; backend re-gates each action. */
-export function editPlan(findingId: number, actions: PlannedAction[]): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan`, jsonInit("PUT", actions));
-}
-
-export function approvePlan(findingId: number): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan/approve`, { method: "POST" });
-}
-
-export function rejectPlan(findingId: number): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan/reject`, { method: "POST" });
-}
-
-/** Un-approve the approved plan back into an editable proposed copy (ADR-0023). */
-export function revisePlan(findingId: number): Promise<Plan> {
-  return request<Plan>(`/findings/${String(findingId)}/plan/revise`, { method: "POST" });
-}
-
-export function listPlans(findingId: number): Promise<Plan[]> {
-  return request<Plan[]>(`/findings/${String(findingId)}/plans`);
-}
-
-// --- Retest / verdicts ---------------------------------------------------
-
-export function retest(findingId: number): Promise<Verdict[]> {
-  return request<Verdict[]>(`/findings/${String(findingId)}/retest`, { method: "POST" });
-}
+// --- Verdicts --------------------------------------------------------------
 
 export function listVerdicts(): Promise<Verdict[]> {
   return request<Verdict[]>("/verdicts");
@@ -180,6 +141,18 @@ export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
 }
 
 // --- Agentic retest sessions (FR-17) ---------------------------------------
+
+/** Generate a retest-goal draft for a finding, pre-session (FR-17 6b-iii-b). */
+export function draftGoal(findingId: number): Promise<{ steps: string[] }> {
+  return request<{ steps: string[] }>(`/findings/${String(findingId)}/goal/draft`, {
+    method: "POST",
+  });
+}
+
+/** List a finding's retest sessions, newest first (FR-17 6b-iii-b). */
+export function listRetestSessions(findingId: number): Promise<RetestSessionSummary[]> {
+  return request<RetestSessionSummary[]>(`/findings/${String(findingId)}/retest-sessions`);
+}
 
 /** One ordered event from a retest session's transcript (see the WS stream). */
 export interface SessionEvent {
@@ -207,6 +180,8 @@ export interface StartSessionOptions {
   free_launch?: boolean;
   max_steps?: number;
   max_seconds?: number | null;
+  /** A pre-start user-owned goal (FR-17 6b-iii-b); seeded verbatim if present. */
+  initial_goal?: string[];
 }
 
 /** Start an agentic retest session for a finding (backend replies with the new session). */

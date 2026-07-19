@@ -1,6 +1,5 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as client from "../api/client";
@@ -11,13 +10,12 @@ import { RetestSession } from "./RetestSession";
 vi.mock("../hooks/useRetestSession");
 vi.mock("../api/client");
 
+// The console is a self-contained component (Task 9): it takes `sessionId` as
+// a prop rather than reading it from the URL, so no route/MemoryRouter path
+// match is needed here — `renderWithProviders` still supplies the router
+// context other providers (e.g. links elsewhere in the tree) may expect.
 function renderAt(id = 1) {
-  return renderWithProviders(
-    <Routes>
-      <Route path="/retest-sessions/:id" element={<RetestSession />} />
-    </Routes>,
-    `/retest-sessions/${String(id)}`,
-  );
+  return renderWithProviders(<RetestSession sessionId={id} />);
 }
 
 /** A default session record for the config `useQuery` (FR-17 Slice 5). */
@@ -534,5 +532,27 @@ describe("RetestSession", () => {
     expect(screen.getByText("budget exhausted")).toBeInTheDocument();
     // Not rendered as an ordinary "Verdict" box.
     expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
+  });
+
+  it("lays out the goal panel and the chat log side by side, not dropping either", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        { seq: 1, kind: "plan_updated", payload: { steps: ["Retry the payload"] } },
+        { seq: 2, kind: "agent_message", payload: { text: "checking the login flow first" } },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    // Both the goal (now a right column, FR-17 6b-iii-b) and the chat log
+    // (the "Agent conversation" region) are present in the same view — the
+    // relayout is presentational, it never trades one for the other.
+    expect(screen.getByText("Current goal")).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: /agent conversation/i })).toBeInTheDocument();
+    expect(screen.getByText("Retry the payload")).toBeInTheDocument();
+    expect(screen.getByText(/checking the login flow first/)).toBeInTheDocument();
   });
 });

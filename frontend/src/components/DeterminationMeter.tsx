@@ -57,7 +57,7 @@ export function DeterminationMeter({
 
       {total === 0 && (
         <p className="mt-3 font-mono text-xs text-faint">
-          No determinations yet. Approve a plan and run a retest to record one.
+          No determinations yet. Run a retest to record one.
         </p>
       )}
     </div>

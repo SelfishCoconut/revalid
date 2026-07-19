@@ -80,6 +80,26 @@ def test_session_start_seeds_a_goal() -> None:
         assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
+def test_start_session_seeds_supplied_initial_goal() -> None:
+    """A start body with initial_goal seeds that goal verbatim — no generation (6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session",
+            json={"initial_goal": ["Confirm the login endpoint", "Retry the documented bypass"]},
+        )
+        assert started.status_code == 202
+        sid = started.json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        goal = next(e for e in state["events"] if e["kind"] == "plan_updated")
+        # Verbatim supplied steps, not the stand-in goal agent's _GOAL_STEPS —
+        # proves generation was skipped.
+        assert goal["payload"]["steps"] == [
+            "Confirm the login endpoint",
+            "Retry the documented bypass",
+        ]
+
+
 def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
     """A goal-generation failure degrades to an empty goal without blocking start (6b-ii)."""
     from pydantic_ai.exceptions import UnexpectedModelBehavior
@@ -107,6 +127,36 @@ def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
 def test_regenerate_goal_unknown_session_is_404() -> None:
     with _client() as client:
         assert client.post("/api/retest-sessions/999/goal/regenerate").status_code == 404
+
+
+def test_goal_draft_generates_without_a_session() -> None:
+    """Drafting a goal runs the goal agent on the current version — no session (6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        resp = client.post("/api/findings/1/goal/draft")
+        assert resp.status_code == 200
+        assert resp.json() == {"steps": _GOAL_STEPS}
+        # No session row was created — see test_list_finding_sessions_newest_first
+        # for the finding-scoped session list.
+        assert client.get("/api/retest-sessions/1").status_code == 404
+        assert client.get("/api/findings/1/retest-sessions").json() == []
+
+
+def test_goal_draft_unknown_finding_is_404() -> None:
+    with _client() as client:
+        assert client.post("/api/findings/999/goal/draft").status_code == 404
+
+
+def test_list_finding_sessions_newest_first() -> None:
+    """A finding's session list returns newest-first summaries (FR-17 6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        a = client.post("/api/findings/1/retest-session").json()["id"]
+        b = client.post("/api/findings/1/retest-session").json()["id"]
+        rows = client.get("/api/findings/1/retest-sessions").json()
+        assert [r["id"] for r in rows] == [b, a]
+        assert {r["finding_id"] for r in rows} == {1}
+        assert client.get("/api/findings/999/retest-sessions").json() == []
 
 
 def test_set_goal_endpoint_updates_the_panel_event() -> None:

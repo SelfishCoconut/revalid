@@ -3,7 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as client from "../api/client";
-import type { Finding, Plan } from "../api/types";
+import type { Finding, RetestSessionSummary } from "../api/types";
 import { renderWithProviders } from "../test/utils";
 import { FindingLayout } from "./FindingLayout";
 
@@ -23,18 +23,12 @@ const finding: Finding = {
   raw: {},
 };
 
-const approvedPlan: Plan = {
-  id: 1,
+const session: RetestSessionSummary = {
+  id: 9,
   finding_id: 7,
-  version: 1,
-  status: "approved",
-  origin: "generated",
-  error: null,
-  actions: [],
-  rejected_actions: [],
-  raw: {},
-  decided_at: null,
-  decided_by: null,
+  status: "concluded",
+  verdict_status: "still_open",
+  created_at: "",
 };
 
 function renderLayout(route: string) {
@@ -43,8 +37,7 @@ function renderLayout(route: string) {
       <Route path="/findings/:id" element={<FindingLayout />}>
         <Route index element={<div>child-index</div>} />
         <Route path="extract" element={<div>child-extract</div>} />
-        <Route path="plan" element={<div>child-plan</div>} />
-        <Route path="approve" element={<div>child-approve</div>} />
+        <Route path="goal" element={<div>child-goal</div>} />
         <Route path="retest" element={<div>child-retest</div>} />
         <Route path="verdict" element={<div>child-verdict</div>} />
       </Route>
@@ -56,7 +49,7 @@ function renderLayout(route: string) {
 describe("FindingLayout", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(client.listPlans).mockResolvedValue([]);
+    vi.mocked(client.listRetestSessions).mockResolvedValue([]);
     vi.mocked(client.listVerdicts).mockResolvedValue([]);
   });
 
@@ -79,32 +72,32 @@ describe("FindingLayout", () => {
   });
 
   describe("deep-link redirect", () => {
-    it("redirects a stage ahead of progress to the current stage", async () => {
-      // Fresh finding: only `extract` is reached, so `plan` is the current stage.
+    it("redirects verdict to retest when no session exists yet", async () => {
+      // Fresh finding: retest is the current stage, so a deep link straight to
+      // verdict is ahead of progress and gets redirected back.
       vi.mocked(client.listFindings).mockResolvedValue([finding]);
-      renderLayout("/findings/7/approve");
-      expect(await screen.findByText("child-plan")).toBeInTheDocument();
-      expect(screen.queryByText("child-approve")).not.toBeInTheDocument();
-    });
-
-    it("redirects verdict to retest when approved but not retested", async () => {
-      vi.mocked(client.listFindings).mockResolvedValue([finding]);
-      vi.mocked(client.listPlans).mockResolvedValue([approvedPlan]);
       renderLayout("/findings/7/verdict");
       expect(await screen.findByText("child-retest")).toBeInTheDocument();
       expect(screen.queryByText("child-verdict")).not.toBeInTheDocument();
     });
 
-    it("keeps the current actionable stage directly reachable", async () => {
+    it("makes verdict directly reachable once a session exists", async () => {
       vi.mocked(client.listFindings).mockResolvedValue([finding]);
-      renderLayout("/findings/7/plan");
-      expect(await screen.findByText("child-plan")).toBeInTheDocument();
+      vi.mocked(client.listRetestSessions).mockResolvedValue([session]);
+      renderLayout("/findings/7/verdict");
+      expect(await screen.findByText("child-verdict")).toBeInTheDocument();
     });
 
-    it("keeps a reached earlier stage directly reachable", async () => {
+    it("keeps the current actionable stage (retest) directly reachable", async () => {
       vi.mocked(client.listFindings).mockResolvedValue([finding]);
-      renderLayout("/findings/7/extract");
-      expect(await screen.findByText("child-extract")).toBeInTheDocument();
+      renderLayout("/findings/7/retest");
+      expect(await screen.findByText("child-retest")).toBeInTheDocument();
+    });
+
+    it("keeps a reached earlier stage (goal) directly reachable", async () => {
+      vi.mocked(client.listFindings).mockResolvedValue([finding]);
+      renderLayout("/findings/7/goal");
+      expect(await screen.findByText("child-goal")).toBeInTheDocument();
     });
   });
 });
