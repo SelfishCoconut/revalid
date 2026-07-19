@@ -40,10 +40,22 @@ describe("verdictCounts", () => {
     expect(verdictCounts([])).toEqual({ still_open: 0, inconclusive: 0, fixed: 0 });
   });
 
-  it("tallies verdicts by status", () => {
+  it("tallies one determination per finding (distinct findings)", () => {
     const statuses: VerdictStatus[] = ["still_open", "still_open", "fixed", "inconclusive"];
-    const verdicts = statuses.map((status, i) => makeVerdict({ id: i, status }));
+    const verdicts = statuses.map((status, i) => makeVerdict({ id: i, finding_id: i, status }));
     expect(verdictCounts(verdicts)).toEqual({ still_open: 2, inconclusive: 1, fixed: 1 });
+  });
+
+  it("counts only the latest verdict per finding (supersedes re-runs / adjudications)", () => {
+    // Finding 1 was re-tested / adjudicated three times; only its latest (id=3,
+    // fixed) determination counts. Finding 2 contributes one (still_open).
+    const verdicts = [
+      makeVerdict({ id: 1, finding_id: 1, status: "still_open" }),
+      makeVerdict({ id: 2, finding_id: 1, status: "inconclusive" }),
+      makeVerdict({ id: 3, finding_id: 1, status: "fixed" }),
+      makeVerdict({ id: 4, finding_id: 2, status: "still_open" }),
+    ];
+    expect(verdictCounts(verdicts)).toEqual({ still_open: 1, inconclusive: 0, fixed: 1 });
   });
 });
 

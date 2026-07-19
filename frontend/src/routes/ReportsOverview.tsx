@@ -28,7 +28,7 @@ function Hero() {
         </p>
       </div>
       <div className="border-t border-line bg-panel-2/30 px-6 pt-5 pb-6 sm:px-8">
-        <Eyebrow>Determination ledger · all retests</Eyebrow>
+        <Eyebrow>Determination ledger · one per finding</Eyebrow>
         <div className="mt-4">
           <DeterminationMeter counts={counts} />
         </div>

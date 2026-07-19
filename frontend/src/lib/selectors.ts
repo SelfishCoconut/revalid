@@ -10,14 +10,27 @@ export function latestVerdict(verdicts: Verdict[], findingId: number): Verdict |
     );
 }
 
-/** Tally verdicts by status for the determination meter. */
+/**
+ * Tally the determination meter by counting **one verdict per finding** — the
+ * latest (highest id) for each `finding_id`. Verdicts are append-only for the
+ * audit trail (a re-run or an operator adjudication supersedes rather than
+ * replaces), so counting every row would inflate the ledger; a finding
+ * contributes exactly one determination — its current one.
+ */
 export function verdictCounts(verdicts: Verdict[]): Record<VerdictStatus, number> {
   const counts: Record<VerdictStatus, number> = {
     still_open: 0,
     inconclusive: 0,
     fixed: 0,
   };
+  const latestByFinding = new Map<number, Verdict>();
   for (const verdict of verdicts) {
+    const current = latestByFinding.get(verdict.finding_id);
+    if (!current || verdict.id > current.id) {
+      latestByFinding.set(verdict.finding_id, verdict);
+    }
+  }
+  for (const verdict of latestByFinding.values()) {
     counts[verdict.status] += 1;
   }
   return counts;
