@@ -388,223 +388,228 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
         </div>
       </div>
 
-      {/* Current goal — the user-owned checklist the agent works to (FR-17 6b-ii). */}
-      <Panel className="shrink-0">
-        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <Eyebrow>Current goal</Eyebrow>
-          <span className="font-mono text-[11px] text-faint">
-            {planSteps.length} {planSteps.length === 1 ? "step" : "steps"}
-          </span>
-        </div>
-        <div className="space-y-3 p-4">
-          {editingGoal ? (
-            <div className="space-y-2">
-              <textarea
-                aria-label="goal steps"
-                value={goalDraft}
-                onChange={(e) => {
-                  setGoalDraft(e.target.value);
-                }}
-                rows={4}
-                className="w-full rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
-                placeholder="One step per line…"
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="accent"
-                  disabled={goalMutation.isPending}
-                  onClick={() => {
-                    const steps = goalDraft
-                      .split("\n")
-                      .map((s) => s.trim())
-                      .filter(Boolean);
-                    goalMutation.mutate(steps);
-                    setEditingGoal(false);
-                  }}
-                >
-                  Save goal
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setEditingGoal(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {planSteps.length > 0 ? (
-                <StepList steps={planSteps} />
-              ) : (
-                <p className="text-sm text-dim">No goal set yet.</p>
-              )}
-              {!sessionOver && (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setGoalDraft(planSteps.join("\n"));
-                      setEditingGoal(true);
-                    }}
-                  >
-                    Edit goal
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={regenerateGoalMutation.isPending}
-                    onClick={() => {
-                      regenerateGoalMutation.mutate();
-                    }}
-                  >
-                    Regenerate goal
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </Panel>
-
-      {/* Chat — the center column, the agent's voice. */}
-      <div
-        ref={chatRef}
-        role="log"
-        aria-label="Agent conversation"
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        <div className="mx-auto flex max-w-[52rem] flex-col gap-3 pb-1">
-          {chatItems.length === 0 && !verdict && (
-            <p className="text-sm text-dim">The agent is preparing its first step…</p>
-          )}
-          {chatItems}
-          {status === "given_up" ? (
-            // The agent hit a budget bound (step or wall-clock). Rendered
-            // distinctly from a reasoned verdict or an operator-ended session.
-            <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
-              <Eyebrow>Agent gave up</Eyebrow>
-              <p className="mt-1 text-sm text-warn-fg">
-                {givenUpReason(events) ?? "budget exhausted"}
-              </p>
-            </div>
-          ) : (
-            verdict && (
-              <div className="rounded-lg border border-line bg-panel-2/50 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <Eyebrow>Verdict</Eyebrow>
-                  {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
-                </div>
-                <p className="text-sm text-fg">{verdict.rationale}</p>
-              </div>
-            )
-          )}
-          {canAdjudicate && verdict && (
-            <div
-              aria-label="adjudication"
-              className="rounded-lg border border-line bg-panel-2/30 p-4"
-            >
-              <Eyebrow>Adjudication</Eyebrow>
-              {adjudicated ? (
-                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
-                  <span className="text-dim">Final verdict (operator):</span>
-                  {typeof finalVerdict?.status === "string" &&
-                    isKnownStatus(finalVerdict.status) && (
-                      <StatusBadge status={finalVerdict.status} />
-                    )}
-                  {typeof finalVerdict?.rationale === "string" && finalVerdict.rationale && (
-                    <span>— {finalVerdict.rationale}</span>
-                  )}
+      {/* main: chat (left, grows) + goal (right column) */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        {/* Chat — the left column, the agent's voice. */}
+        <div
+          ref={chatRef}
+          role="log"
+          aria-label="Agent conversation"
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          <div className="mx-auto flex max-w-none flex-col gap-3 pb-1">
+            {chatItems.length === 0 && !verdict && (
+              <p className="text-sm text-dim">The agent is preparing its first step…</p>
+            )}
+            {chatItems}
+            {status === "given_up" ? (
+              // The agent hit a budget bound (step or wall-clock). Rendered
+              // distinctly from a reasoned verdict or an operator-ended session.
+              <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
+                <Eyebrow>Agent gave up</Eyebrow>
+                <p className="mt-1 text-sm text-warn-fg">
+                  {givenUpReason(events) ?? "budget exhausted"}
                 </p>
-              ) : (
-                <>
-                  <p className="mt-1 text-xs text-dim">
-                    Accept the agent&rsquo;s verdict, or override it with your own determination.
+              </div>
+            ) : (
+              verdict && (
+                <div className="rounded-lg border border-line bg-panel-2/50 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Eyebrow>Verdict</Eyebrow>
+                    {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
+                  </div>
+                  <p className="text-sm text-fg">{verdict.rationale}</p>
+                </div>
+              )
+            )}
+            {canAdjudicate && verdict && (
+              <div
+                aria-label="adjudication"
+                className="rounded-lg border border-line bg-panel-2/30 p-4"
+              >
+                <Eyebrow>Adjudication</Eyebrow>
+                {adjudicated ? (
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
+                    <span className="text-dim">Final verdict (operator):</span>
+                    {typeof finalVerdict?.status === "string" &&
+                      isKnownStatus(finalVerdict.status) && (
+                        <StatusBadge status={finalVerdict.status} />
+                      )}
+                    {typeof finalVerdict?.rationale === "string" && finalVerdict.rationale && (
+                      <span>— {finalVerdict.rationale}</span>
+                    )}
                   </p>
-                  {overriding ? (
-                    <div className="mt-2 space-y-2">
-                      <select
-                        aria-label="override status"
-                        value={overrideStatus}
-                        onChange={(e) => {
-                          setOverrideStatus(e.target.value as VerdictStatus);
-                        }}
-                        className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                      >
-                        {VERDICT_STATUSES.map((s) => (
-                          <option key={s} value={s}>
-                            {STATUS_META[s].label}
-                          </option>
-                        ))}
-                      </select>
-                      <textarea
-                        aria-label="override rationale"
-                        value={overrideRationale}
-                        onChange={(e) => {
-                          setOverrideRationale(e.target.value);
-                        }}
-                        placeholder="Why you override the agent's verdict…"
-                        className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                        rows={2}
-                      />
-                      <div className="flex flex-wrap gap-2">
+                ) : (
+                  <>
+                    <p className="mt-1 text-xs text-dim">
+                      Accept the agent&rsquo;s verdict, or override it with your own determination.
+                    </p>
+                    {overriding ? (
+                      <div className="mt-2 space-y-2">
+                        <select
+                          aria-label="override status"
+                          value={overrideStatus}
+                          onChange={(e) => {
+                            setOverrideStatus(e.target.value as VerdictStatus);
+                          }}
+                          className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                        >
+                          {VERDICT_STATUSES.map((s) => (
+                            <option key={s} value={s}>
+                              {STATUS_META[s].label}
+                            </option>
+                          ))}
+                        </select>
+                        <textarea
+                          aria-label="override rationale"
+                          value={overrideRationale}
+                          onChange={(e) => {
+                            setOverrideRationale(e.target.value);
+                          }}
+                          placeholder="Why you override the agent's verdict…"
+                          className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                          rows={2}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="accent"
+                            disabled={adjudicateMutation.isPending}
+                            onClick={() => {
+                              adjudicateMutation.mutate({
+                                status: overrideStatus,
+                                rationale: overrideRationale,
+                              });
+                            }}
+                          >
+                            Submit override
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setOverriding(false);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
                         <Button
-                          variant="accent"
+                          variant="positive"
                           disabled={adjudicateMutation.isPending}
                           onClick={() => {
                             adjudicateMutation.mutate({
-                              status: overrideStatus,
-                              rationale: overrideRationale,
+                              status: verdict.status,
+                              rationale: verdict.rationale,
                             });
                           }}
                         >
-                          Submit override
+                          Accept
                         </Button>
                         <Button
                           variant="ghost"
                           onClick={() => {
-                            setOverriding(false);
+                            setOverriding(true);
                           }}
                         >
-                          Cancel
+                          Override…
                         </Button>
                       </div>
-                    </div>
+                    )}
+                    {adjudicateMutation.isError && (
+                      <p className="mt-2 text-xs text-danger">
+                        {errorMessage(adjudicateMutation.error)}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Current goal — the user-owned checklist the agent works to (FR-17 6b-ii). */}
+        <aside className="shrink-0 lg:w-[20rem]">
+          <Panel className="shrink-0">
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+              <Eyebrow>Current goal</Eyebrow>
+              <span className="font-mono text-[11px] text-faint">
+                {planSteps.length} {planSteps.length === 1 ? "step" : "steps"}
+              </span>
+            </div>
+            <div className="space-y-3 p-4">
+              {editingGoal ? (
+                <div className="space-y-2">
+                  <textarea
+                    aria-label="goal steps"
+                    value={goalDraft}
+                    onChange={(e) => {
+                      setGoalDraft(e.target.value);
+                    }}
+                    rows={4}
+                    className="w-full rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
+                    placeholder="One step per line…"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="accent"
+                      disabled={goalMutation.isPending}
+                      onClick={() => {
+                        const steps = goalDraft
+                          .split("\n")
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        goalMutation.mutate(steps);
+                        setEditingGoal(false);
+                      }}
+                    >
+                      Save goal
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingGoal(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {planSteps.length > 0 ? (
+                    <StepList steps={planSteps} />
                   ) : (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Button
-                        variant="positive"
-                        disabled={adjudicateMutation.isPending}
-                        onClick={() => {
-                          adjudicateMutation.mutate({
-                            status: verdict.status,
-                            rationale: verdict.rationale,
-                          });
-                        }}
-                      >
-                        Accept
-                      </Button>
+                    <p className="text-sm text-dim">No goal set yet.</p>
+                  )}
+                  {!sessionOver && (
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         variant="ghost"
                         onClick={() => {
-                          setOverriding(true);
+                          setGoalDraft(planSteps.join("\n"));
+                          setEditingGoal(true);
                         }}
                       >
-                        Override…
+                        Edit goal
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={regenerateGoalMutation.isPending}
+                        onClick={() => {
+                          regenerateGoalMutation.mutate();
+                        }}
+                      >
+                        Regenerate goal
                       </Button>
                     </div>
-                  )}
-                  {adjudicateMutation.isError && (
-                    <p className="mt-2 text-xs text-danger">
-                      {errorMessage(adjudicateMutation.error)}
-                    </p>
                   )}
                 </>
               )}
             </div>
-          )}
-        </div>
+          </Panel>
+        </aside>
       </div>
 
       {/* Terminal — docked at the bottom, collapsible, executed output only. */}
