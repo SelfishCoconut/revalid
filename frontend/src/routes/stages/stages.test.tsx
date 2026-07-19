@@ -3,14 +3,23 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as client from "../../api/client";
-import type { AgenticEvidence, Verdict } from "../../api/types";
+import type { AgenticEvidence, RetestSessionSummary, Verdict } from "../../api/types";
 import { renderStage, stageContext } from "../../test/stage";
 import { ExtractStage } from "./ExtractStage";
 import { GoalStage } from "./GoalStage";
+import { RetestStage } from "./RetestStage";
 import { StageRedirect } from "./StageRedirect";
 import { VerdictStage } from "./VerdictStage";
 
 vi.mock("../../api/client");
+// The console itself is exercised in RetestSession.test.tsx (WS machinery,
+// mutations, …); here we only need to know RetestStage picked the right
+// session and handed it the right id.
+vi.mock("../RetestSession", () => ({
+  RetestSession: ({ sessionId }: { sessionId: number }) => (
+    <div data-testid="retest-session-stub">session {sessionId}</div>
+  ),
+}));
 
 function verdict(): Verdict {
   const evidence: AgenticEvidence = {
@@ -51,11 +60,24 @@ describe("VerdictStage", () => {
   });
 });
 
-// RetestStage is being rewritten in Task 9 (FR-17 6b-iii-b Phase F — console as
-// the retest stage); its current implementation still imports the deleted batch
-// `usePlans` hook, so its suite is dropped here rather than skipped in place
-// (a `describe.skip` wrapper would still fail to load — the broken import is
-// resolved eagerly, before any skip logic runs). Task 9 re-adds it rewritten.
+describe("RetestStage", () => {
+  it("redirects to goal when the finding has no session", () => {
+    renderStage(<RetestStage />, stageContext({ currentStage: "goal", sessions: [] }));
+    expect(screen.queryByTestId("retest-session-stub")).not.toBeInTheDocument();
+  });
+
+  it("renders the console for the latest session", () => {
+    const s: RetestSessionSummary = {
+      id: 9,
+      finding_id: 7,
+      status: "thinking",
+      verdict_status: null,
+      created_at: "",
+    };
+    renderStage(<RetestStage />, stageContext({ sessions: [s], latestSession: s }));
+    expect(screen.getByTestId("retest-session-stub")).toHaveTextContent("session 9");
+  });
+});
 
 describe("GoalStage", () => {
   it("shows the generated draft and starts a seeded session", async () => {

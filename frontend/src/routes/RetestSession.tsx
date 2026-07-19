@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
 
 import {
   adjudicateSession,
@@ -20,6 +19,7 @@ import { RetestTerminal } from "../components/RetestTerminal";
 import { StatusBadge } from "../components/StatusBadge";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
+import { queryKeys } from "../hooks/queryKeys";
 import { useRetestSession } from "../hooks/useRetestSession";
 import { errorMessage } from "../lib/format";
 import {
@@ -150,8 +150,8 @@ function lastDecisionSeq(events: SessionEvent[]): number {
  * docked, collapsible terminal that shows only executed-command output. The
  * `/api` + WebSocket contract is unchanged from Slice 0; this is presentation.
  */
-export function RetestSession() {
-  const id = Number(useParams().id);
+export function RetestSession({ sessionId }: { sessionId: number }) {
+  const id = sessionId;
   const { events, status, verdict } = useRetestSession(id);
   const [terminalOpen, setTerminalOpen] = useState(true);
   const [input, setInput] = useState("");
@@ -186,7 +186,7 @@ export function RetestSession() {
   // *initial* free_launch seeds the derivation below. One fetch is enough — live
   // toggles arrive as `free_launch_changed` events, tracked by `currentFreeLaunch`.
   const { data: record } = useQuery({
-    queryKey: ["retest-session", id],
+    queryKey: queryKeys.retestSession(id),
     queryFn: () => getRetestSession(id),
   });
   const toggleMutation = useMutation({
