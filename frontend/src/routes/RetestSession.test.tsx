@@ -295,7 +295,7 @@ describe("RetestSession", () => {
     expect(screen.getByText(/2 lines/)).toBeInTheDocument();
   });
 
-  it("runs a !-prefixed console line as a manual operator command", async () => {
+  it("runs a command typed into the terminal prompt (agent observes it)", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "awaiting_command",
@@ -306,13 +306,15 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    await userEvent.type(screen.getByLabelText(/operator console input/i), "!whoami");
+    // No `!` prefix any more — commands go straight into the terminal's own prompt.
+    await userEvent.type(screen.getByLabelText(/terminal command input/i), "whoami");
     await userEvent.click(screen.getByRole("button", { name: /run/i }));
 
     expect(client.submitHumanCommand).toHaveBeenCalledWith(1, "whoami");
+    expect(client.submitMessage).not.toHaveBeenCalled();
   });
 
-  it("sends non-! text to the agent as a chat message", async () => {
+  it("sends composer text to the agent as a chat message", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "awaiting_command",
@@ -323,11 +325,47 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    await userEvent.type(screen.getByLabelText(/operator console input/i), "focus on login");
+    await userEvent.type(screen.getByLabelText(/message the agent/i), "focus on login");
     await userEvent.click(screen.getByRole("button", { name: /send/i }));
 
     expect(client.submitMessage).toHaveBeenCalledWith(1, "focus on login");
     expect(client.submitHumanCommand).not.toHaveBeenCalled();
+  });
+
+  it("restarts: ends this session and opens a fresh one seeded with the goal", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "plan_updated", payload: { steps: ["Check /admin"] } }],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.endRetestSession).mockResolvedValue({ status: "ended" });
+    vi.mocked(client.startRetestSession).mockResolvedValue({
+      id: 2,
+      finding_id: 1,
+      status: "starting",
+      model: "test",
+      verdict_status: null,
+      verdict_rationale: null,
+      free_launch: false,
+      max_steps: 8,
+      max_seconds: null,
+      events: [],
+    });
+
+    renderAt(1);
+
+    // Restart enables once the session record (carrying its finding id) has loaded.
+    const restart = await screen.findByRole("button", { name: /restart/i });
+    await waitFor(() => {
+      expect(restart).not.toBeDisabled();
+    });
+    await userEvent.click(restart);
+
+    expect(client.endRetestSession).toHaveBeenCalledWith(1);
+    await waitFor(() => {
+      expect(client.startRetestSession).toHaveBeenCalledWith(1, { initial_goal: ["Check /admin"] });
+    });
   });
 
   it("renders a human_message as an operator turn", () => {
@@ -343,7 +381,7 @@ describe("RetestSession", () => {
     expect(screen.getByText("focus on login")).toBeInTheDocument();
   });
 
-  it("disables the input once the session is over", () => {
+  it("disables the message composer once the session is over", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "concluded",
@@ -353,7 +391,7 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByLabelText(/operator console input/i)).toBeDisabled();
+    expect(screen.getByLabelText(/message the agent/i)).toBeDisabled();
   });
 
   it("shows operator commands in the docked terminal, marked apart from the agent's", () => {
@@ -376,7 +414,7 @@ describe("RetestSession", () => {
     expect(screen.getByText(/2 lines/)).toBeInTheDocument();
   });
 
-  it("disables the console input once the session is over", () => {
+  it("disables the terminal command prompt once the session is over", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "concluded",
@@ -386,7 +424,7 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByLabelText(/operator console input/i)).toBeDisabled();
+    expect(screen.getByLabelText(/terminal command input/i)).toBeDisabled();
   });
 
   it("shows the current guiding plan in the plan panel", () => {

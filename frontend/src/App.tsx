@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
 import { BrandMark } from "./components/BrandMark";
 import { FindingLayout } from "./components/FindingLayout";
@@ -32,6 +32,12 @@ function MenuIcon() {
 export function App() {
   const { theme, setTheme } = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The agentic retest console is a cockpit: it earns the full column width so the
+  // conversation, goal rail, and terminal aren't squeezed into the reading-width
+  // cap the rest of the app uses. Both entry points (the finding stage and the
+  // deep-link session route) get it.
+  const { pathname } = useLocation();
+  const wideRoute = pathname.endsWith("/retest") || pathname.startsWith("/retest-sessions/");
 
   // Sidebar links close the drawer via onNavigate; also close it on Escape.
   useEffect(() => {
@@ -71,7 +77,11 @@ export function App() {
           </NavLink>
         </header>
 
-        <main className="mx-auto w-full min-w-0 max-w-[64rem] flex-1 px-5 py-8">
+        <main
+          className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${
+            wideRoute ? "max-w-[100rem]" : "max-w-[64rem]"
+          }`}
+        >
           <Routes>
             <Route path="/" element={<ReportsOverview />} />
             <Route path="/new" element={<NewReport />} />

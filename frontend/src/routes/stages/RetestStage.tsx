@@ -9,5 +9,5 @@ export function RetestStage() {
   if (!latestSession) {
     return <Navigate to={`/findings/${String(findingId)}/goal`} replace />;
   }
-  return <RetestSession sessionId={latestSession.id} />;
+  return <RetestSession sessionId={latestSession.id} embedded />;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 
 import {
   adjudicateSession,
@@ -11,6 +12,7 @@ import {
   rejectCommand,
   setFreeLaunch,
   setSessionGoal,
+  startRetestSession,
   submitHumanCommand,
   submitMessage,
   type SessionEvent,
@@ -150,11 +152,22 @@ function lastDecisionSeq(events: SessionEvent[]): number {
  * docked, collapsible terminal that shows only executed-command output. The
  * `/api` + WebSocket contract is unchanged from Slice 0; this is presentation.
  */
-export function RetestSession({ sessionId }: { sessionId: number }) {
+export function RetestSession({
+  sessionId,
+  embedded = false,
+}: {
+  sessionId: number;
+  /** True when rendered inside the finding-stage wizard (its header + pipeline sit
+   * above), so the cockpit reserves more height than on the standalone route. */
+  embedded?: boolean;
+}) {
   const id = sessionId;
   const { events, status, verdict } = useRetestSession(id);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [terminalOpen, setTerminalOpen] = useState(true);
   const [input, setInput] = useState("");
+  const [command, setCommand] = useState("");
   const chatRef = useRef<HTMLDivElement>(null);
 
   // Each gate action is its own mutation so pending/error state stays scoped to
@@ -170,6 +183,21 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
   });
   const endMutation = useMutation({
     mutationFn: () => endRetestSession(id),
+  });
+  // Restart abandons this attempt and opens a fresh session for the same finding,
+  // seeded with the current goal so the operator keeps their framing. The old
+  // session is ended first to free its sandbox; then the finding's session list is
+  // refreshed and the view follows the new session (the finding stage renders its
+  // newest session).
+  const restartMutation = useMutation({
+    mutationFn: ({ findingId, goal }: { findingId: number; goal: string[] }) =>
+      endRetestSession(id).then(() =>
+        startRetestSession(findingId, goal.length > 0 ? { initial_goal: goal } : undefined),
+      ),
+    onSuccess: async (_fresh, { findingId }) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.findingSessions(findingId) });
+      navigate(`/findings/${String(findingId)}/retest`);
+    },
   });
   // The operator's own commands (`!`) run ungated in the same sandbox; separate
   // mutation so its pending/error state is independent of the gate buttons.
@@ -272,13 +300,14 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
   );
 
   const trimmed = input.trim();
-  const isCommand = trimmed.startsWith("!");
-  const commandBody = isCommand ? trimmed.slice(1).trim() : "";
+  const commandTrimmed = command.trim();
   const sessionOver = OVER_STATUSES.has(status);
-  // `!command` runs in the sandbox (Slice 2); plain text is a chat message to the
-  // agent (Slice 4). Both need non-empty content and a live session.
-  const hasContent = isCommand ? commandBody.length > 0 : trimmed.length > 0;
-  const canSubmit = hasContent && !sessionOver;
+  const findingId = record?.finding_id ?? null;
+  // The composer now sends chat messages only (Slice 4); operator commands live in
+  // the terminal's own prompt (they run in the sandbox and the agent observes them,
+  // Slice 2). Each needs non-empty content and a session that hasn't ended.
+  const canSendMessage = trimmed.length > 0 && !sessionOver;
+  const canRunCommand = commandTrimmed.length > 0 && !sessionOver;
 
   // Keep the newest turn in view as the transcript streams in. `scrollTop`
   // assignment is a no-op under jsdom, so tests need no scroll polyfill.
@@ -340,7 +369,11 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
   });
 
   return (
-    <div className="flex h-[calc(100dvh-9rem)] min-h-[28rem] flex-col gap-4">
+    <div
+      className={`flex min-h-[34rem] flex-col gap-3 ${
+        embedded ? "h-[calc(100dvh-20rem)]" : "h-[calc(100dvh-9rem)]"
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-baseline gap-3">
           <Eyebrow>Agentic retest session</Eyebrow>
@@ -367,6 +400,15 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
             </label>
             <Button
               variant="ghost"
+              disabled={findingId === null || restartMutation.isPending}
+              onClick={() => {
+                if (findingId !== null) restartMutation.mutate({ findingId, goal: planSteps });
+              }}
+            >
+              Restart
+            </Button>
+            <Button
+              variant="ghost"
               disabled={endMutation.isPending}
               onClick={() => {
                 endMutation.mutate();
@@ -385,6 +427,11 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
               {errorMessage(endMutation.error)}
             </p>
           )}
+          {restartMutation.isError && (
+            <p role="alert" className="text-sm text-danger-fg">
+              {errorMessage(restartMutation.error)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -397,7 +444,7 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
           aria-label="Agent conversation"
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          <div className="mx-auto flex max-w-none flex-col gap-3 pb-1">
+          <div className="mx-auto flex max-w-[68rem] flex-col gap-3 pb-1">
             {chatItems.length === 0 && !verdict && (
               <p className="text-sm text-dim">The agent is preparing its first step…</p>
             )}
@@ -530,7 +577,7 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
         </div>
 
         {/* Current goal — the user-owned checklist the agent works to (FR-17 6b-ii). */}
-        <aside className="shrink-0 lg:w-[20rem]">
+        <aside className="shrink-0 lg:w-[20rem] xl:w-[22rem]">
           <Panel className="shrink-0">
             <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
               <Eyebrow>Current goal</Eyebrow>
@@ -612,7 +659,46 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
         </aside>
       </div>
 
-      {/* Terminal — docked at the bottom, collapsible, executed output only. */}
+      {/* Composer — a chat message to the agent, read on its next turn (Slice 4). */}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!canSendMessage) return;
+          messageMutation.mutate(trimmed);
+          setInput("");
+        }}
+        className="shrink-0"
+      >
+        <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
+          <input
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+            }}
+            placeholder="Message the agent…"
+            disabled={sessionOver}
+            aria-label="Message the agent"
+            className="min-w-0 flex-1 bg-transparent text-[14px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
+          />
+          <Button type="submit" variant="accent" disabled={!canSendMessage}>
+            Send
+          </Button>
+        </div>
+        {!sessionOver && (
+          <p className="mt-1 px-1 text-[11px] text-faint">
+            Read on the agent&apos;s next turn — approve or reject a pending step to deliver it now.
+          </p>
+        )}
+        {messageMutation.isError && (
+          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
+            {errorMessage(messageMutation.error)}
+          </p>
+        )}
+      </form>
+
+      {/* Terminal — docked below the conversation: executed output plus your own
+          prompt. A command you run here executes once in the egress-locked sandbox
+          and the agent observes it on its next turn, as if it had run it itself. */}
       <Panel className="shrink-0">
         <button
           type="button"
@@ -631,58 +717,43 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
           </span>
         </button>
         {terminalOpen && (
-          <div className="p-3">
+          <div className="space-y-2 p-3">
             <RetestTerminal lines={terminalLines} />
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!canRunCommand) return;
+                humanCommandMutation.mutate(commandTrimmed);
+                setCommand("");
+              }}
+            >
+              <div className="flex items-center gap-2 rounded-md border border-line bg-ink/50 px-3 py-2 font-mono text-[13px]">
+                <span className="shrink-0 select-none text-iris-fg">operator$</span>
+                <input
+                  value={command}
+                  onChange={(event) => {
+                    setCommand(event.target.value);
+                  }}
+                  placeholder={
+                    sessionOver ? "sandbox closed" : "run a command — the agent reads it as its own"
+                  }
+                  disabled={sessionOver}
+                  aria-label="Terminal command input"
+                  className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-faint disabled:opacity-45"
+                />
+                <Button type="submit" variant="ghost" disabled={!canRunCommand}>
+                  Run
+                </Button>
+              </div>
+              {humanCommandMutation.isError && (
+                <p role="alert" className="mt-1 text-sm text-danger-fg">
+                  {errorMessage(humanCommandMutation.error)}
+                </p>
+              )}
+            </form>
           </div>
         )}
       </Panel>
-
-      {/* Operator console: plain text messages the agent; `!<command>` runs it. */}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSubmit) return;
-          if (isCommand) humanCommandMutation.mutate(commandBody);
-          else messageMutation.mutate(trimmed);
-          setInput("");
-        }}
-        className="shrink-0"
-      >
-        <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
-          <input
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-            }}
-            placeholder="Message the agent — or !command to run it in the sandbox"
-            disabled={sessionOver}
-            aria-label="Operator console input"
-            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
-          />
-          <Button type="submit" variant="ghost" disabled={!canSubmit}>
-            {isCommand ? "Run" : "Send"}
-          </Button>
-        </div>
-        {!sessionOver && (
-          <p className="mt-1 px-1 text-[11px] text-faint">
-            {isCommand ? (
-              <>Runs once in the egress-locked sandbox.</>
-            ) : (
-              <>Messages are read on the agent&apos;s next turn — approve or reject a pending step to deliver now.</>
-            )}
-          </p>
-        )}
-        {humanCommandMutation.isError && (
-          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
-            {errorMessage(humanCommandMutation.error)}
-          </p>
-        )}
-        {messageMutation.isError && (
-          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
-            {errorMessage(messageMutation.error)}
-          </p>
-        )}
-      </form>
     </div>
   );
 }
