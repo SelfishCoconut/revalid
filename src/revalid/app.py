@@ -73,11 +73,17 @@ from revalid.plan import (
     build_goal_agent,
     generate_goal,
 )
-from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
+from revalid.retest_agent import (
+    ConcludeOutput,
+    RetestSessionDeps,
+    build_qa_agent,
+    build_retest_agent,
+)
 from revalid.retest_session import (
     SessionRegistry,
     _fail,
     adjudicate_verdict,
+    answer_operator_question,
     append_event,
     apply_decision,
     conclude_session,
@@ -332,6 +338,11 @@ class StartSessionRequest(BaseModel):
     # A user-owned goal drafted before the session (FR-17 6b-iii-b): when present,
     # the session seeds it verbatim instead of generating one at start.
     initial_goal: list[str] | None = None
+    # The retest scope — the exact target URL(s) the agent may hit (FR-17). Set at
+    # launch (reachability is fixed when the sandbox is provisioned), so there is no
+    # live-edit path; changing scope means a fresh session. Defaults to the finding's
+    # affected endpoints when omitted.
+    target_endpoints: list[str] | None = None
 
 
 class FreeLaunchRequest(BaseModel):
@@ -466,6 +477,11 @@ def get_retest_agent(settings: SettingsDep) -> RetestAgent:
     return build_retest_agent(build_model(settings))
 
 
+def get_qa_agent(settings: SettingsDep) -> Agent[None, str]:
+    """Yield the FR-17 chat Q&A agent built from the persisted setting (ADR-0021)."""
+    return build_qa_agent(build_model(settings))
+
+
 def get_sandbox_factory() -> SandboxFactory:
     """Yield the production sandbox factory: a fresh egress-locked Docker sandbox per session.
 
@@ -482,6 +498,7 @@ def get_sandbox_factory() -> SandboxFactory:
 GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
+QaAgentDep = Annotated[Agent[None, str], Depends(get_qa_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
 
 
@@ -546,6 +563,21 @@ def _current_or_404(session: Session, finding_id: int) -> FindingVersionRecord:
     return version
 
 
+def _session_finding(session: Session, session_id: int) -> Finding | None:
+    """Return the current finding for a session, or ``None`` if unavailable (FR-17).
+
+    Gives the chat Q&A its context. Tolerant of a missing session or finding version
+    so sending a message never 404s — the reply is simply skipped when there is no
+    finding to reason from.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None:
+        return None
+    with contextlib.suppress(HTTPException):
+        return _current_or_404(session, record.finding_id).to_domain()
+    return None
+
+
 def _finding_out(identity: FindingRecord, version: FindingVersionRecord) -> FindingOut:
     """Assemble the API finding view from its identity + current version (FR-16)."""
     return FindingOut(
@@ -577,6 +609,7 @@ def run_first_step(
     finding: Finding,
     goal_agent: Agent[None, GeneratedGoal],
     initial_goal: tuple[str, ...] | None = None,
+    target_endpoints: tuple[str, ...] | None = None,
 ) -> None:
     """Build the sandbox and run the retest agent's first step (FR-17 background task).
 
@@ -606,6 +639,8 @@ def run_first_step(
         goal_agent: The FR-17 goal agent (a stand-in model in tests).
         initial_goal: A pre-start goal drafted by the user (FR-17 6b-iii-b); when
             non-empty it is seeded verbatim and generation is skipped.
+        target_endpoints: The launch-time retest scope (FR-17) — the exact URL(s)
+            the agent may hit; defaults to the finding's endpoints when omitted.
     """
     with sessions() as session:
         sandbox: Sandbox | None = None
@@ -613,6 +648,14 @@ def run_first_step(
             sandbox = make_sandbox(session_id)
             record = session.get(RetestSessionRecord, session_id)
             free_launch = record.free_launch if record else False
+            # Scope is set once, at launch: the operator's endpoints when supplied,
+            # else the finding's. It's recorded (TARGET_SET) for the read-only cockpit
+            # display and injected authoritatively into the prompt.
+            endpoints = tuple(target_endpoints) if target_endpoints else finding.affected_endpoints
+            if endpoints:
+                append_event(
+                    session, session_id, SessionEventKind.TARGET_SET, {"endpoints": list(endpoints)}
+                )
             goal: tuple[str, ...] = tuple(initial_goal) if initial_goal else ()
             if not goal:  # no pre-start draft → generate (best-effort; never blocks)
                 with contextlib.suppress(Exception):
@@ -627,7 +670,7 @@ def run_first_step(
                 session_id,
                 agent,
                 sandbox,
-                _goal_prompt(goal, finding),
+                _target_preamble(endpoints) + _goal_prompt(goal, finding),
                 free_launch=free_launch,
             )
         except Exception as exc:  # broad on purpose: no failure may strand the session
@@ -706,17 +749,37 @@ def run_message(
     registry: SessionRegistry,
     session_id: int,
     text: str,
+    qa_agent: Agent[None, str],
+    finding: Finding | None,
 ) -> None:
-    """Queue an operator chat message for the agent (FR-17 Slice 4 background task).
+    """Queue an operator chat message and answer it immediately (FR-17 background task).
+
+    Two things happen, both additive: the message is buffered for the main agent's
+    next turn (steering, as before), AND the operator gets an immediate chat reply
+    from a read-only Q&A over the transcript. The reply is decoupled from the
+    deferred-command loop, so asking a question never disturbs a pending command.
+    Best-effort — a Q&A failure never strands the (already-recorded) message.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
         registry: The process-local live-session registry.
         session_id: The retest session to message.
         text: The exact operator message.
+        qa_agent: The prose Q&A agent (a stand-in model in tests).
+        finding: The session's finding, for Q&A context; ``None`` skips the reply.
     """
     with sessions() as session:
         submit_message(session, registry, session_id, text)
+        # Only reply when the message was actually recorded (session live) and we
+        # have finding context; answer_operator_question reads events + finding and
+        # appends an agent_message that the transcript stream surfaces.
+        if finding is not None and registry.get(session_id) is not None:
+            with contextlib.suppress(Exception):
+                answer = answer_operator_question(qa_agent, session, session_id, finding, text)
+                if answer:
+                    append_event(
+                        session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": answer}
+                    )
 
 
 def run_free_launch(
@@ -803,6 +866,22 @@ def _goal_prompt(goal: tuple[str, ...], finding: Finding) -> str:
         return base
     steps = "\n".join(f"- {s}" for s in goal)
     return f"Current goal:\n{steps}\n\n{base}"
+
+
+def _target_preamble(endpoints: tuple[str, ...]) -> str:
+    """An authoritative scope line for the agent: the exact target URLs to hit (FR-17).
+
+    Prepended to the prompt at launch so a weaker model cannot invent or substitute
+    a hostname — it must send every request to one of these operator-set URLs.
+    Empty string when no scope was set, so callers can prepend unconditionally.
+    """
+    if not endpoints:
+        return ""
+    urls = "\n".join(f"- {e}" for e in endpoints)
+    return (
+        "Target endpoints — send every request ONLY to these exact URLs; do not "
+        f"invent, guess, or substitute a hostname:\n{urls}\n\n"
+    )
 
 
 def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1128,6 +1207,7 @@ def _register_session_routes(
             finding,
             goal_agent,
             tuple(cfg.initial_goal) if cfg.initial_goal else None,
+            tuple(cfg.target_endpoints) if cfg.target_endpoints else None,
         )
         return RetestSessionOut.from_record(record, [])
 
@@ -1172,15 +1252,28 @@ def _register_session_routes(
 
     @router.post("/retest-sessions/{session_id}/message", status_code=202)
     def send_message(
-        session_id: int, body: MessageRequest, background: BackgroundTasks
+        session_id: int,
+        body: MessageRequest,
+        background: BackgroundTasks,
+        session: SessionDep,
+        qa_agent: QaAgentDep,
     ) -> dict[str, str]:
-        """Queue an operator chat message to the agent (FR-17 Slice 4).
+        """Queue an operator chat message and trigger an immediate agent reply (FR-17).
 
-        Recorded on the transcript and delivered to the agent as a user turn on
-        its next approve/reject (pure-queue steering). A no-op if the session is
-        no longer live.
+        The message is recorded and buffered for the agent's next turn (steering) and,
+        additively, answered right away by a read-only Q&A over the transcript — so a
+        question ("what are we retesting?") gets a reply without an approve/reject. A
+        no-op if the session is no longer live.
         """
-        background.add_task(run_message, sessions, registry, session_id, body.text)
+        background.add_task(
+            run_message,
+            sessions,
+            registry,
+            session_id,
+            body.text,
+            qa_agent,
+            _session_finding(session, session_id),
+        )
         return {"status": "accepted"}
 
     @router.post("/retest-sessions/{session_id}/end", status_code=202)

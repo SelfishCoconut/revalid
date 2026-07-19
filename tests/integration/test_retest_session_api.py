@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from tests._retest_helpers import (
     script_conclude_inconclusive,
@@ -25,10 +25,16 @@ from tests._retest_helpers import (
     script_run_then_conclude_noting_message,
 )
 
-from revalid.app import create_app, get_goal_agent, get_retest_agent, get_sandbox_factory
+from revalid.app import (
+    create_app,
+    get_goal_agent,
+    get_qa_agent,
+    get_retest_agent,
+    get_sandbox_factory,
+)
 from revalid.db import IN_MEMORY, create_db_engine
 from revalid.plan import build_goal_agent
-from revalid.retest_agent import build_retest_agent
+from revalid.retest_agent import build_qa_agent, build_retest_agent
 from revalid.sandbox import CommandResult, FakeSandbox
 
 pytestmark = pytest.mark.integration
@@ -100,6 +106,53 @@ def test_start_session_seeds_supplied_initial_goal() -> None:
             "Confirm the login endpoint",
             "Retry the documented bypass",
         ]
+
+
+def test_start_session_records_target_scope() -> None:
+    """A start body with target_endpoints records them as a launch-time target_set event (FR-17)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session",
+            json={"target_endpoints": ["http://revalid-juice-shop:3000/rest/user/login"]},
+        )
+        assert started.status_code == 202
+        sid = started.json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        scope = next(e for e in state["events"] if e["kind"] == "target_set")
+        assert scope["payload"]["endpoints"] == ["http://revalid-juice-shop:3000/rest/user/login"]
+
+
+def test_message_gets_immediate_agent_reply() -> None:
+    """A chat message triggers an immediate agent_message reply from the Q&A agent (FR-17).
+
+    The message is also buffered for the main loop (steering), but the reply is
+    additive and arrives without an approve/reject — proving the decoupled Q&A path.
+    """
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        FunctionModel(script_run_then_conclude)
+    )
+    _override_goal_agent(app)
+
+    def qa_reply(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[TextPart(content="We are retesting the login SQL injection.")])
+
+    app.dependency_overrides[get_qa_agent] = lambda: build_qa_agent(FunctionModel(qa_reply))
+    box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    with TestClient(app) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        # The session is paused awaiting the proposed command (live); a question now
+        # gets an immediate reply without approving/rejecting the pending command.
+        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "what are we retesting?"})
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "awaiting_command"  # the pending command is undisturbed
+        kinds = [e["kind"] for e in state["events"]]
+        assert "human_message" in kinds
+        reply = next(e for e in state["events"] if e["kind"] == "agent_message")
+        assert "retesting" in reply["payload"]["text"].lower()
 
 
 def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:

@@ -165,3 +165,34 @@ def build_retest_agent(
         return "Delivered to the operator."
 
     return agent
+
+
+_QA_INSTRUCTIONS = """\
+You are the penetration-test retester, replying in chat to the operator's question \
+about the retest in progress. Answer concisely and specifically, using only the \
+context you are given (the finding, the target scope, the current goal, and what has \
+happened so far). If the answer is not in the context, say so briefly. This is a \
+chat reply only — do NOT propose or run commands here.
+"""
+
+
+def build_qa_agent(model: Model | KnownModelName | str | None = None) -> Agent[None, str]:
+    """Build a lightweight prose Q&A agent for answering operator questions (FR-17).
+
+    Decoupled from the retest loop: it runs no tools and never touches the deferred
+    command state, so it can answer at any time — including while the main agent is
+    mid-turn — from a read-only view of the transcript.
+
+    Args:
+        model: A Pydantic AI model instance or name; the configured backend when
+            omitted (tests pass ``TestModel``/``FunctionModel``).
+
+    Returns:
+        An agent whose output is the plain-text answer to show the operator.
+    """
+    return Agent(
+        model if model is not None else resolve_model(),
+        output_type=str,
+        instructions=_QA_INSTRUCTIONS,
+        defer_model_check=True,
+    )
