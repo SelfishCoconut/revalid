@@ -913,14 +913,33 @@ def test_set_goal_records_plan_updated_and_queues_for_agent() -> None:
     assert updates[-1]["payload"] == {"steps": ["Check the login endpoint", "Confirm the token"]}
 
 
-def test_set_goal_is_noop_when_not_live() -> None:
+def test_set_goal_updates_panel_even_when_not_live() -> None:
+    """A non-terminal session with no live agent (e.g. after a backend restart) still
+    records the plan_updated event so the panel reflects the edit — it just has no
+    live agent to queue for."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        rs.set_goal(session, registry, s.id, ["x"])  # not live -> no raise, no event
-        assert rs.load_events_after(session, s.id, 0) == []
+        rs.set_goal(session, registry, s.id, ["x"])  # not live -> no queue, but panel updates
+        assert registry.get(s.id) is None
+        events = rs.load_events_after(session, s.id, 0)
+    updates = [e for e in events if e["kind"] == SessionEventKind.PLAN_UPDATED.value]
+    assert updates[-1]["payload"] == {"steps": ["x"]}
+
+
+def test_set_goal_is_noop_when_terminal() -> None:
+    """A terminal session's goal edit is a no-op — it can no longer be steered."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.set_status(session, s.id, RetestSessionStatus.ENDED)
+        before = rs.load_events_after(session, s.id, 0)
+        rs.set_goal(session, registry, s.id, ["x"])  # terminal -> no raise, no event
+        assert rs.load_events_after(session, s.id, 0) == before
 
 
 def test_queued_goal_is_injected_into_the_next_turn() -> None:

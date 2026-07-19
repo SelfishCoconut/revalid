@@ -905,13 +905,20 @@ def submit_message(session: Session, registry: SessionRegistry, session_id: int,
 def set_goal(
     session: Session, registry: SessionRegistry, session_id: int, steps: list[str]
 ) -> None:
-    """Set the user-owned goal on a live session (FR-17 6b-ii).
+    """Set the user-owned goal on a non-terminal session (FR-17 6b-ii).
 
-    Appends a ``plan_updated`` transcript event (so the "Current goal" panel updates
-    and it replays) and queues the goal on the live session; it is delivered to the
-    agent as a first-class user turn on the next approve/reject
-    (:func:`_resume_with_decision`) — pure-queue, never interrupting a run. A no-op
-    if the session is not live (terminal / never started).
+    Appends a ``plan_updated`` transcript event so the "Current goal" panel reflects
+    the edit (and it replays); when a live agent is attached, the goal is also queued
+    and delivered to it as a first-class user turn on the next approve/reject
+    (:func:`_resume_with_decision`) — pure-queue, never interrupting a run.
+
+    The event is emitted for **any** non-terminal session, live or not: the live
+    orchestration state is process-local, so a session that outlives a backend
+    restart is non-terminal yet has no live agent. Gating the panel update on
+    liveness (the prior behaviour) made such an edit silently vanish — the endpoint
+    still returned 202 but the panel kept the old steps. Emitting regardless keeps
+    the edit visible; queuing stays conditional on a live agent existing to receive
+    it. A no-op only when the session is unknown or already terminal.
 
     Args:
         session: Active DB session for this call.
@@ -919,11 +926,13 @@ def set_goal(
         session_id: The retest session whose goal to set.
         steps: The operator's goal steps (replaces the whole goal).
     """
-    live = registry.get(session_id)
-    if live is None:
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or is_terminal(RetestSessionStatus(record.status)):
         return
     append_event(session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": list(steps)})
-    live.set_pending_goal(steps)
+    live = registry.get(session_id)
+    if live is not None:
+        live.set_pending_goal(steps)
 
 
 def end_session(session: Session, registry: SessionRegistry, session_id: int) -> None:

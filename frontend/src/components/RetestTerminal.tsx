@@ -57,6 +57,6 @@ export function RetestTerminal({ lines }: { lines: string[] }) {
   }, [lines]);
 
   return (
-    <div ref={host} data-testid="retest-terminal" className="h-80 overflow-hidden rounded-md" />
+    <div ref={host} data-testid="retest-terminal" className="h-52 overflow-hidden rounded-md" />
   );
 }

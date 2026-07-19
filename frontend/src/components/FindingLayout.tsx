@@ -33,7 +33,10 @@ export function FindingLayout() {
   const sessionsQuery = useFindingSessions(findingId);
   const verdicts = useVerdicts();
 
-  if (findings.isPending) {
+  // Wait for the sessions + verdicts too: the stage router below decides reach
+  // from them, so rendering the outlet before they load would (e.g.) bounce a
+  // deep link to /retest onto the goal stage until the session list arrives.
+  if (findings.isPending || sessionsQuery.isPending || verdicts.isPending) {
     return <Spinner label="Loading finding" />;
   }
   if (findings.isError) {
