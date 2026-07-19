@@ -312,6 +312,9 @@ class StartSessionRequest(BaseModel):
     free_launch: bool = False
     max_steps: int = Field(default=8, ge=1)
     max_seconds: int | None = Field(default=None, ge=1)
+    # A user-owned goal drafted before the session (FR-17 6b-iii-b): when present,
+    # the session seeds it verbatim instead of generating one at start.
+    initial_goal: list[str] | None = None
 
 
 class FreeLaunchRequest(BaseModel):
@@ -543,6 +546,7 @@ def run_first_step(
     make_sandbox: SandboxFactory,
     finding: Finding,
     goal_agent: Agent[None, GeneratedGoal],
+    initial_goal: tuple[str, ...] | None = None,
 ) -> None:
     """Build the sandbox and run the retest agent's first step (FR-17 background task).
 
@@ -555,10 +559,12 @@ def run_first_step(
     failure the sandbox (if one was created) is best-effort torn down and the
     session is settled to ``error`` — never stranded in ``starting``.
 
-    It also **seeds the goal** (FR-17 6b-ii): the goal agent generates a generic
-    retest goal, which is emitted as the initial ``plan_updated`` (the "Current
-    goal" panel) and prepended to the agent's prompt. Goal generation is
-    best-effort — a failure degrades to an empty goal, never blocking start.
+    It also **seeds the goal** (FR-17 6b-ii): a caller-supplied ``initial_goal``
+    (a goal drafted before the session started, FR-17 6b-iii-b) is used verbatim;
+    otherwise the goal agent generates a generic retest goal. Either way the
+    result is emitted as the initial ``plan_updated`` (the "Current goal" panel)
+    and prepended to the agent's prompt. Goal generation is best-effort — a
+    failure degrades to an empty goal, never blocking start.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -568,6 +574,8 @@ def run_first_step(
         make_sandbox: The session-scoped sandbox factory.
         finding: The finding to retest — the agent's goal is derived from it.
         goal_agent: The FR-17 goal agent (a stand-in model in tests).
+        initial_goal: A pre-start goal drafted by the user (FR-17 6b-iii-b); when
+            non-empty it is seeded verbatim and generation is skipped.
     """
     with sessions() as session:
         sandbox: Sandbox | None = None
@@ -577,9 +585,10 @@ def run_first_step(
             free_launch = record.free_launch if record else False
             max_steps = record.max_steps if record else 8
             max_seconds = float(record.max_seconds) if record and record.max_seconds else None
-            goal: tuple[str, ...] = ()
-            with contextlib.suppress(Exception):  # goal gen is best-effort; never blocks start
-                goal = generate_goal(goal_agent, finding)
+            goal: tuple[str, ...] = tuple(initial_goal) if initial_goal else ()
+            if not goal:  # no pre-start draft → generate (best-effort; never blocks)
+                with contextlib.suppress(Exception):
+                    goal = generate_goal(goal_agent, finding)
             if goal:
                 append_event(
                     session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": list(goal)}
@@ -1018,7 +1027,15 @@ def _register_session_routes(
             max_seconds=cfg.max_seconds,
         )
         background.add_task(
-            run_first_step, sessions, registry, record.id, agent, make_sandbox, finding, goal_agent
+            run_first_step,
+            sessions,
+            registry,
+            record.id,
+            agent,
+            make_sandbox,
+            finding,
+            goal_agent,
+            tuple(cfg.initial_goal) if cfg.initial_goal else None,
         )
         return RetestSessionOut.from_record(record, [])
 

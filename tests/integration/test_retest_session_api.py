@@ -80,6 +80,26 @@ def test_session_start_seeds_a_goal() -> None:
         assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
+def test_start_session_seeds_supplied_initial_goal() -> None:
+    """A start body with initial_goal seeds that goal verbatim — no generation (6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session",
+            json={"initial_goal": ["Confirm the login endpoint", "Retry the documented bypass"]},
+        )
+        assert started.status_code == 202
+        sid = started.json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        goal = next(e for e in state["events"] if e["kind"] == "plan_updated")
+        # Verbatim supplied steps, not the stand-in goal agent's _GOAL_STEPS —
+        # proves generation was skipped.
+        assert goal["payload"]["steps"] == [
+            "Confirm the login endpoint",
+            "Retry the documented bypass",
+        ]
+
+
 def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
     """A goal-generation failure degrades to an empty goal without blocking start (6b-ii)."""
     from pydantic_ai.exceptions import UnexpectedModelBehavior
