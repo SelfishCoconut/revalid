@@ -17,8 +17,6 @@ never stops proposing commands.
 from __future__ import annotations
 
 import threading
-import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -73,7 +71,6 @@ def create_session(
     model: str,
     free_launch: bool = False,
     max_steps: int = 8,
-    max_seconds: int | None = None,
 ) -> RetestSessionRecord:
     """Insert a ``starting`` session row and return it.
 
@@ -83,9 +80,8 @@ def create_session(
         model: The resolved LLM model string driving the agent.
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (plan changes stay gated regardless). FR-17 Slice 5.
-        max_steps: Step budget — commands approved before force-conclude.
-        max_seconds: Wall-clock budget in seconds, enforced only in free-launch
-            mode; ``None`` means no time bound.
+        max_steps: Step budget — approved commands before the session pauses for
+            operator guidance (ADR-0034); the operator can raise it and continue.
     """
     record = RetestSessionRecord(
         finding_id=finding_id,
@@ -93,7 +89,6 @@ def create_session(
         model=model,
         free_launch=free_launch,
         max_steps=max_steps,
-        max_seconds=max_seconds,
     )
     session.add(record)
     session.commit()
@@ -184,9 +179,15 @@ def _build_agentic_evidence(session: Session, session_id: int, rationale: str) -
 
 
 def record_verdict(
-    session: Session, session_id: int, status: VerdictStatus, rationale: str
+    session: Session,
+    session_id: int,
+    status: VerdictStatus,
+    rationale: str,
+    *,
+    actor: str = "agent",
+    reason_code: str = "agentic_conclusion",
 ) -> None:
-    """Persist the agent verdict on the session row + its transcript events.
+    """Persist a determination on the session row + its transcript events.
 
     Appends the ``VERDICT`` event, then a ``STATE_CHANGE`` event to
     ``concluded``, BOTH before committing the terminal row (event-before-
@@ -200,11 +201,11 @@ def record_verdict(
 
     The ``STATE_CHANGE`` event is required because the frontend derives the
     session's displayed status only from the latest such event, not from
-    polling the row directly — without it, a normal conclude would leave the
-    UI showing the pre-verdict status forever. The budget-exhaustion caller
-    (``apply_decision``) calls this and then ``_mark_given_up``, which appends
-    its own ``STATE_CHANGE`` to ``given_up`` right after; the latest one wins,
-    so that path correctly ends up ``given_up`` rather than ``concluded``.
+    polling the row directly — without it, a conclude would leave the UI showing
+    the pre-verdict status forever. Both terminal producers route here: the agent
+    concluding ``fixed``/``still_open`` (``actor="agent"``) and the operator
+    manually concluding a paused session (``actor="operator"``, the only path that
+    writes ``inconclusive`` under ADR-0034).
     """
     record = session.get(RetestSessionRecord, session_id)
     if record is None:
@@ -225,18 +226,18 @@ def record_verdict(
     record.verdict_status = status.value
     record.verdict_rationale = rationale
     record.ended_at = func.now()
-    # FR-09/Slice 6a: the agent's conclusion becomes a queryable agentic verdict
-    # (actor="agent"), so a session's outcome reaches the `verdicts` table, the
-    # FR-10 audit, and the FR-12 export with no human action. The give-up caller
-    # routes through here too, so a budget give-up persists an inconclusive one.
+    # FR-09/Slice 6a: the conclusion becomes a queryable agentic verdict so a
+    # session's outcome reaches the `verdicts` table, the FR-10 audit, and the
+    # FR-12 export — the agent's own (actor="agent") with no human action, or the
+    # operator's manual conclude (actor="operator").
     session.add(
         VerdictRecord.agentic(
             finding_id=record.finding_id,
             session_id=session_id,
             status=status,
             rationale=rationale,
-            actor="agent",
-            reason_code="agentic_conclusion",
+            actor=actor,
+            reason_code=reason_code,
             evidence=_build_agentic_evidence(session, session_id, rationale).model_dump(),
         )
     )
@@ -328,12 +329,10 @@ class LiveSession:
     #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
     #: ``set_free_launch``; the free-launch loop lives in ``_drive_auto``.
     free_launch: bool = False
-    #: Wall-clock budget in seconds (free-launch only); ``None`` = no time bound.
-    max_seconds: float | None = None
-    #: The wall-clock budget's origin, stamped by ``start_and_step`` from its
-    #: injected ``clock`` (``time.monotonic`` in production). The default is a
-    #: safe fallback for a directly-constructed live session.
-    started_at: float = field(default_factory=time.monotonic)
+    #: Paused for operator guidance (ADR-0034): a step budget was reached or the
+    #: agent handed back. Set by ``_pause_for_guidance``, cleared by
+    #: ``continue_session``; the free-launch loop stops while it is ``True``.
+    awaiting_guidance: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     #: Manual operator commands (`!`) run since the agent's last turn, buffered
     #: here and surfaced to the agent on its next turn so it observes what the
@@ -447,14 +446,13 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
     )
 
 
-def _emit_proposal(
-    session: Session, session_id: int, live: LiveSession, call: Any
-) -> RetestSessionStatus:
-    """Record the agent's proposed command and return the awaiting status.
+def _emit_proposal(session: Session, session_id: int, live: LiveSession, call: Any) -> None:
+    """Record the agent's proposed command and mark it pending.
 
     The gate now only ever carries a ``run_command`` (the agent's ``set_plan``
-    was removed in FR-17 6b-ii): a proposal is always a command awaiting human
-    approval.
+    was removed in FR-17 6b-ii): a proposal is always a command awaiting a
+    decision. The caller sets the status — ``awaiting_command`` normally, or
+    ``needs_guidance`` when the step budget is spent (:func:`_dispatch_output`).
     """
     args = call.args_as_dict()
     live.pending_call_id = call.tool_call_id
@@ -468,7 +466,6 @@ def _emit_proposal(
             "tool_call_id": call.tool_call_id,
         },
     )
-    return RetestSessionStatus.AWAITING_COMMAND
 
 
 def _dispatch_output(
@@ -491,11 +488,43 @@ def _dispatch_output(
     live.messages = result.all_messages()
     output = result.output
     if isinstance(output, DeferredToolRequests) and output.approvals:
-        awaiting = _emit_proposal(session, session_id, live, output.approvals[0])
-        set_status(session, session_id, awaiting)
+        _emit_proposal(session, session_id, live, output.approvals[0])
+        # Gate on the step budget: if it is spent, pause and ask the operator
+        # instead of soliciting another approval. The command stays pending; its
+        # gate re-opens once the operator raises the budget (continue_session).
+        if live.step_count >= live.max_steps:
+            _pause_for_guidance(
+                session, registry, session_id, f"Reached the {live.max_steps}-command budget."
+            )
+        else:
+            set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
     elif isinstance(output, ConcludeOutput):
-        record_verdict(session, session_id, output.status, output.rationale)
-        _teardown(registry, session_id)
+        if output.status is VerdictStatus.INCONCLUSIVE:
+            # The agent hands back rather than terminating: it has exhausted the
+            # options it can think of and asks the operator to steer or conclude
+            # (ADR-0034). No verdict is written; the sandbox stays alive.
+            _pause_for_guidance(session, registry, session_id, output.rationale)
+        else:
+            record_verdict(session, session_id, output.status, output.rationale)
+            _teardown(registry, session_id)
+
+
+def _pause_for_guidance(
+    session: Session, registry: SessionRegistry, session_id: int, reason: str
+) -> None:
+    """Pause a session for operator guidance (ADR-0034): no verdict, sandbox kept alive.
+
+    Records a ``needs_guidance`` event carrying the human-readable ``reason`` and
+    moves the session to the non-terminal ``NEEDS_GUIDANCE`` state, so the SPA
+    shows a pause banner (Keep going / Conclude) while the operator can still run
+    commands and steer via chat. The live session is retained (its sandbox is not
+    torn down); the free-launch loop halts on ``awaiting_guidance``.
+    """
+    append_event(session, session_id, SessionEventKind.NEEDS_GUIDANCE, {"reason": reason})
+    set_status(session, session_id, RetestSessionStatus.NEEDS_GUIDANCE)
+    live = registry.get(session_id)
+    if live is not None:
+        live.awaiting_guidance = True
 
 
 def _teardown(registry: SessionRegistry, session_id: int) -> None:
@@ -516,8 +545,6 @@ def start_and_step(
     *,
     max_steps: int = 8,
     free_launch: bool = False,
-    max_seconds: float | None = None,
-    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Start the sandbox and run the retest agent's first step.
 
@@ -529,24 +556,13 @@ def start_and_step(
         agent: The built retest agent (Task 4).
         sandbox: The not-yet-started sandbox for this session.
         finding_prompt: The user prompt describing the finding to retest.
-        max_steps: Maximum number of approved commands before the session is
-            force-concluded ``inconclusive`` (the budget backstop).
+        max_steps: Approved commands before the session pauses for operator
+            guidance (ADR-0034); the operator can raise it and continue.
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (FR-17 Slice 5). Plan changes stay gated regardless.
-        max_seconds: Wall-clock budget in seconds (free-launch only); ``None`` =
-            no time bound.
-        clock: Monotonic clock stamping the wall-clock budget's origin and used
-            by the free-launch loop's budget check (injectable for tests).
     """
     sandbox.start()
-    live = LiveSession(
-        agent=agent,
-        sandbox=sandbox,
-        max_steps=max_steps,
-        free_launch=free_launch,
-        max_seconds=max_seconds,
-        started_at=clock(),
-    )
+    live = LiveSession(agent=agent, sandbox=sandbox, max_steps=max_steps, free_launch=free_launch)
     registry.put(session_id, live)
     set_status(session, session_id, RetestSessionStatus.STARTING)
     deps = _make_deps(session, session_id, live)
@@ -557,38 +573,7 @@ def start_and_step(
         return
     _dispatch_output(session, registry, session_id, result)
     # In free-launch, drive the auto-approve loop from here; gated mode no-ops.
-    _drive_auto(session, registry, session_id, clock=clock)
-
-
-def _step_budget_exhausted(live: LiveSession) -> bool:
-    """Count one more approved command and report whether the budget is now exceeded."""
-    live.step_count += 1
-    return live.step_count > live.max_steps
-
-
-def _time_budget_exhausted(live: LiveSession, clock: Callable[[], float]) -> bool:
-    """Report whether a free-launch session has exceeded its wall-clock budget.
-
-    Checked only at step boundaries (the orchestrator holds control between agent
-    turns, never mid-turn) and only in free-launch mode — in gated mode the
-    elapsed time would include human think-time and trip falsely. ``None``
-    ``max_seconds`` means no time bound.
-    """
-    if live.max_seconds is None:
-        return False
-    return clock() - live.started_at > live.max_seconds
-
-
-def _give_up(session: Session, registry: SessionRegistry, session_id: int, reason: str) -> None:
-    """Force-conclude a session ``inconclusive`` with a give-up ``reason`` and tear down.
-
-    The shared exit for both budget backstops (step and wall-clock): record an
-    ``inconclusive`` verdict citing the reason, mark the session ``given_up``,
-    and stop the sandbox.
-    """
-    record_verdict(session, session_id, VerdictStatus.INCONCLUSIVE, reason)
-    _mark_given_up(session, session_id)
-    _teardown(registry, session_id)
+    _drive_auto(session, registry, session_id)
 
 
 def _consume_pending_call(live: LiveSession, command_id: str) -> str | None:
@@ -653,20 +638,18 @@ def _resume_with_decision(
     """Resume the agent run with the human decision on ``call_id`` (post-lock).
 
     Split out of :func:`apply_decision` so the lock-holding compare-and-swap
-    stays a small, easily-audited critical section; everything here — the
-    budget check, the LLM resume call — runs AFTER the lock has been released.
-    Every pending call is a command now (the agent's ``set_plan`` was removed in
-    6b-ii), so each approval counts against the step budget.
+    stays a small, easily-audited critical section; the LLM resume call runs
+    AFTER the lock has been released. Every pending call is a command now (the
+    agent's ``set_plan`` was removed in 6b-ii), so each *approval* counts one step
+    against the budget; the budget is enforced when the agent proposes its next
+    command (:func:`_dispatch_output`), where a spent budget pauses for guidance.
     """
-    if approved and _step_budget_exhausted(live):
-        _give_up(session, registry, session_id, "budget exhausted")
-        return
-
     set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
     results = DeferredToolResults()
     if approved:
-        # Approved: the run_command tool runs and drains observations into its
-        # own result (see _make_deps / the agent tool).
+        # Approved: count the step, then run. The run_command tool runs and drains
+        # observations into its own result (see _make_deps / the agent tool).
+        live.step_count += 1
         results.approvals[call_id] = ToolApproved()
     else:
         # Rejected: no tool runs, so fold any operator activity into the denial
@@ -687,39 +670,35 @@ def _resume_with_decision(
     _dispatch_output(session, registry, session_id, result)
 
 
-def _drive_auto(
-    session: Session,
-    registry: SessionRegistry,
-    session_id: int,
-    *,
-    clock: Callable[[], float] = time.monotonic,
-) -> None:
+def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) -> None:
     """Auto-approve successive command proposals while free-launch is on (FR-17 Slice 5).
 
     The free-launch loop. Iterative on purpose — one :func:`_resume_with_decision`
     call per pass, never recursing through :func:`apply_decision` — so a large
     ``max_steps`` cannot blow the stack. Each auto-approval goes through the same
-    compare-and-swap (:func:`_consume_pending_call`) and step-budget check as a
-    human approval, and is recorded as a ``command_approved`` event flagged
-    ``{"auto": True}`` so the transcript stays honest about what a human vetted.
+    compare-and-swap (:func:`_consume_pending_call`) as a human approval, and is
+    recorded as a ``command_approved`` event flagged ``{"auto": True}`` so the
+    transcript stays honest about what a human vetted.
 
-    The loop stops when: the session is torn down (concluded / gave up),
-    free-launch is turned off, or a budget bound trips. In gated mode the first
-    guard returns immediately, so callers can invoke this unconditionally.
+    The loop stops when: the session is torn down (concluded / ended), free-launch
+    is turned off, or the session has paused for guidance (``awaiting_guidance`` —
+    a spent step budget, ADR-0034; the pending command is held, not auto-run). In
+    gated mode the first guard returns immediately, so callers can invoke this
+    unconditionally.
 
     Args:
         session: Active DB session for this call.
         registry: The live-session registry.
         session_id: The retest session to drive.
-        clock: Monotonic clock for the wall-clock budget check (injectable for
-            tests); shares the origin stamped by :func:`start_and_step`.
     """
     while True:
         live = registry.get(session_id)
-        if live is None or not live.free_launch or live.pending_call_id is None:
-            return
-        if _time_budget_exhausted(live, clock):
-            _give_up(session, registry, session_id, "time budget exhausted")
+        if (
+            live is None
+            or not live.free_launch
+            or live.pending_call_id is None
+            or live.awaiting_guidance
+        ):
             return
         call_id = _consume_pending_call(live, live.pending_call_id)
         if call_id is None:
@@ -741,11 +720,10 @@ def apply_decision(
 ) -> None:
     """Resume a paused run with a human decision on the pending command.
 
-    Each *approval* counts against ``live.max_steps``; exceeding it force-
-    concludes the session ``inconclusive`` and tears the sandbox down WITHOUT
-    running the over-budget command (the budget backstop bounds an
-    always-proposing agent). Rejections never run a command, so they never
-    count against the budget.
+    Each *approval* counts one step against ``live.max_steps``; when the agent
+    then proposes its next command with the budget spent, the session pauses for
+    operator guidance rather than force-concluding (:func:`_dispatch_output`,
+    ADR-0034). Rejections never run a command, so they never count.
 
     ``command_id`` must match the session's currently pending ``tool_call_id``
     (validated + consumed atomically under ``live.lock``, see
@@ -784,12 +762,7 @@ def apply_decision(
 
 
 def set_free_launch(
-    session: Session,
-    registry: SessionRegistry,
-    session_id: int,
-    enabled: bool,
-    *,
-    clock: Callable[[], float] = time.monotonic,
+    session: Session, registry: SessionRegistry, session_id: int, enabled: bool
 ) -> None:
     """Toggle free-launch on a live session (FR-17 Slice 5).
 
@@ -804,8 +777,6 @@ def set_free_launch(
         registry: The live-session registry.
         session_id: The retest session to toggle.
         enabled: The new free-launch state.
-        clock: Monotonic clock for the wall-clock budget check (injectable for
-            tests); forwarded to :func:`_drive_auto`.
     """
     live = registry.get(session_id)
     if live is None:
@@ -818,7 +789,7 @@ def set_free_launch(
     live.free_launch = enabled
     append_event(session, session_id, SessionEventKind.FREE_LAUNCH_CHANGED, {"enabled": enabled})
     if enabled:
-        _drive_auto(session, registry, session_id, clock=clock)
+        _drive_auto(session, registry, session_id)
 
 
 def _summarize_human_command(command: str, result: CommandResult) -> str:
@@ -953,18 +924,101 @@ def end_session(session: Session, registry: SessionRegistry, session_id: int) ->
         _teardown(registry, session_id)
 
 
-def _mark_given_up(session: Session, session_id: int) -> None:
-    """Force status to ``given_up``, overriding the ``concluded`` set by ``record_verdict``."""
+def _resume_run(
+    session: Session, registry: SessionRegistry, session_id: int, live: LiveSession
+) -> None:
+    """Re-run the agent to continue after an exhausted-options pause (ADR-0034).
+
+    Used by :func:`continue_session` when no command is held pending — the agent
+    ended its turn handing back to the operator, so we resume it with any queued
+    goal/chat steering (or a plain nudge) and dispatch its next output.
+    """
+    set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
+    deps = _make_deps(session, session_id, live)
+    user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages()) or (
+        "Continue the retest toward a determination."
+    )
+    try:
+        result = live.agent.run_sync(user_prompt, deps=deps, message_history=live.messages)
+    except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
+        _fail(session, registry, session_id, str(exc))
+        return
+    _dispatch_output(session, registry, session_id, result)
+    _drive_auto(session, registry, session_id)
+
+
+def continue_session(
+    session: Session, registry: SessionRegistry, session_id: int, *, extra_steps: int = 8
+) -> None:
+    """Resume a paused session, raising the step budget — ADR-0034 "Keep going".
+
+    A no-op unless the session is paused in ``needs_guidance`` with a live agent (a
+    paused session that outlived a backend restart has no sandbox to resume — the
+    operator restarts it instead). Raises ``max_steps`` by ``extra_steps``, clears
+    the pause, and continues: a command held at the budget re-opens its approve
+    gate (auto-run in free-launch); an exhausted-options pause re-runs the agent,
+    folding in any queued goal/chat guidance.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The paused retest session to resume.
+        extra_steps: How many more approved commands to allow before the next pause.
+    """
     record = session.get(RetestSessionRecord, session_id)
-    if record is not None:
-        record.status = RetestSessionStatus.GIVEN_UP.value
-        session.commit()
-        append_event(
-            session,
-            session_id,
-            SessionEventKind.STATE_CHANGE,
-            {"to": RetestSessionStatus.GIVEN_UP.value},
-        )
+    if (
+        record is None
+        or RetestSessionStatus(record.status) is not RetestSessionStatus.NEEDS_GUIDANCE
+    ):
+        return
+    live = registry.get(session_id)
+    if live is None:
+        return
+    live.max_steps += extra_steps
+    record.max_steps = live.max_steps
+    session.commit()
+    live.awaiting_guidance = False
+    if live.pending_call_id is not None:
+        # A command was held at the budget: re-open its gate (auto-run in free-launch).
+        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
+        _drive_auto(session, registry, session_id)
+    else:
+        _resume_run(session, registry, session_id, live)
+
+
+def conclude_session(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    status: VerdictStatus,
+    rationale: str,
+) -> None:
+    """Operator manually concludes a session with a determination — ADR-0034.
+
+    The operator's own verdict for a paused (or otherwise live) session: writes it
+    (``actor="operator"``, the only path that can record ``inconclusive``) and
+    tears down the sandbox. A no-op if the session is already terminal. Works even
+    on an orphaned paused session (the verdict is recorded; the teardown no-ops).
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The session to conclude.
+        status: The operator's determination.
+        rationale: The operator's justification.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or RetestSessionStatus(record.status) in _TERMINAL:
+        return
+    record_verdict(
+        session,
+        session_id,
+        status,
+        rationale,
+        actor="operator",
+        reason_code="operator_conclusion",
+    )
+    _teardown(registry, session_id)
 
 
 def _fail(session: Session, registry: SessionRegistry, session_id: int, detail: str) -> None:

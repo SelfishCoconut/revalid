@@ -29,7 +29,6 @@ function mockRecord(overrides: Partial<client.RetestSession> = {}): void {
     verdict_rationale: null,
     free_launch: false,
     max_steps: 8,
-    max_seconds: null,
     events: [],
     ...overrides,
   });
@@ -349,7 +348,6 @@ describe("RetestSession", () => {
       verdict_rationale: null,
       free_launch: false,
       max_steps: 8,
-      max_seconds: null,
       events: [],
     });
 
@@ -570,6 +568,51 @@ describe("RetestSession", () => {
     expect(screen.getByText("budget exhausted")).toBeInTheDocument();
     // Not rendered as an ordinary "Verdict" box.
     expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
+  });
+
+  function mockPaused(reason = "Reached the 8-command budget."): void {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "needs_guidance", payload: { reason } }],
+      status: "needs_guidance",
+      verdict: null,
+      connected: true,
+    });
+  }
+
+  it("renders the pause banner with its guidance reason (ADR-0034)", () => {
+    mockPaused("exhausted my options, need guidance");
+    renderAt(1);
+    expect(screen.getByLabelText(/needs guidance/i)).toBeInTheDocument();
+    expect(screen.getByText(/exhausted my options/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /keep going/i })).toBeInTheDocument();
+  });
+
+  it("Keep going resumes the paused session", async () => {
+    mockPaused();
+    vi.mocked(client.continueSession).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /keep going/i }));
+    expect(client.continueSession).toHaveBeenCalledWith(1);
+  });
+
+  it("Conclude records the operator's own verdict", async () => {
+    mockPaused();
+    vi.mocked(client.concludeSession).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /conclude/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/conclude status/i), "fixed");
+    await userEvent.type(screen.getByLabelText(/conclude rationale/i), "patched by hand");
+    await userEvent.click(screen.getByRole("button", { name: /record verdict/i }));
+    expect(client.concludeSession).toHaveBeenCalledWith(1, "fixed", "patched by hand");
+  });
+
+  it("keeps the composer and terminal usable while paused for guidance", () => {
+    mockPaused();
+    renderAt(1);
+    // needs_guidance is non-terminal: the operator steers by chatting and running
+    // commands, so neither input is disabled.
+    expect(screen.getByLabelText(/message the agent/i)).not.toBeDisabled();
+    expect(screen.getByLabelText(/terminal command input/i)).not.toBeDisabled();
   });
 
   it("lays out the goal panel and the chat log side by side, not dropping either", () => {

@@ -66,14 +66,16 @@ class AuditReport:
 def _transcript_verdict(session: Session, record: VerdictRecord) -> dict[str, str] | None:
     """Return the authoritative transcript verdict payload for an agentic row (FR-17).
 
-    The agent's record (``actor="agent"``) is projected from the session's
-    ``verdict`` event; an operator adjudication (``actor="operator"``) from the
-    latest ``verdict_adjudicated`` event. ``None`` if the transcript carries no
+    An operator *adjudication* (``reason_code="operator_adjudication"``) is
+    projected from the latest ``verdict_adjudicated`` event; every other agentic
+    row — the agent's own conclusion and an operator *manual conclude* of a paused
+    session (ADR-0034), both ``actor``-tagged but backed by a ``verdict`` event —
+    from the session's ``verdict`` event. ``None`` if the transcript carries no
     such event (the row has no trail to re-derive from — itself a discrepancy).
     """
     kind = (
         SessionEventKind.VERDICT_ADJUDICATED
-        if record.actor == "operator"
+        if record.reason_code == "operator_adjudication"
         else SessionEventKind.VERDICT
     )
     events = session.scalars(

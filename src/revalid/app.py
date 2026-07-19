@@ -80,6 +80,8 @@ from revalid.retest_session import (
     adjudicate_verdict,
     append_event,
     apply_decision,
+    conclude_session,
+    continue_session,
     create_session,
     end_session,
     is_terminal,
@@ -266,7 +268,6 @@ class RetestSessionOut(BaseModel):
     verdict_rationale: str | None
     free_launch: bool
     max_steps: int
-    max_seconds: int | None
     events: list[SessionEventOut] = []
 
     @classmethod
@@ -283,7 +284,6 @@ class RetestSessionOut(BaseModel):
             verdict_rationale=record.verdict_rationale,
             free_launch=record.free_launch,
             max_steps=record.max_steps,
-            max_seconds=record.max_seconds,
             events=[SessionEventOut(**e) for e in events],
         )
 
@@ -332,7 +332,6 @@ class StartSessionRequest(BaseModel):
 
     free_launch: bool = False
     max_steps: int = Field(default=8, ge=1)
-    max_seconds: int | None = Field(default=None, ge=1)
     # A user-owned goal drafted before the session (FR-17 6b-iii-b): when present,
     # the session seeds it verbatim instead of generating one at start.
     initial_goal: list[str] | None = None
@@ -362,6 +361,19 @@ class AdjudicateRequest(BaseModel):
     ``status`` is the human's call — equal to the agent's when accepting, or a
     different value when overriding; ``rationale`` is their justification.
     """
+
+    status: VerdictStatus
+    rationale: str = ""
+
+
+class ContinueRequest(BaseModel):
+    """Body for resuming a paused session (ADR-0034): how many more steps to allow."""
+
+    extra_steps: int = Field(default=8, ge=1)
+
+
+class ConcludeRequest(BaseModel):
+    """Body for an operator's manual conclusion of a paused session (ADR-0034)."""
 
     status: VerdictStatus
     rationale: str = ""
@@ -611,7 +623,6 @@ def run_first_step(
             record = session.get(RetestSessionRecord, session_id)
             free_launch = record.free_launch if record else False
             max_steps = record.max_steps if record else 8
-            max_seconds = float(record.max_seconds) if record and record.max_seconds else None
             goal: tuple[str, ...] = tuple(initial_goal) if initial_goal else ()
             if not goal:  # no pre-start draft → generate (best-effort; never blocks)
                 with contextlib.suppress(Exception):
@@ -629,7 +640,6 @@ def run_first_step(
                 _goal_prompt(goal, finding),
                 max_steps=max_steps,
                 free_launch=free_launch,
-                max_seconds=max_seconds,
             )
         except Exception as exc:  # broad on purpose: no failure may strand the session
             if sandbox is not None:
@@ -739,6 +749,47 @@ def run_free_launch(
     """
     with sessions() as session:
         set_free_launch(session, registry, session_id, enabled)
+
+
+def run_continue(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    extra_steps: int,
+) -> None:
+    """Resume a paused session with a raised budget (ADR-0034 background task).
+
+    Runs in the background because resuming drives further agent turns. A no-op
+    unless the session is paused in ``needs_guidance`` with a live agent.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The paused retest session to resume.
+        extra_steps: How many more approved commands to allow before the next pause.
+    """
+    with sessions() as session:
+        continue_session(session, registry, session_id, extra_steps=extra_steps)
+
+
+def run_conclude(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    status: VerdictStatus,
+    rationale: str,
+) -> None:
+    """Record the operator's manual conclusion + tear down (ADR-0034 background task).
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The session to conclude.
+        status: The operator's determination.
+        rationale: The operator's justification.
+    """
+    with sessions() as session:
+        conclude_session(session, registry, session_id, status, rationale)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1080,7 +1131,6 @@ def _register_session_routes(
             model=agent_model_name(agent),
             free_launch=cfg.free_launch,
             max_steps=cfg.max_steps,
-            max_seconds=cfg.max_seconds,
         )
         background.add_task(
             run_first_step,
@@ -1176,6 +1226,44 @@ def _register_free_launch_route(
         gate. Runs in the background; a no-op if the session is no longer live.
         """
         background.add_task(run_free_launch, sessions, registry, session_id, body.enabled)
+        return {"status": "accepted"}
+
+
+def _register_guidance_routes(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the ADR-0034 pause-and-ask routes (keep going + manual conclude).
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`.
+    """
+
+    @router.post("/retest-sessions/{session_id}/continue", status_code=202)
+    def continue_route(
+        session_id: int, background: BackgroundTasks, body: ContinueRequest | None = None
+    ) -> dict[str, str]:
+        """Keep going on a paused session, raising its step budget (ADR-0034).
+
+        Resumes the agent — a command held at the budget re-opens its gate, an
+        exhausted-options pause re-runs the agent with any queued guidance. Runs in
+        the background; a no-op unless the session is paused with a live agent.
+        """
+        extra = (body or ContinueRequest()).extra_steps
+        background.add_task(run_continue, sessions, registry, session_id, extra)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/conclude", status_code=202)
+    def conclude_route(
+        session_id: int, body: ConcludeRequest, background: BackgroundTasks
+    ) -> dict[str, str]:
+        """Manually conclude a session with the operator's determination (ADR-0034).
+
+        Records the operator's verdict (the only path that writes ``inconclusive``)
+        and tears down. Runs in the background; a no-op if the session is terminal.
+        """
+        background.add_task(
+            run_conclude, sessions, registry, session_id, body.status, body.rationale
+        )
         return {"status": "accepted"}
 
 
@@ -1405,6 +1493,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
+    _register_guidance_routes(api, sessions, registry)
     _register_goal_routes(api, sessions, registry)
     _register_adjudicate_route(api, sessions)
     _register_session_stream_route(api, sessions)

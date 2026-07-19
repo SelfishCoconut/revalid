@@ -113,14 +113,21 @@ class ReportStatus(enum.StrEnum):
 class RetestSessionStatus(enum.StrEnum):
     """Lifecycle of an FR-17 agentic retest session.
 
-    A session always reaches a terminal state (``CONCLUDED``/``GIVEN_UP``/
-    ``ENDED``/``ERROR``) so the SPA poll and the WS tail terminate.
+    A session reaches a terminal state (``CONCLUDED``/``ENDED``/``ERROR``) only
+    on a real determination or an operator action; between turns it may pause in
+    the non-terminal ``NEEDS_GUIDANCE`` state, asking the operator to steer or
+    conclude (ADR-0034). ``GIVEN_UP`` is retired — kept only so any legacy row
+    stays terminal.
     """
 
     STARTING = "starting"
     THINKING = "thinking"
     AWAITING_COMMAND = "awaiting_command"
     RUNNING_COMMAND = "running_command"
+    #: Paused mid-session: a step budget was reached or the agent exhausted its
+    #: options and handed back to the operator (ADR-0034). Non-terminal — the
+    #: sandbox stays alive; the operator keeps going or concludes.
+    NEEDS_GUIDANCE = "needs_guidance"
     CONCLUDED = "concluded"
     GIVEN_UP = "given_up"
     ENDED = "ended"
@@ -139,6 +146,9 @@ class SessionEventKind(enum.StrEnum):
     HUMAN_MESSAGE = "human_message"
     # The current guiding goal (FR-17 6b-ii: user-owned; formerly the agent's set_plan).
     PLAN_UPDATED = "plan_updated"
+    #: The session paused for operator guidance (ADR-0034); payload carries the
+    #: human-readable ``reason`` (budget reached, or the agent's own hand-back).
+    NEEDS_GUIDANCE = "needs_guidance"
     STATE_CHANGE = "state_change"
     FREE_LAUNCH_CHANGED = "free_launch_changed"
     VERDICT = "verdict"

@@ -104,7 +104,9 @@ def script_respond_then_conclude(messages: list[ModelMessage], info: AgentInfo) 
     """Stateful scripted model: call ``respond`` once, then conclude (FR-17 Slice 4).
 
     Proves the non-gated ``respond`` tool emits prose mid-run and the run then
-    continues to a verdict without proposing any command.
+    continues to a verdict without proposing any command. Concludes ``still_open``
+    (a real determination) — the agent can no longer self-conclude ``inconclusive``
+    (ADR-0034), which now pauses for the operator instead of terminating.
     """
     if not has_tool_result(messages, "respond"):
         return ModelResponse(
@@ -119,10 +121,45 @@ def script_respond_then_conclude(messages: list[ModelMessage], info: AgentInfo) 
         parts=[
             ToolCallPart(
                 tool_name=info.output_tools[0].name,
-                args={"status": "inconclusive", "rationale": "answered the operator"},
+                args={
+                    "status": "still_open",
+                    "rationale": "answered the operator, still reproduces",
+                },
             )
         ]
     )
+
+
+def script_conclude_inconclusive(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Immediately conclude ``inconclusive`` — the agent handing back to the operator.
+
+    Under ADR-0034 this does not terminate: the orchestrator reinterprets an
+    ``inconclusive`` conclusion as an exhausted-options pause for guidance.
+    """
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=info.output_tools[0].name,
+                args={"status": "inconclusive", "rationale": "exhausted my options, need guidance"},
+            )
+        ]
+    )
+
+
+def script_inconclusive_then_conclude_on_message(
+    messages: list[ModelMessage], info: AgentInfo
+) -> ModelResponse:
+    """Hand back ``inconclusive`` until the operator provides guidance, then conclude.
+
+    With only the initial user turn present the agent pauses (``inconclusive``);
+    once a second user turn (delivered operator guidance) arrives it concludes
+    ``still_open`` — exercising the resume path of ``continue_session`` (ADR-0034).
+    """
+    if operator_message_count(messages) > 1:
+        args = {"status": "still_open", "rationale": "with the operator's steer, confirmed open"}
+    else:
+        args = {"status": "inconclusive", "rationale": "need guidance to proceed"}
+    return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=args)])
 
 
 def operator_message_count(messages: list[ModelMessage]) -> int:

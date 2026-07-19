@@ -156,8 +156,8 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 5** (met — issue #100, ADR-0029 proposed, 2026-07-17):
   - [x] **AC9**: with free-launch on, the agent's commands auto-run to a verdict with no per-command human approval, while a `set_plan` proposal still pauses for approval (plan changes are always gated).
   - [x] **AC10**: free-launch is settable at session start (`POST /retest-session` body) and toggleable live (`POST /retest-sessions/{id}/free-launch`); enabling mid-session auto-approves any pending command; every toggle is a `free_launch_changed` transcript event and each auto-approval is marked `{"auto": true}`.
-  - [x] **AC11**: `max_steps` (both modes) and `max_seconds` (free-launch only, checked at step boundaries) force-conclude the session `given_up`/`inconclusive` with a budget-exhausted reason; both bounds are visible in the SPA.
-  - [x] **AC12**: the given-up state renders distinctly from an operator-ended or concluded session.
+  - [x] **AC11** *(superseded by AC23 / ADR-0034)*: `max_steps` (both modes) bounds the session — no longer a give-up but a **pause for guidance**; the `max_seconds` wall-clock budget is **removed**.
+  - [x] **AC12** *(superseded by AC23 / ADR-0034)*: the give-up state is retired; a bounded/stuck session renders as a **needs-guidance pause** (Keep going / Conclude), distinct from an operator-ended or concluded session.
 - **Acceptance criteria — Slice 6a** (met — issue #102, ADR-0030 proposed, 2026-07-18):
   - [x] **AC13**: a concluded (or given-up) session's verdict is auto-persisted as an agentic `VerdictRecord` (`actor="agent"`, `source="agentic"`, evidence-free, session-linked) with no human action, so it is queryable at `GET /api/verdicts`, appears in the FR-12 export, and re-derives under the FR-10 audit — without touching the frozen domain `Verdict`/`Evidence` type (polymorphic storage).
   - [x] **AC14**: the operator can accept or override the agent's verdict (`POST /retest-sessions/{id}/adjudicate`); adjudication appends a `verdict_adjudicated` transcript event **and** a superseding operator verdict (`actor="operator"`, higher id ⇒ latest-per-finding), never mutating the agent's record (append-only; FR-10 intact).
@@ -178,7 +178,9 @@ non-lab targets, destructive exploitation.
     launches a session seeded with it; the console is the only retest path, relaid out as
     chat + right-editable goal + bottom terminal, with live goal edit, the command gate, chat
     steering, and adjudication intact and an in-progress session surviving reload.
-- **Remaining — Slice 6b-iii-b**: **done**. FR-17 is now feature-complete; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
+- **Acceptance criteria — Slice 8 (pause-and-ask)** (met — issue #117, ADR-0034 proposed, 2026-07-19):
+  - [x] **AC23**: the session never *gives up*. Reaching the `max_steps` budget, or the agent concluding `inconclusive` (reinterpreted as "exhausted my options"), **pauses** the session in the non-terminal `needs_guidance` state with the sandbox kept alive and no verdict written; there is **no wall-clock budget**. The operator **keeps going** (`POST …/continue {extra_steps?}` — raises the budget and resumes, re-opening a held command's gate or re-running the agent with queued guidance) or **concludes** (`POST …/conclude {status, rationale}` — the only path that records `inconclusive`, `actor="operator"`); chat and terminal commands stay usable while paused, and the SPA shows a pause banner instead of a give-up one.
+- **Remaining**: **none for the core**; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ## 3. Non-functional requirements
