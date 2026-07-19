@@ -534,3 +534,22 @@ def test_pause_then_continue_with_guidance_reaches_a_verdict() -> None:
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "concluded"
         assert state["verdict_status"] == "still_open"
+
+
+def test_new_session_inherits_the_settings_step_budget() -> None:
+    """A started session's budget comes from the Settings default — incl. no-limit (Slice 9)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        client.put(
+            "/api/settings",
+            json={"model": "ollama:qwen3:14b", "base_url": None, "default_max_steps": 3},
+        )
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["max_steps"] == 3
+
+        client.put(
+            "/api/settings",
+            json={"model": "ollama:qwen3:14b", "base_url": None, "default_max_steps": None},
+        )
+        sid2 = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid2}").json()["max_steps"] is None

@@ -14,6 +14,7 @@ const current: SettingsData = {
   base_url: "http://localhost:11434/v1",
   api_key_set: false,
   api_key_hint: null,
+  default_max_steps: 8,
 };
 
 describe("Settings", () => {
@@ -50,9 +51,42 @@ describe("Settings", () => {
       model: "ollama:qwen3:14b",
       base_url: "http://localhost:11434/v1",
       api_key: "sk-secret",
+      default_max_steps: 8, // unchanged from the current setting
     });
 
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
+  });
+
+  it("saves a No-limit retest budget as null", async () => {
+    vi.mocked(client.getSettings).mockResolvedValue(current);
+    vi.mocked(client.updateSettings).mockResolvedValue({ ...current, default_max_steps: null });
+
+    renderWithProviders(<Settings />);
+    await screen.findByDisplayValue("ollama:qwen3.6:27b");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /no limit/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalled());
+    const [payload] = vi.mocked(client.updateSettings).mock.calls[0];
+    expect(payload.default_max_steps).toBeNull();
+  });
+
+  it("saves an edited retest step budget", async () => {
+    vi.mocked(client.getSettings).mockResolvedValue(current);
+    vi.mocked(client.updateSettings).mockResolvedValue({ ...current, default_max_steps: 20 });
+
+    renderWithProviders(<Settings />);
+    await screen.findByDisplayValue("ollama:qwen3.6:27b");
+
+    const budget = screen.getByLabelText(/retest step budget/i);
+    await userEvent.clear(budget);
+    await userEvent.type(budget, "20");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalled());
+    const [payload] = vi.mocked(client.updateSettings).mock.calls[0];
+    expect(payload.default_max_steps).toBe(20);
   });
 
   it("tests the connection and populates discovered models", async () => {

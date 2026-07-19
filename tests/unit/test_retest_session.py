@@ -492,6 +492,30 @@ def test_free_launch_step_budget_pauses_for_guidance() -> None:
     assert registry.get(s.id) is not None and not box.stopped  # paused, still alive
 
 
+def test_no_limit_session_never_pauses_on_the_budget() -> None:
+    """A ``max_steps=None`` session runs approvals without ever pausing on the budget (Slice 9)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", max_steps=None)
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
+        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=None)
+        # Approve well past what any finite default (8) would allow — it keeps gating
+        # each command, never pausing for guidance.
+        for _ in range(12):
+            apply_decision(
+                session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+            )
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # still gating, never paused
+    assert len(box.commands) == 12
+    assert registry.get(s.id) is not None
+
+
 def test_agent_inconclusive_conclusion_pauses_for_guidance() -> None:
     """The agent handing back `inconclusive` pauses and asks — no verdict is written (ADR-0034)."""
     sessions = session_factory(create_db_engine(IN_MEMORY))

@@ -30,6 +30,9 @@ class Settings(BaseModel):
         base_url: Provider base URL for OpenAI-compatible backends (Ollama and
             friends); ``None`` for native providers configured from the environment.
         api_key: Provider API key, or ``None`` when supplied via the environment.
+        default_max_steps: Default step budget for a new retest session — approved
+            commands before the session pauses for operator guidance (ADR-0034);
+            ``None`` means **no limit** (never pause on the budget).
     """
 
     model_config = ConfigDict(frozen=True, protected_namespaces=())
@@ -37,6 +40,7 @@ class Settings(BaseModel):
     model: str = Field(min_length=1)
     base_url: str | None = None
     api_key: str | None = None
+    default_max_steps: int | None = 8
 
 
 class Finding(BaseModel):

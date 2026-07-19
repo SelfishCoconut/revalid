@@ -267,7 +267,7 @@ class RetestSessionOut(BaseModel):
     verdict_status: str | None
     verdict_rationale: str | None
     free_launch: bool
-    max_steps: int
+    max_steps: int | None
     events: list[SessionEventOut] = []
 
     @classmethod
@@ -331,7 +331,9 @@ class StartSessionRequest(BaseModel):
     """Optional body for starting a session: free-launch + budget config (FR-17 Slice 5)."""
 
     free_launch: bool = False
-    max_steps: int = Field(default=8, ge=1)
+    # Step budget override; when omitted the session inherits the Settings default
+    # (which may itself be no-limit, ADR-0034). ``ge=1`` applies when a value is given.
+    max_steps: int | None = Field(default=None, ge=1)
     # A user-owned goal drafted before the session (FR-17 6b-iii-b): when present,
     # the session seeds it verbatim instead of generating one at start.
     initial_goal: list[str] | None = None
@@ -419,6 +421,7 @@ class SettingsOut(BaseModel):
     base_url: str | None
     api_key_set: bool
     api_key_hint: str | None
+    default_max_steps: int | None
 
     @classmethod
     def from_domain(cls, cfg: Settings) -> "SettingsOut":
@@ -429,6 +432,7 @@ class SettingsOut(BaseModel):
             base_url=cfg.base_url,
             api_key_set=bool(key),
             api_key_hint=key[-4:] if key else None,
+            default_max_steps=cfg.default_max_steps,
         )
 
 
@@ -441,6 +445,8 @@ class SettingsUpdateIn(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     clear_key: bool = False
+    #: Default retest step budget; ``None`` = no limit (ADR-0034). Omitted → keep 8.
+    default_max_steps: int | None = Field(default=8, ge=1)
 
 
 class ProbeIn(BaseModel):
@@ -1125,12 +1131,17 @@ def _register_session_routes(
         cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
         finding = version.to_domain()
+        # An explicit body override wins; otherwise inherit the Settings default
+        # step budget (which may be no-limit → None) — ADR-0034 / Slice 9.
+        max_steps = (
+            cfg.max_steps if cfg.max_steps is not None else load_or_seed(session).default_max_steps
+        )
         record = create_session(
             session,
             finding_id=finding_id,
             model=agent_model_name(agent),
             free_launch=cfg.free_launch,
-            max_steps=cfg.max_steps,
+            max_steps=max_steps,
         )
         background.add_task(
             run_first_step,
@@ -1435,6 +1446,7 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
             base_url=body.base_url,
             api_key=body.api_key,
             clear_key=body.clear_key,
+            default_max_steps=body.default_max_steps,
         )
         return SettingsOut.from_domain(cfg)
 

@@ -15,6 +15,7 @@ const maskedSettings: Settings = {
   base_url: "http://localhost:11434/v1",
   api_key_set: false,
   api_key_hint: null,
+  default_max_steps: 8,
 };
 
 /** A fresh QueryClient (no retries) wrapped for `renderHook`, mirroring the
@@ -57,12 +58,17 @@ describe("useSettings", () => {
     await waitFor(() => expect(settings.result.current.isSuccess).toBe(true));
 
     const mutation = renderHook(() => useUpdateSettings(), { wrapper });
-    mutation.result.current.mutate({ model: "openai:gpt-5", base_url: null });
+    mutation.result.current.mutate({
+      model: "openai:gpt-5",
+      base_url: null,
+      default_max_steps: 12,
+    });
 
     await waitFor(() => expect(mutation.result.current.isSuccess).toBe(true));
     expect(vi.mocked(client.updateSettings).mock.calls[0][0]).toEqual({
       model: "openai:gpt-5",
       base_url: null,
+      default_max_steps: 12,
     });
     // Invalidating the settings query re-triggers `getSettings`.
     await waitFor(() => expect(client.getSettings).toHaveBeenCalledTimes(2));
