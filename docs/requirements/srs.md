@@ -63,7 +63,7 @@ non-lab targets, destructive exploitation.
 
 ### FR-06 — Target authorization allowlist
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19). With the batch HTTP executor retired, egress control now lives **solely in the agentic sandbox's Docker `--internal` network membership** (ADR-0025) — the container can reach only the connected lab target and nothing else, a strictly stronger guarantee than the HTTP-transport allowlist. The `allowlist.py` HTTP guard is orphaned (kept pending a tracked cleanup follow-up).
+- **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19). With the batch HTTP executor retired, egress control now lives **solely in the agentic sandbox's Docker `--internal` network membership** (ADR-0025) — the container can reach only the connected lab target and nothing else, a strictly stronger guarantee than the HTTP-transport allowlist. The `allowlist.py` HTTP guard was removed (FR-17 6b-iii-b).
 - **Description**: The executor shall refuse any action whose target is not on the configured allowlist (default: the lab compose targets). Allowlist changes are explicit configuration, never inferred from report content.
 - **Acceptance criteria**:
   - [ ] An approved plan referencing a non-allowlisted host fails closed with an audit-trail entry.
@@ -122,7 +122,7 @@ non-lab targets, destructive exploitation.
 - **Status**: **dropped, subsumed by FR-17** (ADR-0033, 2026-07-19). The dedicated Playwright browser executor (`browser.py`, ADR-0018) is deleted. DOM/JS-dependent verification is reachable within FR-17: the sandbox agent can run browser-capable tooling as a command, so a distinct browser-probe path is no longer warranted (a Kali-tooling sandbox image is tracked separately, #105).
 - **Description**: For findings not verifiable at HTTP level (DOM/JS-dependent), the executor may support Playwright-driven browser probes under the same approval, allowlist, and audit constraints.
 - **Acceptance criteria**:
-  - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser gets a correct verdict. — `src/revalid/browser.py` (ADR-0018): a `browser-xss` Playwright probe (optional `browser` extra) verifies Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` is executor-agnostic; browser verdicts re-derive via the shared `assess_evidence`). Pipeline + assessor unit-tested with a canned runner; the live-lab still-open verdict is asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`). Exemplar is DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalizes.
+  - [~] At least one stored-XSS-class Juice Shop finding verifiable only in-browser got a correct verdict. — `src/revalid/browser.py` (ADR-0018, deleted in FR-17 6b-iii-a): a `browser-xss` Playwright probe (optional `browser` extra) verified Juice Shop's DOM XSS in a real browser under the same FR-05/FR-06/FR-10 constraints (`guarded_run` was executor-agnostic; browser verdicts re-derived via the shared `assess_evidence`). Pipeline + assessor were unit-tested with a canned runner; the live-lab still-open verdict was asserted by `tests/system/test_browser_xss_system.py` (nightly `system-tests.yml`, also deleted). Exemplar was DOM (browser-only-verifiable) XSS, not persisted — same probe kind/assessor generalized.
 
 ### FR-15 — Evaluation harness
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -171,7 +171,7 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 6b-iii-a** (met — issue #110, ADR-0033 proposed, 2026-07-19):
   - [x] **AC20**: the batch execution path is deleted end-to-end (backend) — `approval.py`/`retest.py`/`sanity.py`/`browser.py`, the batch plan/approve/retest REST endpoints, the batch domain types (`Probe`/`RetestPlan`/`PlanStatus`/`Verdict`/`Evidence`), and `PlanRecord` — with the full gate green; FR-09/10/12 now have exactly one (agentic) implementation.
   - [x] **AC21**: `VerdictRecord`, `VerdictExport`, and the FR-10 audit collapse from polymorphic (batch/agentic) to a single agentic shape — the `source` discriminator and batch-only columns are gone, the audit re-derives only from the transcript; the FR-12 export drops `plans`, `SCHEMA_VERSION` 1.3 → 1.4 (regenerated + drift-tested).
-- **Acceptance criteria — Slice 6b-iii-b** (met — issue #110, ADR-0033, 2026-07-19):
+- **Acceptance criteria — Slice 6b-iii-b** (met — issue #110, ADR-0033 proposed, 2026-07-19):
   - [x] **AC22**: the finding flow is **extract → goal → retest → verdict**; no batch
     stage/hook/client-fn/`Plan` type remains and the SPA calls no removed endpoint. The
     Goal stage generates an editable pre-start draft goal (no session), and **Start retest**
