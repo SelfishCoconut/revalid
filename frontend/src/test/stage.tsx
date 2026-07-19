@@ -25,13 +25,10 @@ export function stageContext(overrides: Partial<FindingStageContext> = {}): Find
   return {
     finding: BASE_FINDING,
     findingId: 7,
-    plans: [],
-    currentPlan: undefined,
-    hasPlan: false,
-    approved: false,
-    retested: false,
+    sessions: [],
+    latestSession: undefined,
     verdicts: [],
-    currentStage: "plan",
+    currentStage: "goal",
     ...overrides,
   };
 }
