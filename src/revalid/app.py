@@ -329,6 +329,12 @@ class GoalRequest(BaseModel):
     steps: list[str]
 
 
+class GoalDraftOut(BaseModel):
+    """A generated retest-goal draft for a finding, pre-session (FR-17 6b-iii-b)."""
+
+    steps: list[str]
+
+
 class AdjudicateRequest(BaseModel):
     """Body for a human verdict adjudication of a concluded session (FR-17 Slice 6a).
 
@@ -828,6 +834,25 @@ def _register_finding_routes(router: APIRouter, sessions: sessionmaker[Session])
         """List a finding's notes, newest first (FR-16)."""
         _get_finding_or_404(session, finding_id)
         return [NoteOut.from_record(r) for r in list_notes(session, finding_id)]
+
+
+def _register_finding_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the finding-level agentic-retest helpers (goal draft + session list).
+
+    FR-17 6b-iii-b. Kept out of ``_register_finding_routes`` to stay under the mccabe gate.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/findings/{finding_id}/goal/draft", response_model=GoalDraftOut)
+    def draft_goal(finding_id: int, session: SessionDep, goal_agent: GoalAgentDep) -> GoalDraftOut:
+        """Generate a retest-goal draft for the finding — no session, no persistence."""
+        finding = _current_or_404(session, finding_id).to_domain()
+        return GoalDraftOut(steps=list(generate_goal(goal_agent, finding)))
 
 
 def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1344,6 +1369,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
     _register_finding_routes(api, sessions)
+    _register_finding_retest_routes(api, sessions)
     _register_report_routes(api, sessions)
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)

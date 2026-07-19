@@ -129,6 +129,23 @@ def test_regenerate_goal_unknown_session_is_404() -> None:
         assert client.post("/api/retest-sessions/999/goal/regenerate").status_code == 404
 
 
+def test_goal_draft_generates_without_a_session() -> None:
+    """Drafting a goal runs the goal agent on the current version — no session (6b-iii-b)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        resp = client.post("/api/findings/1/goal/draft")
+        assert resp.status_code == 200
+        assert resp.json() == {"steps": _GOAL_STEPS}
+        # No session row was created (Task 3 adds a finding-scoped list endpoint;
+        # until then, prove it via the session-lookup 404).
+        assert client.get("/api/retest-sessions/1").status_code == 404
+
+
+def test_goal_draft_unknown_finding_is_404() -> None:
+    with _client() as client:
+        assert client.post("/api/findings/999/goal/draft").status_code == 404
+
+
 def test_set_goal_endpoint_updates_the_panel_event() -> None:
     """A user goal edit appends a fresh plan_updated event (FR-17 6b-ii)."""
     with _echo_client() as client:
