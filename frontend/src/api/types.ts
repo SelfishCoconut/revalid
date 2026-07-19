@@ -93,61 +93,6 @@ export interface ManualReportInput {
   findings: ManualFindingInput[];
 }
 
-export interface PlannedAction {
-  method: string;
-  target: string;
-  headers: Record<string, string>;
-  json_body: Record<string, unknown> | null;
-  expected_indicator: string;
-}
-
-export interface Probe {
-  kind: string;
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  json_body: Record<string, unknown> | null;
-  expected_indicator: string;
-}
-
-export interface RejectedAction {
-  action: PlannedAction;
-  reason: string;
-}
-
-export type PlanStatus =
-  | "generating"
-  | "proposed"
-  | "approved"
-  | "rejected"
-  | "superseded"
-  | "failed";
-
-export interface Plan {
-  id: number;
-  finding_id: number;
-  version: number;
-  status: PlanStatus;
-  origin: string;
-  /** Set only on a `failed` version: why background generation produced no plan. */
-  error: string | null;
-  actions: Probe[];
-  rejected_actions: RejectedAction[];
-  raw: Record<string, unknown>;
-  decided_at: string | null;
-  decided_by: string | null;
-}
-
-export interface Evidence {
-  request_method: string;
-  request_url: string;
-  request_body: string;
-  response_status: number;
-  response_headers: Record<string, string>;
-  response_body_excerpt: string;
-  elapsed_ms: number;
-}
-
 /** Flexible, tool-agnostic proof for an agentic verdict (FR-17 Slice 6b-i). */
 export interface AgenticEvidence {
   explanation: string;
@@ -162,19 +107,22 @@ export type VerdictStatus = "still_open" | "fixed" | "inconclusive";
 export interface Verdict {
   id: number;
   finding_id: number;
-  probe_kind: string;
-  plan_version: number | null;
   status: VerdictStatus;
   reason_code: string;
   rationale: string;
   matched_indicators: string[];
-  // "batch" verdicts carry the single request/response they were derived from;
-  // "agentic" verdicts (FR-17) are justified by a session transcript, so evidence
-  // is null and session_id links the session (FR-17 Slice 6a).
-  source: string;
   session_id: number | null;
   actor: string;
-  evidence: Evidence | AgenticEvidence | null;
+  evidence: AgenticEvidence | null;
+}
+
+/** A compact retest-session row for a finding's session list (FR-17 6b-iii-b). */
+export interface RetestSessionSummary {
+  id: number;
+  finding_id: number;
+  status: string;
+  verdict_status: string | null;
+  created_at: string;
 }
 
 export interface Settings {
