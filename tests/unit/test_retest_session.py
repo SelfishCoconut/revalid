@@ -83,24 +83,16 @@ def test_create_session_starts_in_starting_status() -> None:
         assert s.model == "ollama:qwen3.6:27b"
         assert s.verdict_status is None
         assert s.ended_at is None
-        # Slice 5 config defaults: gated, 8-step budget (no wall-clock bound; ADR-0034).
+        # Default config: gated (per-command approval), no budget (ADR-0034).
         assert s.free_launch is False
-        assert s.max_steps == 8
 
 
-def test_create_session_persists_budget_config() -> None:
+def test_create_session_persists_free_launch() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     with sessions() as session:
         fid = _seed_finding(session)
-        s = rs.create_session(
-            session,
-            finding_id=fid,
-            model="m",
-            free_launch=True,
-            max_steps=20,
-        )
+        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True)
         assert s.free_launch is True
-        assert s.max_steps == 20
 
 
 def test_append_event_assigns_monotonic_seq() -> None:
@@ -253,62 +245,6 @@ def test_record_verdict_auto_persists_agentic_verdict() -> None:
             "exit_code": None,
             "elapsed_ms": 0.0,
         }
-
-
-def test_budget_reached_pauses_without_a_verdict() -> None:
-    """Reaching the step budget pauses for guidance — no verdict, sandbox alive (ADR-0034)."""
-    sessions = session_factory(create_db_engine(IN_MEMORY))
-    registry = SessionRegistry()
-    with sessions() as session:
-        fid = _seed_finding(session)
-        s = rs.create_session(session, finding_id=fid, model="m")
-        box = FakeSandbox(
-            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
-        )
-        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
-        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=1)
-        # The one allowed command runs; the agent's next proposal reaches the budget.
-        apply_decision(
-            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
-        )
-        session.refresh(s)
-        rows = session.scalars(select(VerdictRecord)).all()
-        events = rs.load_events_after(session, s.id, 0)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
-    assert s.verdict_status is None  # nothing concluded
-    assert rows == []  # no verdict persisted
-    assert registry.get(s.id) is not None  # live session retained (can still be steered)
-    assert not box.stopped  # the sandbox stays alive
-    assert len(box.commands) == 1  # only the in-budget command ran
-    guidance = [e for e in events if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value]
-    assert "budget" in guidance[-1]["payload"]["reason"].lower()
-
-
-def test_continue_after_budget_runs_more_then_repauses() -> None:
-    """Keep going raises the budget and resumes; the held command runs, then it re-pauses."""
-    sessions = session_factory(create_db_engine(IN_MEMORY))
-    registry = SessionRegistry()
-    with sessions() as session:
-        fid = _seed_finding(session)
-        s = rs.create_session(session, finding_id=fid, model="m")
-        box = FakeSandbox(
-            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
-        )
-        agent = build_retest_agent(FunctionModel(script_always_propose))
-        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=1)
-        apply_decision(
-            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
-        )  # runs cmd 1, then pauses at the budget with cmd 2 held
-        rs.continue_session(session, registry, s.id, extra_steps=1)  # +1 → re-opens cmd 2's gate
-        session.refresh(s)
-        assert s.status == RetestSessionStatus.AWAITING_COMMAND.value
-        apply_decision(
-            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
-        )  # runs cmd 2 (budget 2 now spent) → pauses again
-        session.refresh(s)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
-    assert len(box.commands) == 2  # both approved commands ran across the two budgets
-    assert not box.stopped
 
 
 def test_adjudicate_appends_event_and_superseding_operator_record() -> None:
@@ -468,44 +404,24 @@ def test_free_launch_auto_runs_command_to_verdict() -> None:
     assert not any(e["kind"] == SessionEventKind.COMMAND_REJECTED.value for e in events)
 
 
-def test_free_launch_step_budget_pauses_for_guidance() -> None:
-    """The step budget bounds a free-launch session: it pauses (asks), not gives up (ADR-0034)."""
+def test_session_never_pauses_on_a_step_count() -> None:
+    """With the step budget removed, a session gates commands indefinitely (ADR-0034).
+
+    It only ever pauses when the *agent* hands back — never on a step count — so an
+    operator can keep approving as long as the agent keeps proposing.
+    """
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
         fid = _seed_finding(session)
-        s = rs.create_session(session, finding_id=fid, model="m", free_launch=True, max_steps=1)
+        s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox(
             lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
         )
         agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
-
-        start_and_step(
-            session, registry, s.id, agent, box, "Retest.", free_launch=True, max_steps=1
-        )
-        session.refresh(s)
-        rows = session.scalars(select(VerdictRecord)).all()
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
-    assert s.verdict_status is None
-    assert rows == []  # no verdict — the budget pauses, it does not conclude
-    assert len(box.commands) == 1  # exactly one step auto-ran before the budget
-    assert registry.get(s.id) is not None and not box.stopped  # paused, still alive
-
-
-def test_no_limit_session_never_pauses_on_the_budget() -> None:
-    """A ``max_steps=None`` session runs approvals without ever pausing on the budget (Slice 9)."""
-    sessions = session_factory(create_db_engine(IN_MEMORY))
-    registry = SessionRegistry()
-    with sessions() as session:
-        fid = _seed_finding(session)
-        s = rs.create_session(session, finding_id=fid, model="m", max_steps=None)
-        box = FakeSandbox(
-            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
-        )
-        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
-        start_and_step(session, registry, s.id, agent, box, "Retest.", max_steps=None)
-        # Approve well past what any finite default (8) would allow — it keeps gating
-        # each command, never pausing for guidance.
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        # Approve well past any former finite default (8) — it keeps gating each
+        # command, never pausing for guidance.
         for _ in range(12):
             apply_decision(
                 session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)

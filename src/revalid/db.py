@@ -232,11 +232,6 @@ class RetestSessionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     free_launch: Mapped[bool] = mapped_column(default=False)
-    #: Step budget for the session (ADR-0034); ``None`` = no limit (never pause on
-    #: it). The column default stays ``None`` so a no-limit session isn't clobbered
-    #: to 8 on insert — ``create_session`` always supplies the value (its own
-    #: default is 8).
-    max_steps: Mapped[int | None] = mapped_column(default=None)
 
 
 class SessionEventRecord(Base):
@@ -273,11 +268,6 @@ class SettingsRecord(Base):
     model: Mapped[str] = mapped_column(String(128))
     base_url: Mapped[str | None] = mapped_column(String(256), default=None)
     api_key: Mapped[str | None] = mapped_column(String(256), default=None)
-    #: Default retest step budget (ADR-0034); ``None`` = no limit. The 8 default
-    #: lives on the domain model (``from_domain`` always supplies a value); the
-    #: column default stays ``None`` so an explicit no-limit isn't clobbered on
-    #: insert by a column-level default firing for a ``None`` attribute.
-    default_max_steps: Mapped[int | None] = mapped_column(default=None)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
@@ -289,7 +279,6 @@ class SettingsRecord(Base):
             model=cfg.model,
             base_url=cfg.base_url,
             api_key=cfg.api_key,
-            default_max_steps=cfg.default_max_steps,
         )
 
     def to_domain(self) -> Settings:
@@ -298,7 +287,6 @@ class SettingsRecord(Base):
             model=self.model,
             base_url=self.base_url,
             api_key=self.api_key,
-            default_max_steps=self.default_max_steps,
         )
 
 

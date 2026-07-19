@@ -10,8 +10,8 @@ Task 5 adds the orchestration layer that drives the Task 4 agent
 (:mod:`revalid.retest_agent`) step-by-step: a process-local
 :class:`SessionRegistry` of :class:`LiveSession` state, ``start_and_step``/
 ``apply_decision`` to pause on each proposed command for human approval and
-resume it, and a step-budget backstop that force-concludes a session that
-never stops proposing commands.
+resume it. When the agent exhausts the options it can think of, it hands back
+to the operator (``needs_guidance``, ADR-0034) rather than running forever.
 """
 
 from __future__ import annotations
@@ -70,7 +70,6 @@ def create_session(
     finding_id: int,
     model: str,
     free_launch: bool = False,
-    max_steps: int | None = 8,
 ) -> RetestSessionRecord:
     """Insert a ``starting`` session row and return it.
 
@@ -80,15 +79,12 @@ def create_session(
         model: The resolved LLM model string driving the agent.
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (plan changes stay gated regardless). FR-17 Slice 5.
-        max_steps: Step budget — approved commands before the session pauses for
-            operator guidance (ADR-0034); the operator can raise it and continue.
     """
     record = RetestSessionRecord(
         finding_id=finding_id,
         status=RetestSessionStatus.STARTING.value,
         model=model,
         free_launch=free_launch,
-        max_steps=max_steps,
     )
     session.add(record)
     session.commit()
@@ -310,9 +306,6 @@ class LiveSession:
             each step via ``message_history``).
         pending_call_id: The ``tool_call_id`` awaiting a human decision, or
             ``None`` when no command is currently proposed.
-        step_count: Number of commands approved (and run) so far.
-        max_steps: The step budget — approved commands before the session pauses
-            for guidance (ADR-0034); ``None`` = no limit.
         lock: Guards the compare-and-swap on ``pending_call_id`` in
             ``apply_decision`` so two concurrent decisions (e.g. a double-click
             on Approve before the REST 202 re-enables the button) can't both
@@ -323,15 +316,13 @@ class LiveSession:
     sandbox: Sandbox
     messages: list[ModelMessage] = field(default_factory=list)
     pending_call_id: str | None = None
-    step_count: int = 0
-    max_steps: int | None = 8
     #: Whether the agent's commands auto-run without a per-command human approval
     #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
     #: ``set_free_launch``; the free-launch loop lives in ``_drive_auto``.
     free_launch: bool = False
-    #: Paused for operator guidance (ADR-0034): a step budget was reached or the
-    #: agent handed back. Set by ``_pause_for_guidance``, cleared by
-    #: ``continue_session``; the free-launch loop stops while it is ``True``.
+    #: Paused for operator guidance (ADR-0034): the agent exhausted its options and
+    #: handed back. Set by ``_pause_for_guidance``, cleared by ``continue_session``;
+    #: the free-launch loop stops while it is ``True``.
     awaiting_guidance: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     #: Manual operator commands (`!`) run since the agent's last turn, buffered
@@ -451,8 +442,8 @@ def _emit_proposal(session: Session, session_id: int, live: LiveSession, call: A
 
     The gate now only ever carries a ``run_command`` (the agent's ``set_plan``
     was removed in FR-17 6b-ii): a proposal is always a command awaiting a
-    decision. The caller sets the status — ``awaiting_command`` normally, or
-    ``needs_guidance`` when the step budget is spent (:func:`_dispatch_output`).
+    decision. The caller then sets the status to ``awaiting_command``
+    (:func:`_dispatch_output`).
     """
     args = call.args_as_dict()
     live.pending_call_id = call.tool_call_id
@@ -489,16 +480,7 @@ def _dispatch_output(
     output = result.output
     if isinstance(output, DeferredToolRequests) and output.approvals:
         _emit_proposal(session, session_id, live, output.approvals[0])
-        # Gate on the step budget: if it is spent, pause and ask the operator
-        # instead of soliciting another approval. The command stays pending; its
-        # gate re-opens once the operator raises the budget (continue_session).
-        # ``None`` max_steps means no limit — never pause on the budget (Slice 9).
-        if live.max_steps is not None and live.step_count >= live.max_steps:
-            _pause_for_guidance(
-                session, registry, session_id, f"Reached the {live.max_steps}-command budget."
-            )
-        else:
-            set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
+        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
     elif isinstance(output, ConcludeOutput):
         if output.status is VerdictStatus.INCONCLUSIVE:
             # The agent hands back rather than terminating: it has exhausted the
@@ -544,7 +526,6 @@ def start_and_step(
     sandbox: Sandbox,
     finding_prompt: str,
     *,
-    max_steps: int | None = 8,
     free_launch: bool = False,
 ) -> None:
     """Start the sandbox and run the retest agent's first step.
@@ -557,15 +538,13 @@ def start_and_step(
         agent: The built retest agent (Task 4).
         sandbox: The not-yet-started sandbox for this session.
         finding_prompt: The user prompt describing the finding to retest.
-        max_steps: Approved commands before the session pauses for operator
-            guidance (ADR-0034); the operator can raise it and continue.
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (FR-17 Slice 5). Plan changes stay gated regardless.
     """
     sandbox.start()
-    live = LiveSession(agent=agent, sandbox=sandbox, max_steps=max_steps, free_launch=free_launch)
+    live = LiveSession(agent=agent, sandbox=sandbox, free_launch=free_launch)
     registry.put(session_id, live)
-    set_status(session, session_id, RetestSessionStatus.STARTING)
+    set_status(session, session_id, RetestSessionStatus.THINKING)
     deps = _make_deps(session, session_id, live)
     try:
         result = agent.run_sync(finding_prompt, deps=deps)
@@ -641,16 +620,14 @@ def _resume_with_decision(
     Split out of :func:`apply_decision` so the lock-holding compare-and-swap
     stays a small, easily-audited critical section; the LLM resume call runs
     AFTER the lock has been released. Every pending call is a command now (the
-    agent's ``set_plan`` was removed in 6b-ii), so each *approval* counts one step
-    against the budget; the budget is enforced when the agent proposes its next
-    command (:func:`_dispatch_output`), where a spent budget pauses for guidance.
+    agent's ``set_plan`` was removed in 6b-ii), so a resume either runs the
+    approved command or folds a rejection into the tool's denial message.
     """
-    set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
+    set_status(session, session_id, RetestSessionStatus.THINKING)
     results = DeferredToolResults()
     if approved:
-        # Approved: count the step, then run. The run_command tool runs and drains
-        # observations into its own result (see _make_deps / the agent tool).
-        live.step_count += 1
+        # Approved: the run_command tool runs and drains observations into its own
+        # result (see _make_deps / the agent tool).
         results.approvals[call_id] = ToolApproved()
     else:
         # Rejected: no tool runs, so fold any operator activity into the denial
@@ -675,15 +652,15 @@ def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) ->
     """Auto-approve successive command proposals while free-launch is on (FR-17 Slice 5).
 
     The free-launch loop. Iterative on purpose — one :func:`_resume_with_decision`
-    call per pass, never recursing through :func:`apply_decision` — so a large
-    ``max_steps`` cannot blow the stack. Each auto-approval goes through the same
-    compare-and-swap (:func:`_consume_pending_call`) as a human approval, and is
-    recorded as a ``command_approved`` event flagged ``{"auto": True}`` so the
-    transcript stays honest about what a human vetted.
+    call per pass, never recursing through :func:`apply_decision` — so a long run
+    cannot blow the stack. Each auto-approval goes through the same compare-and-swap
+    (:func:`_consume_pending_call`) as a human approval, and is recorded as a
+    ``command_approved`` event flagged ``{"auto": True}`` so the transcript stays
+    honest about what a human vetted.
 
     The loop stops when: the session is torn down (concluded / ended), free-launch
     is turned off, or the session has paused for guidance (``awaiting_guidance`` —
-    a spent step budget, ADR-0034; the pending command is held, not auto-run). In
+    the agent handed back, ADR-0034; the pending command is held, not auto-run). In
     gated mode the first guard returns immediately, so callers can invoke this
     unconditionally.
 
@@ -721,10 +698,9 @@ def apply_decision(
 ) -> None:
     """Resume a paused run with a human decision on the pending command.
 
-    Each *approval* counts one step against ``live.max_steps``; when the agent
-    then proposes its next command with the budget spent, the session pauses for
-    operator guidance rather than force-concluding (:func:`_dispatch_output`,
-    ADR-0034). Rejections never run a command, so they never count.
+    An approval runs the command and resumes the agent; when the agent later
+    exhausts the options it can think of it hands back for operator guidance
+    (:func:`_dispatch_output`, ADR-0034) rather than running forever.
 
     ``command_id`` must match the session's currently pending ``tool_call_id``
     (validated + consumed atomically under ``live.lock``, see
@@ -934,7 +910,7 @@ def _resume_run(
     ended its turn handing back to the operator, so we resume it with any queued
     goal/chat steering (or a plain nudge) and dispatch its next output.
     """
-    set_status(session, session_id, RetestSessionStatus.RUNNING_COMMAND)
+    set_status(session, session_id, RetestSessionStatus.THINKING)
     deps = _make_deps(session, session_id, live)
     user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages()) or (
         "Continue the retest toward a determination."
@@ -948,23 +924,19 @@ def _resume_run(
     _drive_auto(session, registry, session_id)
 
 
-def continue_session(
-    session: Session, registry: SessionRegistry, session_id: int, *, extra_steps: int = 8
-) -> None:
-    """Resume a paused session, raising the step budget — ADR-0034 "Keep going".
+def continue_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Resume a paused session — ADR-0034 "Keep going".
 
     A no-op unless the session is paused in ``needs_guidance`` with a live agent (a
     paused session that outlived a backend restart has no sandbox to resume — the
-    operator restarts it instead). Raises ``max_steps`` by ``extra_steps``, clears
-    the pause, and continues: a command held at the budget re-opens its approve
-    gate (auto-run in free-launch); an exhausted-options pause re-runs the agent,
-    folding in any queued goal/chat guidance.
+    operator restarts it instead). A session only ever pauses when the agent hands
+    back a conclusion (never with a command still pending), so continuing re-runs
+    the agent, folding in any queued goal/chat guidance.
 
     Args:
         session: Active DB session for this call.
         registry: The live-session registry.
         session_id: The paused retest session to resume.
-        extra_steps: How many more approved commands to allow before the next pause.
     """
     record = session.get(RetestSessionRecord, session_id)
     if (
@@ -975,19 +947,8 @@ def continue_session(
     live = registry.get(session_id)
     if live is None:
         return
-    # A no-limit session never pauses on the budget, so it only reaches here via an
-    # exhausted-options pause — leave its (absent) budget as-is; otherwise raise it.
-    if live.max_steps is not None:
-        live.max_steps += extra_steps
-        record.max_steps = live.max_steps
-        session.commit()
     live.awaiting_guidance = False
-    if live.pending_call_id is not None:
-        # A command was held at the budget: re-open its gate (auto-run in free-launch).
-        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
-        _drive_auto(session, registry, session_id)
-    else:
-        _resume_run(session, registry, session_id, live)
+    _resume_run(session, registry, session_id, live)
 
 
 def conclude_session(

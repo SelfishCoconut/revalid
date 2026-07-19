@@ -62,15 +62,3 @@ def test_save_clear_key_removes_it(session: Session) -> None:
     settings_mod.save(session, model="x:y", base_url=None, api_key="sk-123")
     cfg = settings_mod.save(session, model="x:y", base_url=None, api_key=None, clear_key=True)
     assert cfg.api_key is None
-
-
-def test_default_max_steps_seeds_to_8_and_roundtrips(session: Session) -> None:
-    """The retest step budget seeds to 8 and persists any value, including no-limit (Slice 9)."""
-    assert settings_mod.load_or_seed(session).default_max_steps == 8
-    assert (
-        settings_mod.save(session, model="x:y", base_url=None, api_key=None, default_max_steps=20)
-    ).default_max_steps == 20
-    # None = no limit.
-    assert (
-        settings_mod.save(session, model="x:y", base_url=None, api_key=None, default_max_steps=None)
-    ).default_max_steps is None

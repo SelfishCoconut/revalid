@@ -370,16 +370,13 @@ def test_start_session_in_free_launch_auto_runs_to_verdict() -> None:
     """Starting with free_launch drives the command to a verdict, no approval (FR-17 Slice 5)."""
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
-        started = client.post(
-            "/api/findings/1/retest-session", json={"free_launch": True, "max_steps": 5}
-        )
+        started = client.post("/api/findings/1/retest-session", json={"free_launch": True})
         assert started.status_code == 202
         sid = started.json()["id"]
         # TestClient runs background tasks to completion before POST returns, so
         # the free-launch loop has already driven to a verdict.
         got = client.get(f"/api/retest-sessions/{sid}").json()
         assert got["free_launch"] is True
-        assert got["max_steps"] == 5
         assert got["status"] == "concluded"
         approvals = [e for e in got["events"] if e["kind"] == "command_approved"]
         assert approvals and all(e["payload"].get("auto") is True for e in approvals)
@@ -479,14 +476,14 @@ def test_adjudicate_without_a_verdict_is_a_noop() -> None:
         assert client.get("/api/verdicts").json() == []  # nothing to supersede → no row written
 
 
-def test_get_session_returns_budget_defaults() -> None:
-    """A default-started session reports gated mode + the default step budget (FR-17 Slice 5)."""
+def test_get_session_returns_gated_default() -> None:
+    """A default-started session reports gated mode (per-command approval; FR-17 Slice 5)."""
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
         got = client.get(f"/api/retest-sessions/{sid}").json()
         assert got["free_launch"] is False
-        assert got["max_steps"] == 8
+        assert "max_steps" not in got
 
 
 def _paused_client(script: Any) -> TestClient:
@@ -529,27 +526,8 @@ def test_pause_then_continue_with_guidance_reaches_a_verdict() -> None:
         assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "needs_guidance"
 
         client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
-        resp = client.post(f"/api/retest-sessions/{sid}/continue", json={"extra_steps": 4})
+        resp = client.post(f"/api/retest-sessions/{sid}/continue")
         assert resp.status_code == 202
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "concluded"
         assert state["verdict_status"] == "still_open"
-
-
-def test_new_session_inherits_the_settings_step_budget() -> None:
-    """A started session's budget comes from the Settings default — incl. no-limit (Slice 9)."""
-    with _client() as client:
-        client.post("/api/findings/import", json=_IMPORT)
-        client.put(
-            "/api/settings",
-            json={"model": "ollama:qwen3:14b", "base_url": None, "default_max_steps": 3},
-        )
-        sid = client.post("/api/findings/1/retest-session").json()["id"]
-        assert client.get(f"/api/retest-sessions/{sid}").json()["max_steps"] == 3
-
-        client.put(
-            "/api/settings",
-            json={"model": "ollama:qwen3:14b", "base_url": None, "default_max_steps": None},
-        )
-        sid2 = client.post("/api/findings/1/retest-session").json()["id"]
-        assert client.get(f"/api/retest-sessions/{sid2}").json()["max_steps"] is None

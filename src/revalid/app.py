@@ -267,7 +267,6 @@ class RetestSessionOut(BaseModel):
     verdict_status: str | None
     verdict_rationale: str | None
     free_launch: bool
-    max_steps: int | None
     events: list[SessionEventOut] = []
 
     @classmethod
@@ -283,7 +282,6 @@ class RetestSessionOut(BaseModel):
             verdict_status=record.verdict_status,
             verdict_rationale=record.verdict_rationale,
             free_launch=record.free_launch,
-            max_steps=record.max_steps,
             events=[SessionEventOut(**e) for e in events],
         )
 
@@ -328,12 +326,9 @@ class MessageRequest(BaseModel):
 
 
 class StartSessionRequest(BaseModel):
-    """Optional body for starting a session: free-launch + budget config (FR-17 Slice 5)."""
+    """Optional body for starting a session: free-launch + seed goal (FR-17 Slice 5)."""
 
     free_launch: bool = False
-    # Step budget override; when omitted the session inherits the Settings default
-    # (which may itself be no-limit, ADR-0034). ``ge=1`` applies when a value is given.
-    max_steps: int | None = Field(default=None, ge=1)
     # A user-owned goal drafted before the session (FR-17 6b-iii-b): when present,
     # the session seeds it verbatim instead of generating one at start.
     initial_goal: list[str] | None = None
@@ -366,12 +361,6 @@ class AdjudicateRequest(BaseModel):
 
     status: VerdictStatus
     rationale: str = ""
-
-
-class ContinueRequest(BaseModel):
-    """Body for resuming a paused session (ADR-0034): how many more steps to allow."""
-
-    extra_steps: int = Field(default=8, ge=1)
 
 
 class ConcludeRequest(BaseModel):
@@ -421,7 +410,6 @@ class SettingsOut(BaseModel):
     base_url: str | None
     api_key_set: bool
     api_key_hint: str | None
-    default_max_steps: int | None
 
     @classmethod
     def from_domain(cls, cfg: Settings) -> "SettingsOut":
@@ -432,7 +420,6 @@ class SettingsOut(BaseModel):
             base_url=cfg.base_url,
             api_key_set=bool(key),
             api_key_hint=key[-4:] if key else None,
-            default_max_steps=cfg.default_max_steps,
         )
 
 
@@ -445,8 +432,6 @@ class SettingsUpdateIn(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     clear_key: bool = False
-    #: Default retest step budget; ``None`` = no limit (ADR-0034). Omitted → keep 8.
-    default_max_steps: int | None = Field(default=8, ge=1)
 
 
 class ProbeIn(BaseModel):
@@ -628,7 +613,6 @@ def run_first_step(
             sandbox = make_sandbox(session_id)
             record = session.get(RetestSessionRecord, session_id)
             free_launch = record.free_launch if record else False
-            max_steps = record.max_steps if record else 8
             goal: tuple[str, ...] = tuple(initial_goal) if initial_goal else ()
             if not goal:  # no pre-start draft → generate (best-effort; never blocks)
                 with contextlib.suppress(Exception):
@@ -644,7 +628,6 @@ def run_first_step(
                 agent,
                 sandbox,
                 _goal_prompt(goal, finding),
-                max_steps=max_steps,
                 free_launch=free_launch,
             )
         except Exception as exc:  # broad on purpose: no failure may strand the session
@@ -761,9 +744,8 @@ def run_continue(
     sessions: sessionmaker[Session],
     registry: SessionRegistry,
     session_id: int,
-    extra_steps: int,
 ) -> None:
-    """Resume a paused session with a raised budget (ADR-0034 background task).
+    """Resume a paused session (ADR-0034 "Keep going", background task).
 
     Runs in the background because resuming drives further agent turns. A no-op
     unless the session is paused in ``needs_guidance`` with a live agent.
@@ -772,10 +754,9 @@ def run_continue(
         sessions: The app's session factory (each task opens a fresh session).
         registry: The process-local live-session registry.
         session_id: The paused retest session to resume.
-        extra_steps: How many more approved commands to allow before the next pause.
     """
     with sessions() as session:
-        continue_session(session, registry, session_id, extra_steps=extra_steps)
+        continue_session(session, registry, session_id)
 
 
 def run_conclude(
@@ -1131,17 +1112,11 @@ def _register_session_routes(
         cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
         finding = version.to_domain()
-        # An explicit body override wins; otherwise inherit the Settings default
-        # step budget (which may be no-limit → None) — ADR-0034 / Slice 9.
-        max_steps = (
-            cfg.max_steps if cfg.max_steps is not None else load_or_seed(session).default_max_steps
-        )
         record = create_session(
             session,
             finding_id=finding_id,
             model=agent_model_name(agent),
             free_launch=cfg.free_launch,
-            max_steps=max_steps,
         )
         background.add_task(
             run_first_step,
@@ -1250,17 +1225,14 @@ def _register_guidance_routes(
     """
 
     @router.post("/retest-sessions/{session_id}/continue", status_code=202)
-    def continue_route(
-        session_id: int, background: BackgroundTasks, body: ContinueRequest | None = None
-    ) -> dict[str, str]:
-        """Keep going on a paused session, raising its step budget (ADR-0034).
+    def continue_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
+        """Keep going on a paused session (ADR-0034 "Keep going").
 
-        Resumes the agent — a command held at the budget re-opens its gate, an
-        exhausted-options pause re-runs the agent with any queued guidance. Runs in
-        the background; a no-op unless the session is paused with a live agent.
+        Resumes the agent — a held command re-opens its gate, an exhausted-options
+        pause re-runs the agent with any queued guidance. Runs in the background; a
+        no-op unless the session is paused with a live agent.
         """
-        extra = (body or ContinueRequest()).extra_steps
-        background.add_task(run_continue, sessions, registry, session_id, extra)
+        background.add_task(run_continue, sessions, registry, session_id)
         return {"status": "accepted"}
 
     @router.post("/retest-sessions/{session_id}/conclude", status_code=202)
@@ -1446,7 +1418,6 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
             base_url=body.base_url,
             api_key=body.api_key,
             clear_key=body.clear_key,
-            default_max_steps=body.default_max_steps,
         )
         return SettingsOut.from_domain(cfg)
 
