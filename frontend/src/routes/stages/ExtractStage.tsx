@@ -14,7 +14,7 @@ import { errorMessage, formatDateTime } from "../../lib/format";
 const SEVERITIES: Severity[] = ["info", "low", "medium", "high", "critical"];
 
 const inputClass =
-  "mt-1 w-full rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 text-[13px] text-fg transition-colors placeholder:text-faint focus:border-iris/60 disabled:opacity-55";
+  "mt-1.5 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-fg transition-colors placeholder:text-faint focus:border-iris/60 disabled:opacity-55";
 const fieldLabel = "font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-faint";
 
 function toLines(values: string[]): string {
@@ -112,7 +112,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
           Description
           <textarea
             aria-label="Finding description"
-            rows={3}
+            rows={6}
             value={form.description}
             disabled={edit.isPending}
             onChange={(event) => {
@@ -126,7 +126,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
             Impact
             <textarea
               aria-label="Finding impact"
-              rows={2}
+              rows={4}
               value={form.impact}
               disabled={edit.isPending}
               onChange={(event) => {
@@ -139,7 +139,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
             Attack vector
             <textarea
               aria-label="Finding attack vector"
-              rows={2}
+              rows={4}
               value={form.attack_vector}
               disabled={edit.isPending}
               onChange={(event) => {
@@ -153,7 +153,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
           Affected endpoints (one per line)
           <textarea
             aria-label="Affected endpoints"
-            rows={2}
+            rows={4}
             value={form.endpoints}
             disabled={edit.isPending}
             onChange={(event) => {
@@ -166,7 +166,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
           Reproduction steps (one per line)
           <textarea
             aria-label="Reproduction steps"
-            rows={3}
+            rows={6}
             value={form.steps}
             disabled={edit.isPending}
             onChange={(event) => {

@@ -149,6 +149,11 @@ class SessionEventKind(enum.StrEnum):
     HUMAN_MESSAGE = "human_message"
     # The current guiding goal (FR-17 6b-ii: user-owned; formerly the agent's set_plan).
     PLAN_UPDATED = "plan_updated"
+    #: The retest scope set at launch (FR-17): payload ``endpoints`` is the exact
+    #: list of target URLs the agent must confine itself to. Emitted once at session
+    #: start and never again — reachability is fixed when the sandbox is provisioned,
+    #: so changing scope needs a fresh session (Restart), not a live edit.
+    TARGET_SET = "target_set"
     #: The session paused for operator guidance (ADR-0034); payload carries the
     #: human-readable ``reason`` the agent gave when it handed back.
     NEEDS_GUIDANCE = "needs_guidance"

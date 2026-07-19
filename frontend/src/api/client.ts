@@ -178,6 +178,10 @@ export interface StartSessionOptions {
   free_launch?: boolean;
   /** A pre-start user-owned goal (FR-17 6b-iii-b); seeded verbatim if present. */
   initial_goal?: string[];
+  /** The retest scope — exact target URL(s) the agent may hit (FR-17). Set at
+   * launch (reachability is fixed when the sandbox is provisioned); defaults to
+   * the finding's endpoints server-side when omitted. */
+  target_endpoints?: string[];
 }
 
 /** Start an agentic retest session for a finding (backend replies with the new session). */

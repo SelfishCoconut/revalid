@@ -80,14 +80,28 @@ describe("RetestStage", () => {
 });
 
 describe("GoalStage", () => {
-  it("shows the generated draft and starts a seeded session", async () => {
+  it("starts a seeded session with the goal and the finding's endpoints as scope", async () => {
     vi.mocked(client.draftGoal).mockResolvedValue({ steps: ["confirm endpoint", "retry bypass"] });
     vi.mocked(client.startRetestSession).mockResolvedValue({ id: 5 } as never);
-    renderStage(<GoalStage />, stageContext({ currentStage: "goal" }));
+    renderStage(
+      <GoalStage />,
+      stageContext({
+        currentStage: "goal",
+        finding: {
+          ...stageContext().finding,
+          affected_endpoints: ["http://revalid-juice-shop:3000/rest/user/login"],
+        },
+      }),
+    );
     expect(await screen.findByDisplayValue(/confirm endpoint/)).toBeInTheDocument();
+    // The scope editor pre-fills from the finding's endpoints (FR-17 launch scope).
+    expect(
+      screen.getByDisplayValue("http://revalid-juice-shop:3000/rest/user/login"),
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /start retest/i }));
     expect(client.startRetestSession).toHaveBeenCalledWith(7, {
       initial_goal: ["confirm endpoint", "retry bypass"],
+      target_endpoints: ["http://revalid-juice-shop:3000/rest/user/login"],
     });
   });
 });

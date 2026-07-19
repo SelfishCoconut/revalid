@@ -22,7 +22,7 @@ import {
 import { RetestTerminal } from "../components/RetestTerminal";
 import { StatusBadge } from "../components/StatusBadge";
 import { Button } from "../components/ui/Button";
-import { Eyebrow, Panel } from "../components/ui/Panel";
+import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { queryKeys } from "../hooks/queryKeys";
 import { useRetestSession } from "../hooks/useRetestSession";
 import { errorMessage } from "../lib/format";
@@ -77,6 +77,14 @@ function payloadSteps(payload: Record<string, unknown>): string[] {
 function currentPlan(events: SessionEvent[]): string[] {
   const latest = [...events].reverse().find((event) => event.kind === "plan_updated");
   return latest ? payloadSteps(latest.payload) : [];
+}
+
+/** The retest scope = endpoints from the launch-time `target_set` event (read-only). */
+function currentTarget(events: SessionEvent[]): string[] {
+  const latest = [...events].reverse().find((event) => event.kind === "target_set");
+  return latest && Array.isArray(latest.payload.endpoints)
+    ? latest.payload.endpoints.map(String)
+    : [];
 }
 
 /** A compact ordered list of guiding-plan steps. */
@@ -301,6 +309,7 @@ export function RetestSession({
   const autoSeqs = autoApprovedSeqs(events);
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);
+  const targetEndpoints = currentTarget(events);
   const decisionSeq = lastDecisionSeq(events);
   // A pending approval is for either a command or a plan change; both gate on the
   // same tool_call_id, so they share the approve/reject mutations below.
@@ -420,8 +429,8 @@ export function RetestSession({
 
   return (
     <div
-      className={`flex min-h-[34rem] flex-col gap-3 ${
-        embedded ? "h-[calc(100dvh-20rem)]" : "h-[calc(100dvh-9rem)]"
+      className={`flex flex-col gap-3 ${
+        embedded ? "min-h-[calc(100dvh-20rem)]" : "min-h-[calc(100dvh-9rem)]"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -499,6 +508,21 @@ export function RetestSession({
             <Eyebrow>Current goal</Eyebrow>
           </div>
           <div className="space-y-3 p-4">
+            {targetEndpoints.length > 0 && (
+              <div className="rounded-lg border border-line bg-panel-2/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Eyebrow>Scope</Eyebrow>
+                  <span className="text-[11px] text-faint">set at launch — Restart to change</span>
+                </div>
+                <ul className="mt-1.5 space-y-0.5">
+                  {targetEndpoints.map((ep) => (
+                    <li key={ep} className="break-all font-mono text-[12px] text-fg">
+                      {ep}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {editingGoal ? (
               <div className="space-y-2">
                 <textarea
@@ -575,14 +599,18 @@ export function RetestSession({
           </div>
         </Panel>
 
-        {/* Conversation — a boxed chat with the agent. */}
-        <div
-          ref={chatRef}
-          role="log"
-          aria-label="Agent conversation"
-          className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-line bg-panel/40 p-4"
-        >
-          <div className="mx-auto flex max-w-[68rem] flex-col gap-3 pb-1">
+        {/* Conversation — a boxed chat with the agent, panelled like the rest. A
+            min-height keeps it usable so the docked terminal can never squeeze the
+            approval gate to nothing on a short viewport (the page scrolls instead). */}
+        <Panel className="flex min-h-[16rem] flex-1 flex-col overflow-hidden">
+          <PanelHeader eyebrow="Conversation" />
+          <div
+            ref={chatRef}
+            role="log"
+            aria-label="Agent conversation"
+            className="min-h-0 flex-1 overflow-y-auto p-4"
+          >
+            <div className="mx-auto flex max-w-[68rem] flex-col gap-3 pb-1">
             {chatItems.length === 0 && !verdict && !isThinking(status) && (
               <p className="text-sm text-dim">Starting the sandboxed retest…</p>
             )}
@@ -811,8 +839,9 @@ export function RetestSession({
                 )}
               </div>
             )}
+            </div>
           </div>
-        </div>
+        </Panel>
 
       </div>
 
@@ -843,7 +872,7 @@ export function RetestSession({
         </div>
         {!sessionOver && (
           <p className="mt-1 px-1 text-[11px] text-faint">
-            The agent reads your message on its next turn.
+            The agent replies here; your message also steers its next turn.
           </p>
         )}
         {messageMutation.isError && (

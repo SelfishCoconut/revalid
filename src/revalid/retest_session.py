@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from revalid.db import RetestSessionRecord, SessionEventRecord, VerdictRecord
 from revalid.domain import (
     AgenticEvidence,
+    Finding,
     RetestSessionStatus,
     SessionEventKind,
     VerdictStatus,
@@ -848,6 +849,76 @@ def submit_message(session: Session, registry: SessionRegistry, session_id: int,
         return
     append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
     live.receive_message(text)
+
+
+def _activity_line(event: dict[str, Any]) -> str:
+    """One compact transcript line for the Q&A context, or '' to skip this event."""
+    kind, payload = event["kind"], event["payload"]
+    if kind == SessionEventKind.COMMAND_OUTPUT:
+        return f"ran: {payload.get('command', '')} -> exit {payload.get('exit_code')}"
+    if kind == SessionEventKind.COMMAND_PROPOSED:
+        return f"proposed: {payload.get('command', '')}"
+    if kind == SessionEventKind.AGENT_MESSAGE:
+        return f"you said: {payload.get('text', '')}"
+    if kind == SessionEventKind.HUMAN_MESSAGE:
+        return f"operator said: {payload.get('text', '')}"
+    if kind == SessionEventKind.VERDICT:
+        return f"verdict: {payload.get('status')} — {payload.get('rationale', '')}"
+    return ""
+
+
+def _qa_context(events: list[dict[str, Any]], finding: Finding) -> str:
+    """Render a compact, read-only context for the Q&A agent from the transcript (FR-17).
+
+    Pulls the finding identity, the launch scope, the current goal, and a short tail
+    of recent activity — enough to answer "what are we retesting?", "what have you
+    tried?", "why that command?" without replaying the deferred-command history.
+    """
+    lines = [f"Finding: {finding.title}"]
+    if finding.description:
+        lines.append(f"Description: {finding.description}")
+    target = next(
+        (
+            e["payload"].get("endpoints")
+            for e in reversed(events)
+            if e["kind"] == SessionEventKind.TARGET_SET
+        ),
+        None,
+    )
+    if target:
+        lines.append("Target scope: " + ", ".join(str(t) for t in target))
+    goal = next(
+        (
+            e["payload"].get("steps")
+            for e in reversed(events)
+            if e["kind"] == SessionEventKind.PLAN_UPDATED
+        ),
+        None,
+    )
+    if goal:
+        lines.append("Current goal:\n" + "\n".join(f"- {s}" for s in goal))
+    activity = [line for e in events[-14:] if (line := _activity_line(e))]
+    if activity:
+        lines.append("Recent activity:\n" + "\n".join(activity))
+    return "\n".join(lines)
+
+
+def answer_operator_question(
+    qa_agent: Agent[None, str],
+    session: Session,
+    session_id: int,
+    finding: Finding,
+    question: str,
+) -> str:
+    """Answer an operator's chat question from a read-only view of the transcript (FR-17).
+
+    Reads the persisted events + finding and runs the prose Q&A agent. Never mutates
+    live session state or the deferred-command history, so it is safe to call while
+    the main agent is mid-turn — the reply is additive to the transcript.
+    """
+    context = _qa_context(load_events_after(session, session_id, 0), finding)
+    result = qa_agent.run_sync(f"{context}\n\nOperator's question: {question}")
+    return result.output.strip()
 
 
 def set_goal(
