@@ -1,12 +1,14 @@
 import { useState } from "react";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { startRetestSession } from "../../api/client";
+import type { RetestSessionSummary } from "../../api/types";
 import { NotesThread } from "../../components/NotesThread";
 import { Button } from "../../components/ui/Button";
 import { Eyebrow, Panel } from "../../components/ui/Panel";
+import { queryKeys } from "../../hooks/queryKeys";
 import { useFindingStage } from "../../hooks/useFindingStage";
 import { useGoalDraft } from "../../hooks/useGoalDraft";
 import { errorMessage } from "../../lib/format";
@@ -16,6 +18,7 @@ export function GoalStage() {
   const { findingId } = useFindingStage();
   const draft = useGoalDraft(findingId);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [text, setText] = useState("");
   // Track which draft we've already seeded the textarea from, so a fresh draft
   // (first load or after Regenerate) re-seeds while further edits stay local.
@@ -34,7 +37,25 @@ export function GoalStage() {
       startRetestSession(findingId, {
         initial_goal: text.split("\n").map((s) => s.trim()).filter(Boolean),
       }),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      // Seed the finding-sessions cache with the just-created session before
+      // navigating: FindingLayout stays mounted across this child-stage
+      // navigation, so without this the cache still holds the pre-start `[]`
+      // and RetestStage bounces straight back to /goal (see FR-17 6b-iii-b
+      // fix wave, GoalStage regression).
+      queryClient.setQueryData<RetestSessionSummary[]>(
+        queryKeys.findingSessions(findingId),
+        (old) => [
+          {
+            id: created.id,
+            finding_id: created.finding_id,
+            status: created.status,
+            verdict_status: created.verdict_status,
+            created_at: new Date().toISOString(),
+          },
+          ...(old ?? []),
+        ],
+      );
       navigate(`/findings/${String(findingId)}/retest`);
     },
   });
