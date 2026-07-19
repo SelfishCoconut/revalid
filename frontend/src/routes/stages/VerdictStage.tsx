@@ -30,7 +30,7 @@ export function VerdictStage() {
               >
                 Run the retest
               </Link>{" "}
-              once a plan is approved.
+              to record a determination.
             </p>
           ) : (
             <>

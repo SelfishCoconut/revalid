@@ -7,24 +7,13 @@ function makeVerdict(overrides: Partial<Verdict>): Verdict {
   return {
     id: 1,
     finding_id: 1,
-    probe_kind: "probe",
-    plan_version: 1,
     status: "still_open",
     reason_code: "CODE",
     rationale: "",
     matched_indicators: [],
-    source: "batch",
-    session_id: null,
-    actor: "executor",
-    evidence: {
-      request_method: "GET",
-      request_url: "http://lab.local/",
-      request_body: "",
-      response_status: 200,
-      response_headers: {},
-      response_body_excerpt: "",
-      elapsed_ms: 1,
-    },
+    session_id: 1,
+    actor: "agent",
+    evidence: null,
     ...overrides,
   };
 }

@@ -20,14 +20,13 @@ export function VerdictCard({ verdict }: { verdict: Verdict }) {
         <code className="rounded-md bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-dim ring-1 ring-inset ring-line">
           {verdict.reason_code}
         </code>
-        <span className="font-mono text-[11px] text-faint">probe: {verdict.probe_kind}</span>
-        {verdict.plan_version != null && (
-          <span className="font-mono text-[11px] text-faint">
-            plan v{verdict.plan_version}
-          </span>
-        )}
       </header>
       <p className="mt-2.5 text-sm leading-relaxed text-dim">{verdict.rationale}</p>
+      {verdict.matched_indicators.length > 0 && (
+        <p className="mt-1.5 font-mono text-[11px] text-faint">
+          matched: {verdict.matched_indicators.join(", ")}
+        </p>
+      )}
       <EvidenceView verdict={verdict} />
     </article>
   );
