@@ -105,6 +105,7 @@ def save(
     base_url: str | None,
     api_key: str | None,
     clear_key: bool = False,
+    default_max_steps: int | None = 8,
 ) -> Settings:
     """Persist an updated setting and return it.
 
@@ -118,6 +119,8 @@ def save(
         base_url: Provider base URL, or ``None`` for env-configured providers.
         api_key: A new key to store, or blank/``None`` to keep the existing one.
         clear_key: When true, delete the stored key.
+        default_max_steps: Default retest step budget for new sessions; ``None`` =
+            no limit (ADR-0034).
 
     Returns:
         The persisted :class:`~revalid.domain.Settings`.
@@ -129,6 +132,7 @@ def save(
         session.add(record)
     record.model = model
     record.base_url = base_url or None
+    record.default_max_steps = default_max_steps
     if clear_key:
         record.api_key = None
     elif api_key:

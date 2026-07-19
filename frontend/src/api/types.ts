@@ -130,6 +130,8 @@ export interface Settings {
   base_url: string | null;
   api_key_set: boolean;
   api_key_hint: string | null;
+  /** Default retest step budget; `null` = no limit (ADR-0034). */
+  default_max_steps: number | null;
 }
 
 export interface SettingsUpdate {
@@ -137,6 +139,8 @@ export interface SettingsUpdate {
   base_url: string | null;
   api_key?: string | null;
   clear_key?: boolean;
+  /** Default retest step budget; `null` = no limit. */
+  default_max_steps: number | null;
 }
 
 export interface ProbeInput {

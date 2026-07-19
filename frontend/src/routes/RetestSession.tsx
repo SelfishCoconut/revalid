@@ -258,7 +258,9 @@ export function RetestSession({
 
   const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
   const stepsDone = stepsUsed(events);
-  const maxSteps = record?.max_steps ?? 8;
+  // `record.max_steps` is `null` for a no-limit session (a real value, distinct
+  // from the still-loading `undefined` — which falls back to the default meter).
+  const maxSteps = record ? record.max_steps : 8;
   const autoSeqs = autoApprovedSeqs(events);
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);

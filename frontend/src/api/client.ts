@@ -170,7 +170,7 @@ export interface RetestSession {
   verdict_status: string | null;
   verdict_rationale: string | null;
   free_launch: boolean;
-  max_steps: number;
+  max_steps: number | null;
   events: SessionEvent[];
 }
 

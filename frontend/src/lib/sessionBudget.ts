@@ -21,7 +21,8 @@ export function currentFreeLaunch(events: SessionEvent[], initial: boolean): boo
 }
 
 /** "3 / 8 steps" — the step-budget meter label. */
-export function budgetLabel(used: number, max: number): string {
+export function budgetLabel(used: number, max: number | null): string {
+  if (max === null) return `${String(used)} steps · no limit`;
   return `${String(used)} / ${String(max)} steps`;
 }
 

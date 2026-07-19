@@ -70,7 +70,7 @@ def create_session(
     finding_id: int,
     model: str,
     free_launch: bool = False,
-    max_steps: int = 8,
+    max_steps: int | None = 8,
 ) -> RetestSessionRecord:
     """Insert a ``starting`` session row and return it.
 
@@ -311,8 +311,8 @@ class LiveSession:
         pending_call_id: The ``tool_call_id`` awaiting a human decision, or
             ``None`` when no command is currently proposed.
         step_count: Number of commands approved (and run) so far.
-        max_steps: The maximum number of commands the agent may run before
-            the session is force-concluded ``inconclusive`` (budget backstop).
+        max_steps: The step budget — approved commands before the session pauses
+            for guidance (ADR-0034); ``None`` = no limit.
         lock: Guards the compare-and-swap on ``pending_call_id`` in
             ``apply_decision`` so two concurrent decisions (e.g. a double-click
             on Approve before the REST 202 re-enables the button) can't both
@@ -324,7 +324,7 @@ class LiveSession:
     messages: list[ModelMessage] = field(default_factory=list)
     pending_call_id: str | None = None
     step_count: int = 0
-    max_steps: int = 8
+    max_steps: int | None = 8
     #: Whether the agent's commands auto-run without a per-command human approval
     #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
     #: ``set_free_launch``; the free-launch loop lives in ``_drive_auto``.
@@ -492,7 +492,8 @@ def _dispatch_output(
         # Gate on the step budget: if it is spent, pause and ask the operator
         # instead of soliciting another approval. The command stays pending; its
         # gate re-opens once the operator raises the budget (continue_session).
-        if live.step_count >= live.max_steps:
+        # ``None`` max_steps means no limit — never pause on the budget (Slice 9).
+        if live.max_steps is not None and live.step_count >= live.max_steps:
             _pause_for_guidance(
                 session, registry, session_id, f"Reached the {live.max_steps}-command budget."
             )
@@ -543,7 +544,7 @@ def start_and_step(
     sandbox: Sandbox,
     finding_prompt: str,
     *,
-    max_steps: int = 8,
+    max_steps: int | None = 8,
     free_launch: bool = False,
 ) -> None:
     """Start the sandbox and run the retest agent's first step.
@@ -974,9 +975,12 @@ def continue_session(
     live = registry.get(session_id)
     if live is None:
         return
-    live.max_steps += extra_steps
-    record.max_steps = live.max_steps
-    session.commit()
+    # A no-limit session never pauses on the budget, so it only reaches here via an
+    # exhausted-options pause — leave its (absent) budget as-is; otherwise raise it.
+    if live.max_steps is not None:
+        live.max_steps += extra_steps
+        record.max_steps = live.max_steps
+        session.commit()
     live.awaiting_guidance = False
     if live.pending_call_id is not None:
         # A command was held at the budget: re-open its gate (auto-run in free-launch).

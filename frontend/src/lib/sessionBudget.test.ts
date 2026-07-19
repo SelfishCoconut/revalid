@@ -42,6 +42,10 @@ describe("budgetLabel", () => {
   it("formats used / max", () => {
     expect(budgetLabel(3, 8)).toBe("3 / 8 steps");
   });
+
+  it("shows no-limit when max is null", () => {
+    expect(budgetLabel(3, null)).toBe("3 steps · no limit");
+  });
 });
 
 describe("givenUpReason", () => {

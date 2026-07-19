@@ -45,6 +45,8 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   const [model, setModel] = useState(initial.model);
   const [baseUrl, setBaseUrl] = useState(initial.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [maxSteps, setMaxSteps] = useState(String(initial.default_max_steps ?? 8));
+  const [noLimit, setNoLimit] = useState(initial.default_max_steps === null);
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
 
   const discoveredModels = useMemo(() => {
@@ -66,7 +68,13 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   }
 
   function handleSave() {
-    update.mutate({ model, base_url: baseUrl || null, api_key: apiKey || null });
+    const budget = noLimit ? null : Math.max(1, Math.trunc(Number(maxSteps)) || 8);
+    update.mutate({
+      model,
+      base_url: baseUrl || null,
+      api_key: apiKey || null,
+      default_max_steps: budget,
+    });
   }
 
   return (
@@ -126,6 +134,38 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
             className={`${inputClass} font-mono`}
           />
         </label>
+
+        <div className={fieldLabel}>
+          Retest step budget
+          <div className="mt-1 flex items-center gap-3">
+            <input
+              type="number"
+              min={1}
+              value={maxSteps}
+              onChange={(event) => {
+                setMaxSteps(event.target.value);
+              }}
+              disabled={noLimit}
+              aria-label="retest step budget"
+              className={`${inputClass} mt-0 w-24 font-mono`}
+            />
+            <label className="flex items-center gap-2 whitespace-nowrap text-[13px] normal-case tracking-normal text-dim">
+              <input
+                type="checkbox"
+                checked={noLimit}
+                onChange={(event) => {
+                  setNoLimit(event.target.checked);
+                }}
+                className="accent-iris"
+              />
+              No limit
+            </label>
+          </div>
+          <span className="mt-1 block text-[12px] normal-case tracking-normal text-faint">
+            Approved commands before a retest pauses to ask you; raise it or continue live at any
+            time.
+          </span>
+        </div>
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
