@@ -1,17 +1,17 @@
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom";
 
 import { useFindings } from "../hooks/useFindings";
+import { useFindingSessions } from "../hooks/useFindingSessions";
 import type { FindingStageContext } from "../hooks/useFindingStage";
-import { usePlans } from "../hooks/usePlans";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-import { currentPlan, pipelineReach } from "../lib/selectors";
+import { pipelineReach } from "../lib/selectors";
 import { PipelineTrack, type Stage } from "./PipelineTrack";
 import { SeverityBadge } from "./SeverityBadge";
 import { Spinner } from "./Spinner";
 import { Panel } from "./ui/Panel";
 
-const STAGES: readonly Stage[] = ["extract", "plan", "approve", "retest", "verdict"];
+const STAGES: readonly Stage[] = ["extract", "goal", "retest", "verdict"];
 
 function isStage(value: string | undefined): value is Stage {
   return value != null && (STAGES as readonly string[]).includes(value);
@@ -21,8 +21,8 @@ function isStage(value: string | undefined): value is Stage {
  * Persistent chrome for the finding stage wizard (ADR-0024): the identity header
  * and the {@link PipelineTrack} stepper stay put while only the stage panel below
  * (the `<Outlet/>`) swaps as the operator walks extract → … → verdict. It loads
- * the finding, its plans, and its verdicts once and shares them via Outlet
- * context so each stage page reads from one cache.
+ * the finding, its retest sessions, and its verdicts once and shares them via
+ * Outlet context so each stage page reads from one cache.
  */
 export function FindingLayout() {
   const { id } = useParams();
@@ -30,7 +30,7 @@ export function FindingLayout() {
   const location = useLocation();
 
   const findings = useFindings();
-  const plans = usePlans(findingId);
+  const sessionsQuery = useFindingSessions(findingId);
   const verdicts = useVerdicts();
 
   if (findings.isPending) {
@@ -49,22 +49,19 @@ export function FindingLayout() {
     return <p className="text-sm text-faint">Finding not found.</p>;
   }
 
-  const planList = plans.data ?? [];
-  const current = currentPlan(planList);
-  const hasPlan = planList.some(
-    (plan) => plan.status !== "generating" && plan.status !== "failed",
-  );
+  const sessions = sessionsQuery.data ?? [];
   const findingVerdicts = (verdicts.data ?? [])
     .filter((verdict) => verdict.finding_id === findingId)
     .sort((a, b) => b.id - a.id);
-  const approved = planList.some((plan) => plan.status === "approved") || findingVerdicts.length > 0;
-  const retested = findingVerdicts.length > 0;
 
-  const reach = pipelineReach({ planned: hasPlan, approved, retested });
+  const reach = pipelineReach({
+    sessionExists: sessions.length > 0,
+    hasVerdict: findingVerdicts.length > 0,
+  });
   const currentStage = STAGES[reach.current];
   const segment = location.pathname.split("/").pop();
 
-  // Deep-linking to a stage ahead of progress (e.g. /approve before a plan
+  // Deep-linking to a stage ahead of progress (e.g. /verdict before a session
   // exists) would strand the operator on a not-yet-actionable stage — send them
   // to the current stage instead, matching the index route (#83, ADR-0024).
   const requestedIndex = isStage(segment) ? STAGES.indexOf(segment) : -1;
@@ -77,11 +74,8 @@ export function FindingLayout() {
   const context: FindingStageContext = {
     finding,
     findingId,
-    plans: planList,
-    currentPlan: current,
-    hasPlan,
-    approved,
-    retested,
+    sessions,
+    latestSession: sessions[0],
     verdicts: findingVerdicts,
     currentStage,
   };
@@ -106,9 +100,8 @@ export function FindingLayout() {
         </div>
         <div className="border-t border-line bg-panel-2/30 px-4 py-4">
           <PipelineTrack
-            planned={hasPlan}
-            approved={approved}
-            retested={retested}
+            sessionExists={sessions.length > 0}
+            hasVerdict={findingVerdicts.length > 0}
             verdict={findingVerdicts[0]?.status}
             findingId={findingId}
             activeStage={activeStage}
