@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-plan demo-approval demo-sanity demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-techniques demo-browser-xss demo-retest-session demo-walking-skeleton lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests
@@ -34,26 +34,6 @@ demo-ingest-pdf:
 # else an offline stand-in model — runs the full FR-01 -> FR-03 pipeline either way)
 demo-extract:
 	uv run python scripts/demo/extract_pdf.py
-
-# ADR-0019 demo: the retest-technique registry — finding classification, curl
-# rendering, and conservative verdicts on synthetic evidence (offline, no lab)
-demo-techniques:
-	uv run python scripts/demo/techniques.py
-
-# FR-04 demo: derive a gated retest plan from a finding (configured backend or
-# an offline stand-in); shows an off-allowlist action being dropped by the gate
-demo-plan:
-	uv run python scripts/demo/plan_retest.py
-
-# FR-05 demo: nothing executes without approval — refused -> approve -> retest,
-# plus an edit creating v2 (offline: in-memory app + mock probe target)
-demo-approval:
-	uv run python scripts/demo/approval_gate.py
-
-# FR-08 execution sanity checker (ADR-0014): plan-deviation block + ambiguity
-# downgrade, fully offline
-demo-sanity:
-	uv run python scripts/demo/execution_sanity.py
 
 # FR-10 audit trail (ADR-0015): re-derive every verdict from stored evidence
 # alone, no re-execution — offline
@@ -91,11 +71,6 @@ eval:
 ground-truth-skeleton:
 	uv run python scripts/make_ground_truth.py --export "$(EXPORT)" $(if $(OUT),--out "$(OUT)",)
 
-# FR-14 browser-probe demo (ADR-0018): run a browser-XSS probe through the FR-05
-# gate + FR-08 guard with a canned runner (no real browser), fully offline
-demo-browser-xss:
-	uv run python scripts/demo/browser_xss.py
-
 # FR-17 agentic retest session demo (ADR-0025, Slice 0): propose -> approve ->
 # output -> verdict through the real orchestrator, with a FakeSandbox + scripted
 # FunctionModel standing in for Docker/the lab/the LLM — fully offline. PYTHONPATH=.
@@ -104,10 +79,6 @@ demo-browser-xss:
 # lab needs the `sandbox` extra + `make lab-up` — see the system test.
 demo-retest-session:
 	PYTHONPATH=. uv run python scripts/demo/retest_session.py
-
-# M1 walking-skeleton demo (FR-07/FR-09): ingest -> probe -> verdict (needs the lab)
-demo-walking-skeleton:
-	uv run python scripts/demo/walking_skeleton.py
 
 # FR-13 enhancement demo (ADR-0021): the DB-persisted model/provider setting drives
 # the next agent build — seed default -> change -> build_model picks it up, offline
@@ -163,7 +134,7 @@ dev-ui:
 	npm --prefix frontend run dev
 
 # FR-11 acceptance demo: build the SPA and serve the whole tool on localhost so
-# the full flow (upload PDF -> approve plan -> retest -> verdicts) is operable
+# the full flow (upload PDF -> goal -> agentic retest -> verdicts) is operable
 # from the browser alone. Prereqs for a live retest: `make lab-up` and an LLM
 # backend (ANTHROPIC_API_KEY, or REVALID_LLM_MODEL=ollama:<model> + a server).
 demo-ui: build-ui run

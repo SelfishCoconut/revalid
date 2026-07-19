@@ -4,9 +4,9 @@ Usage::
 
     uv run python scripts/demo/results_export.py
 
-Runs fully offline: build a small run (finding -> approved plan -> verdict from a
-mock retest), export the whole run via :func:`revalid.export.build_export`, then
-validate the document against the *published* JSON schema
+Runs fully offline: build a small run (finding -> agentic retest session -> recorded
+verdict), export the whole run via :func:`revalid.export.build_export`, then validate
+the document against the *published* JSON schema
 (``docs/reference/schemas/run-export.schema.json``) with ``jsonschema`` — proving
 the FR-12 acceptance criterion the evaluation harness (FR-15) relies on.
 """
@@ -17,30 +17,15 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
 from jsonschema import validate
 
-from revalid.approval import approve_plan, execute_approved_plan, save_generated_plan
+from revalid import retest_session as rs
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
-from revalid.domain import Finding, Probe, RetestPlan, Severity
+from revalid.domain import Finding, SessionEventKind, Severity, VerdictStatus
 from revalid.export import build_export
 from revalid.findings import create_finding
-from revalid.plan import PlanResult
 
 _SCHEMA = Path(__file__).resolve().parents[2] / "docs/reference/schemas/run-export.schema.json"
-
-
-def _plan() -> PlanResult:
-    probe = Probe(
-        kind="sqli-login-bypass",
-        method="POST",
-        url="http://localhost:3000/rest/user/login",
-        json_body={"email": "' OR 1=1--", "password": "x"},
-    )
-    plan = RetestPlan(
-        finding_title="SQLi login", actions=(probe,), raw={"finding_title": "SQLi login"}
-    )
-    return PlanResult(plan=plan)
 
 
 def main() -> int:
@@ -48,20 +33,27 @@ def main() -> int:
     session = session_factory(create_db_engine(IN_MEMORY))()
     create_finding(session, Finding(title="SQLi login", severity=Severity.CRITICAL))
     session.commit()
-    save_generated_plan(session, 1, _plan())
-    approve_plan(session, 1)
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"authentication": {"token": "t"}})
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        execute_approved_plan(session, client, 1)
+    sid = rs.create_session(session, finding_id=1, model="demo").id
+    rs.append_event(
+        session,
+        sid,
+        SessionEventKind.COMMAND_OUTPUT,
+        {
+            "command": "curl -s http://localhost:3000/rest/user/login",
+            "stdout": '{"authentication": {"token": "t"}}',
+            "stderr": "",
+            "exit_code": 0,
+            "elapsed_ms": 12,
+        },
+    )
+    rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
 
     export = build_export(session, generated_at=datetime(2026, 7, 15, tzinfo=UTC))
     document = export.model_dump(mode="json")
     print(
         f"1. exported run: schema_version={export.schema_version}, "
-        f"{export.metrics.findings} finding(s), {export.metrics.plans} plan(s), "
+        f"{export.metrics.findings} finding(s), "
         f"{export.metrics.verdicts} verdict(s) {dict(export.metrics.verdicts_by_status)}"
     )
 

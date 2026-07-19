@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-import httpx
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -34,27 +33,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
 from revalid import __version__
-from revalid.allowlist import load_allowlist
-from revalid.approval import (
-    AllActionsRejectedError,
-    NoProposedPlanError,
-    PlanNotApprovedError,
-    approve_plan,
-    edit_plan,
-    execute_approved_plan,
-    finish_plan_generation,
-    list_plans,
-    reject_plan,
-    revise_plan,
-    start_plan_generation,
-)
 from revalid.audit import rederive_run
-from revalid.browser import BrowserProbeUnavailableError, BrowserRunner, make_browser_runner
 from revalid.db import (
     FindingNoteRecord,
     FindingRecord,
     FindingVersionRecord,
-    PlanRecord,
     ReportRecord,
     RetestSessionRecord,
     VerdictRecord,
@@ -63,12 +46,9 @@ from revalid.db import (
 )
 from revalid.domain import (
     AgenticEvidence,
-    Evidence,
     Finding,
     FindingStage,
-    Probe,
     ReportStatus,
-    RetestPlan,
     RetestSessionStatus,
     SessionEventKind,
     Settings,
@@ -90,15 +70,9 @@ from revalid.llm import agent_model_name, build_model
 from revalid.pdf import PdfError, read_pdf
 from revalid.plan import (
     GeneratedGoal,
-    PlannedAction,
-    PlanResult,
-    RejectedAction,
     build_goal_agent,
-    build_plan_agent,
     generate_goal,
-    generate_plan,
 )
-from revalid.retest import build_probe_client, lab_base_url
 from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
 from revalid.retest_session import (
     SessionRegistry,
@@ -117,7 +91,6 @@ from revalid.retest_session import (
     submit_message,
 )
 from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
-from revalid.sanity import PlanDeviationError
 from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
 
 #: The retest agent's static output type: a verdict, or a deferred approval request.
@@ -223,55 +196,36 @@ class NoteOut(BaseModel):
         )
 
 
-def _verdict_out_evidence(record: VerdictRecord) -> Evidence | AgenticEvidence | None:
-    """Build the right evidence shape for the API view (batch HTTP vs agentic)."""
-    if record.evidence is None:
-        return None
-    if record.source == "agentic":
-        return AgenticEvidence(**record.evidence)
-    return Evidence(**record.evidence)
-
-
 class VerdictOut(BaseModel):
-    """A persisted verdict as returned by the API (FR-09/FR-17).
+    """An agentic verdict as returned by the API (FR-09/FR-17).
 
-    Flat over both a ``batch`` verdict (evidence-backed) and an ``agentic`` one
-    (session-backed, ``evidence`` is ``None``) — the same shape as the FR-12
-    :class:`~revalid.export.VerdictExport`. A superset of the pre-Slice-6a batch
-    fields (it adds ``source``/``session_id``/``actor``), so existing batch
-    consumers still read ``status``/``reason_code``/``rationale``/``evidence`` at
-    the top level.
+    Every verdict is a retest-session conclusion (the batch verdict path retired
+    in FR-17 6b-iii); the shape mirrors the FR-12 :class:`~revalid.export.VerdictExport`.
     """
 
     id: int
     finding_id: int
-    probe_kind: str
-    plan_version: int | None = None
-    source: str
     session_id: int | None
     actor: str
     status: VerdictStatus
     reason_code: str
     rationale: str
     matched_indicators: tuple[str, ...]
-    evidence: Evidence | AgenticEvidence | None
+    evidence: AgenticEvidence | None
 
     @classmethod
     def from_record(cls, record: VerdictRecord) -> "VerdictOut":
-        """Build the API view from a stored verdict row (batch or agentic)."""
+        """Build the API view from a stored verdict row."""
         return cls(
             id=record.id,
             finding_id=record.finding_id,
-            probe_kind=record.probe_kind,
-            plan_version=record.plan_version,
-            source=record.source,
             session_id=record.session_id,
             actor=record.actor,
             status=VerdictStatus(record.status),
             reason_code=record.reason_code,
             rationale=record.rationale,
             matched_indicators=tuple(record.matched_indicators),
-            evidence=_verdict_out_evidence(record),
+            evidence=AgenticEvidence(**record.evidence) if record.evidence is not None else None,
         )
 
 
@@ -291,47 +245,6 @@ class AuditOut(BaseModel):
     reproduced: int
     ok: bool
     discrepancies: list[DiscrepancyOut]
-
-
-class PlanRequest(BaseModel):
-    """Optional body for plan generation: operator guidance for this run (FR-04)."""
-
-    instructions: str = ""
-
-
-class PlanOut(BaseModel):
-    """A persisted retest-plan version as returned by the API (FR-05)."""
-
-    id: int
-    finding_id: int
-    version: int
-    status: str
-    origin: str
-    error: str | None
-    actions: tuple[Probe, ...]
-    rejected_actions: tuple[RejectedAction, ...]
-    raw: dict[str, Any]
-    decided_at: datetime | None
-    decided_by: str | None
-
-    @classmethod
-    def from_record(cls, record: PlanRecord) -> "PlanOut":
-        """Build the API view from a persisted plan row."""
-        return cls(
-            id=record.id,
-            finding_id=record.finding_id,
-            version=record.version,
-            status=record.status,
-            origin=record.origin,
-            error=record.error,
-            actions=record.probes(),
-            rejected_actions=tuple(
-                RejectedAction.model_validate(item) for item in record.rejected_actions
-            ),
-            raw=record.raw,
-            decided_at=record.decided_at,
-            decided_by=record.decided_by,
-        )
 
 
 class SessionEventOut(BaseModel):
@@ -495,26 +408,6 @@ class ProbeIn(BaseModel):
     api_key: str | None = None
 
 
-def get_probe_client() -> Iterator[httpx.Client]:
-    """Yield an allowlist-enforcing HTTP client for probes.
-
-    Defined at module scope so tests can override it
-    (``app.dependency_overrides[get_probe_client]``) with a client backed by a
-    mock transport, keeping unit/integration tests off the network.
-    """
-    with build_probe_client(load_allowlist()) as client:
-        yield client
-
-
-def get_browser_runner() -> BrowserRunner:
-    """Yield the FR-14 browser probe runner, bound to the allowlist guard.
-
-    Overridable in tests with a stand-in runner that returns canned evidence, so
-    the browser-probe execution path is tested without launching a real browser.
-    """
-    return make_browser_runner(load_allowlist())
-
-
 def get_settings_dep(request: Request) -> Settings:
     """Load the persisted model/provider setting, seeding a fresh DB (ADR-0021)."""
     sessions = cast("sessionmaker[Session]", request.app.state.sessions)
@@ -523,11 +416,6 @@ def get_settings_dep(request: Request) -> Settings:
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
-
-
-def get_plan_agent(settings: SettingsDep) -> Agent[None, list[PlannedAction]]:
-    """Yield the FR-04 plan agent built from the persisted setting (ADR-0021)."""
-    return build_plan_agent(build_model(settings))
 
 
 def get_goal_agent(settings: SettingsDep) -> Agent[None, GeneratedGoal]:
@@ -556,12 +444,8 @@ def get_sandbox_factory() -> SandboxFactory:
     return lambda sid: DockerSandbox(sid)
 
 
-# Both underlying dependencies (get_probe_client, get_plan_agent) are module-level
-# functions with no per-app-instance state, so these aliases can live here too —
-# unlike SessionDep, which closes over each app's own session factory.
-ProbeClientDep = Annotated[httpx.Client, Depends(get_probe_client)]
-BrowserRunnerDep = Annotated[BrowserRunner, Depends(get_browser_runner)]
-PlanAgentDep = Annotated[Agent[None, list[PlannedAction]], Depends(get_plan_agent)]
+# Module-level dependency aliases (no per-app-instance state) — unlike SessionDep,
+# which closes over each app's own session factory.
 GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
@@ -649,44 +533,6 @@ def _persist_findings(
     """
     for finding in findings:
         create_finding(session, finding, report_id=report_id)
-
-
-def run_plan_generation(
-    sessions: sessionmaker[Session],
-    finding_id: int,
-    plan_id: int,
-    agent: Agent[None, list[PlannedAction]],
-    instructions: str = "",
-) -> None:
-    """Generate the reserved plan version's actions and settle it (FR-04, ADR-0022).
-
-    Runs as a FastAPI background task — a sync function on Starlette's threadpool
-    — so it opens its **own** session (the request session closed with the
-    ``202``) and never blocks the event loop. It always moves the ``generating``
-    row on: to ``proposed`` with its gated actions, or ``failed`` with the
-    reason, so the SPA's plan poll terminates exactly like the report poll does.
-
-    Args:
-        sessions: The app's session factory (each task opens a fresh session).
-        finding_id: The finding being planned.
-        plan_id: The reserved ``generating`` version to fill in.
-        agent: The plan agent (a stand-in model in tests).
-        instructions: Optional operator guidance for this generation (ADR-0023).
-    """
-    with sessions() as session:
-        version = current_version(session, finding_id)
-        if version is None:  # pragma: no cover - the row was just committed
-            return
-        try:
-            result = generate_plan(
-                agent, version.to_domain(), load_allowlist(), lab_base_url(), instructions
-            )
-        except Exception as exc:
-            result = PlanResult(
-                plan=RetestPlan(finding_title=version.title),
-                error=f"plan generation failed: {exc}",
-            )
-        finish_plan_generation(session, plan_id, result)
 
 
 def run_first_step(
@@ -885,82 +731,6 @@ def _goal_prompt(goal: tuple[str, ...], finding: Finding) -> str:
     return f"Current goal:\n{steps}\n\n{base}"
 
 
-def _edit_plan(session: Session, finding_id: int, actions: list[PlannedAction]) -> PlanOut:
-    """Replace the plan with edited actions as a new proposed version (FR-05)."""
-    finding = _current_or_404(session, finding_id)
-    try:
-        record, _ = edit_plan(
-            session,
-            finding_id,
-            actions,
-            load_allowlist(),
-            lab_base_url(),
-            finding_title=finding.title,
-        )
-    except AllActionsRejectedError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail="all edited actions were rejected by the allowlist/method gate",
-        ) from exc
-    return PlanOut.from_record(record)
-
-
-def _approve_plan(session: Session, finding_id: int) -> PlanOut:
-    """Approve the latest proposed plan version (FR-05)."""
-    _get_finding_or_404(session, finding_id)
-    try:
-        return PlanOut.from_record(approve_plan(session, finding_id))
-    except NoProposedPlanError as exc:
-        raise HTTPException(status_code=409, detail="no proposed plan to approve") from exc
-
-
-def _reject_plan(session: Session, finding_id: int) -> PlanOut:
-    """Reject the latest proposed plan version (FR-05)."""
-    _get_finding_or_404(session, finding_id)
-    try:
-        return PlanOut.from_record(reject_plan(session, finding_id))
-    except NoProposedPlanError as exc:
-        raise HTTPException(status_code=409, detail="no proposed plan to reject") from exc
-
-
-def _revise_plan(session: Session, finding_id: int) -> PlanOut:
-    """Un-approve the approved plan back into an editable proposed copy (ADR-0023)."""
-    finding = _current_or_404(session, finding_id)
-    try:
-        return PlanOut.from_record(revise_plan(session, finding_id, finding_title=finding.title))
-    except PlanNotApprovedError as exc:
-        raise HTTPException(status_code=409, detail="no approved plan to revise") from exc
-
-
-def _list_plans(session: Session, finding_id: int) -> list[PlanOut]:
-    """List all plan versions for a finding (FR-05)."""
-    _get_finding_or_404(session, finding_id)
-    return [PlanOut.from_record(record) for record in list_plans(session, finding_id)]
-
-
-def _retest_finding(
-    session: Session,
-    client: httpx.Client,
-    finding_id: int,
-    browser_runner: BrowserRunner,
-) -> list[VerdictOut]:
-    """Execute the finding's APPROVED plan and persist the verdicts (FR-05/FR-07/FR-09/FR-14)."""
-    _get_finding_or_404(session, finding_id)
-    try:
-        records = execute_approved_plan(session, client, finding_id, browser_runner=browser_runner)
-    except PlanNotApprovedError as exc:
-        raise HTTPException(
-            status_code=409, detail="no approved plan; approve one before retesting"
-        ) from exc
-    except PlanDeviationError as exc:
-        raise HTTPException(
-            status_code=409, detail="execution blocked: probe deviates from the approved plan"
-        ) from exc
-    except BrowserProbeUnavailableError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
-    return [VerdictOut.from_record(r) for r in records]
-
-
 def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register ``/health`` and the FR-02 finding import/list routes.
 
@@ -1137,100 +907,24 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return ReportOut.from_record(report)
 
 
-def _register_plan_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
-    """Register the FR-05 plan lifecycle routes (generate/edit/approve/reject/revise/list)."""
+def _register_verdict_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the verdict-list + FR-10 audit routes (agentic-only after FR-17 6b-iii)."""
 
     def get_session() -> Iterator[Session]:
         with sessions() as session:
             yield session
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
-
-    @router.post("/findings/{finding_id}/plan", response_model=PlanOut, status_code=202)
-    def create_plan(
-        finding_id: int,
-        background: BackgroundTasks,
-        session: SessionDep,
-        agent: PlanAgentDep,
-        body: PlanRequest | None = None,
-    ) -> PlanOut:
-        """Schedule background FR-04 plan generation; persist a ``generating`` version (ADR-0022).
-
-        Returns ``202`` immediately with the reserved version so a reload always
-        shows the real in-progress state; :func:`run_plan_generation` settles it
-        to ``proposed``/``failed`` and the SPA polls ``/plans`` until it does.
-        This is also the *regenerate* path: it supersedes any live version — an
-        approved one included — so the operator can start over at any point
-        (ADR-0023). The optional ``instructions`` body steers this generation.
-        """
-        _get_finding_or_404(session, finding_id)
-        instructions = body.instructions if body else ""
-        record = start_plan_generation(session, finding_id, instructions)
-        background.add_task(
-            run_plan_generation, sessions, finding_id, record.id, agent, instructions
-        )
-        return PlanOut.from_record(record)
-
-    @router.put("/findings/{finding_id}/plan", response_model=PlanOut)
-    def edit_plan_endpoint(
-        finding_id: int, actions: list[PlannedAction], session: SessionDep
-    ) -> PlanOut:
-        """Replace the plan with edited actions as a new proposed version (FR-05)."""
-        return _edit_plan(session, finding_id, actions)
-
-    @router.post("/findings/{finding_id}/plan/approve", response_model=PlanOut)
-    def approve_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
-        """Approve the latest proposed plan version (FR-05)."""
-        return _approve_plan(session, finding_id)
-
-    @router.post("/findings/{finding_id}/plan/reject", response_model=PlanOut)
-    def reject_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
-        """Reject the latest proposed plan version (FR-05)."""
-        return _reject_plan(session, finding_id)
-
-    @router.post("/findings/{finding_id}/plan/revise", response_model=PlanOut)
-    def revise_plan_endpoint(finding_id: int, session: SessionDep) -> PlanOut:
-        """Un-approve the approved plan back into an editable proposed copy (ADR-0023)."""
-        return _revise_plan(session, finding_id)
-
-    @router.get("/findings/{finding_id}/plans", response_model=list[PlanOut])
-    def get_plans(finding_id: int, session: SessionDep) -> list[PlanOut]:
-        """List all plan versions for a finding (FR-05)."""
-        return _list_plans(session, finding_id)
-
-
-def _register_retest_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
-    """Register the plan-driven retest, verdict-list, and FR-10 audit routes.
-
-    Split from :func:`_register_plan_routes` to keep each registration function's
-    nested-route count under the mccabe gate (see :func:`_register_core_routes`).
-    """
-
-    def get_session() -> Iterator[Session]:
-        with sessions() as session:
-            yield session
-
-    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
-
-    @router.post("/findings/{finding_id}/retest", response_model=list[VerdictOut])
-    def retest_finding(
-        finding_id: int,
-        session: SessionDep,
-        client: ProbeClientDep,
-        browser_runner: BrowserRunnerDep,
-    ) -> list[VerdictOut]:
-        """Execute the finding's approved plan; persist the verdicts (FR-05/07/09/14)."""
-        return _retest_finding(session, client, finding_id, browser_runner)
 
     @router.get("/verdicts", response_model=list[VerdictOut])
     def list_verdicts(session: SessionDep) -> list[VerdictOut]:
-        """List all persisted verdicts, batch and agentic (FR-09/FR-17)."""
+        """List all persisted (agentic) verdicts (FR-09/FR-17)."""
         records = session.scalars(select(VerdictRecord).order_by(VerdictRecord.id))
         return [VerdictOut.from_record(r) for r in records]
 
     @router.get("/audit", response_model=AuditOut)
     def audit_rederive(session: SessionDep) -> AuditOut:
-        """Re-derive every verdict from stored evidence alone — no re-execution (FR-10)."""
+        """Re-derive every verdict from the transcript alone — no re-execution (FR-10)."""
         report = rederive_run(session)
         return AuditOut(
             total=report.total,
@@ -1634,8 +1328,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_core_routes(api, sessions)
     _register_finding_routes(api, sessions)
     _register_report_routes(api, sessions)
-    _register_plan_routes(api, sessions)
-    _register_retest_routes(api, sessions)
+    _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
     _register_goal_routes(api, sessions, registry)

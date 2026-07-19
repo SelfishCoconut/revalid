@@ -4,54 +4,49 @@ Usage::
 
     uv run python scripts/demo/audit_rederive.py
 
-Runs fully offline: store a verdict by executing an approved plan against a mock
-target, then re-derive every verdict from its persisted evidence alone — no probe
-is re-run — and print the reproduction result (FR-10 acceptance / NFR-02).
+Runs fully offline: store an agentic retest verdict (a session transcript plus the
+recorded conclusion), then re-derive every verdict from its persisted transcript
+alone — nothing is re-executed — and print the reproduction result (FR-10
+acceptance / NFR-02).
 """
 
 from __future__ import annotations
 
-import httpx
-
-from revalid.approval import approve_plan, execute_approved_plan, save_generated_plan
+from revalid import retest_session as rs
 from revalid.audit import rederive_run
-from revalid.db import IN_MEMORY, FindingRecord, create_db_engine, session_factory
-from revalid.domain import Finding, Probe, RetestPlan, Severity
-from revalid.plan import PlanResult
-
-
-def _plan() -> PlanResult:
-    probe = Probe(
-        kind="sqli-login-bypass",
-        method="POST",
-        url="http://localhost:3000/rest/user/login",
-        json_body={"email": "' OR 1=1--", "password": "x"},
-    )
-    plan = RetestPlan(
-        finding_title="SQLi login", actions=(probe,), raw={"finding_title": "SQLi login"}
-    )
-    return PlanResult(plan=plan)
+from revalid.db import IN_MEMORY, create_db_engine, session_factory
+from revalid.domain import Finding, SessionEventKind, Severity, VerdictStatus
+from revalid.findings import create_finding
 
 
 def main() -> int:
-    """Store a verdict from a live retest, then re-derive it from stored data."""
+    """Store an agentic verdict, then re-derive it from the stored transcript."""
     session = session_factory(create_db_engine(IN_MEMORY))()
-    session.add(FindingRecord.from_domain(Finding(title="SQLi login", severity=Severity.CRITICAL)))
+    create_finding(session, Finding(title="SQLi login", severity=Severity.CRITICAL))
     session.commit()
-    save_generated_plan(session, 1, _plan())
-    approve_plan(session, 1)
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"authentication": {"token": "t"}})
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        [verdict] = execute_approved_plan(session, client, 1)
-    print(f"1. stored verdict from a live retest: {verdict.status} ({verdict.reason_code})")
+    sid = rs.create_session(session, finding_id=1, model="demo").id
+    rs.append_event(
+        session,
+        sid,
+        SessionEventKind.COMMAND_OUTPUT,
+        {
+            "command": "curl -s http://localhost:3000/rest/user/login",
+            "stdout": '{"authentication": {"token": "t"}}',
+            "stderr": "",
+            "exit_code": 0,
+            "elapsed_ms": 12,
+        },
+    )
+    rs.record_verdict(session, sid, VerdictStatus.STILL_OPEN, "auth still bypassable")
+    print(
+        f"1. stored verdict from an agentic retest: {VerdictStatus.STILL_OPEN} (agentic_conclusion)"
+    )
 
     report = rederive_run(session)
     print(
-        f"2. re-derived {report.reproduced}/{report.total} verdict(s) from stored evidence "
-        f"alone -- no probe re-executed; discrepancies: {len(report.discrepancies)}"
+        f"2. re-derived {report.reproduced}/{report.total} verdict(s) from the stored transcript "
+        f"alone -- nothing re-executed; discrepancies: {len(report.discrepancies)}"
     )
     print(f"3. audit fully reproducible (FR-10 AC): {report.ok}")
     return 0

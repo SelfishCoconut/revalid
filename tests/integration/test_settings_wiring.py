@@ -2,7 +2,7 @@
 
 import pytest
 
-from revalid.app import create_app, get_extraction_agent, get_plan_agent, get_settings_dep
+from revalid.app import create_app, get_extraction_agent, get_goal_agent, get_settings_dep
 from revalid.db import create_db_engine, session_factory
 from revalid.llm import agent_model_name
 from revalid.settings import save
@@ -29,6 +29,6 @@ def test_di_builds_agent_from_stored_setting() -> None:
     # the stored setting. build_model strips the ollama:/openai: prefix, so the
     # built model_name is "llama3.2". Reverting the factory rewrite fails here.
     extraction_agent = get_extraction_agent(cfg)
-    plan_agent = get_plan_agent(cfg)
+    goal_agent = get_goal_agent(cfg)
     assert agent_model_name(extraction_agent) == "llama3.2"
-    assert agent_model_name(plan_agent) == "llama3.2"
+    assert agent_model_name(goal_agent) == "llama3.2"

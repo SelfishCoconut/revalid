@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from revalid.domain import Evidence, Finding, Severity, VerdictStatus
+from revalid.domain import AgenticEvidence, Finding, Severity, VerdictStatus
 from revalid.eval import GroundTruth, GroundTruthEntry, evaluate, format_table
 from revalid.export import (
     FindingExport,
@@ -51,22 +51,19 @@ def _finding(fid: int, title: str) -> FindingExport:
 
 
 def _verdict(vid: int, fid: int, status: VerdictStatus, ms: float) -> VerdictExport:
-    evidence = Evidence(
-        request_method="POST",
-        request_url="http://lab.local/probe",
-        response_status=200,
+    evidence = AgenticEvidence(
+        explanation="demo",
+        command="curl -s http://lab.local/probe",
+        output="{token}",
+        exit_code=0,
         elapsed_ms=ms,
     )
     return VerdictExport(
         id=vid,
         finding_id=fid,
-        probe_kind="demo",
-        plan_id=None,
-        plan_version=1,
-        actor="executor",
+        actor="agent",
         created_at=_NOW,
-        source="batch",
-        session_id=None,
+        session_id=vid,
         status=status,
         reason_code="demo",
         rationale="",
@@ -91,7 +88,6 @@ def _synthetic_export() -> RunExport:
     metrics = RunMetrics(
         reports=0,
         findings=len(findings),
-        plans=0,
         verdicts=len(verdicts),
         verdicts_by_status={"still_open": 1, "fixed": 1, "inconclusive": 2},
         total_elapsed_ms=345.0,
@@ -103,7 +99,6 @@ def _synthetic_export() -> RunExport:
         generator=Generator(tool="revalid", version="demo"),
         reports=(),
         findings=findings,
-        plans=(),
         verdicts=verdicts,
         metrics=metrics,
     )

@@ -3,7 +3,7 @@
 Only the pure surface is exercised here: ``FakeSandbox`` (a scripted in-memory
 double, no Docker), and the pure helpers. The live ``DockerSandbox`` needs the
 optional ``sandbox`` extra and a Docker daemon — it is covered by the nightly
-system test, mirroring ``revalid.browser``.
+system test.
 """
 
 from __future__ import annotations
