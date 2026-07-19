@@ -171,7 +171,6 @@ export interface RetestSession {
   verdict_rationale: string | null;
   free_launch: boolean;
   max_steps: number;
-  max_seconds: number | null;
   events: SessionEvent[];
 }
 
@@ -179,7 +178,6 @@ export interface RetestSession {
 export interface StartSessionOptions {
   free_launch?: boolean;
   max_steps?: number;
-  max_seconds?: number | null;
   /** A pre-start user-owned goal (FR-17 6b-iii-b); seeded verbatim if present. */
   initial_goal?: string[];
 }
@@ -228,6 +226,34 @@ export function rejectCommand(id: number, cid: string, reason = ""): Promise<{ s
 
 export function endRetestSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/end`, { method: "POST" });
+}
+
+/**
+ * Keep going on a session paused for guidance (ADR-0034): raise its step budget
+ * by `extraSteps` and resume the agent. A no-op server-side unless the session is
+ * paused with a live agent.
+ */
+export function continueSession(id: number, extraSteps = 8): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/continue`,
+    jsonInit("POST", { extra_steps: extraSteps }),
+  );
+}
+
+/**
+ * Manually conclude a session with the operator's determination (ADR-0034) — the
+ * only path that records `inconclusive`. Records the verdict and tears the sandbox
+ * down.
+ */
+export function concludeSession(
+  id: number,
+  status: string,
+  rationale: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/retest-sessions/${String(id)}/conclude`,
+    jsonInit("POST", { status, rationale }),
+  );
 }
 
 /**

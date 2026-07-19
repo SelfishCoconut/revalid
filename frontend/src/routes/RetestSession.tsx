@@ -6,6 +6,8 @@ import { useNavigate } from "react-router-dom";
 import {
   adjudicateSession,
   approveCommand,
+  concludeSession,
+  continueSession,
   endRetestSession,
   getRetestSession,
   regenerateSessionGoal,
@@ -29,6 +31,7 @@ import {
   budgetLabel,
   currentFreeLaunch,
   givenUpReason,
+  guidanceReason,
   stepsUsed,
 } from "../lib/sessionBudget";
 import { STATUS_META, type KnownStatus } from "../lib/status";
@@ -210,7 +213,7 @@ export function RetestSession({
     mutationFn: (text: string) => submitMessage(id, text),
   });
   // The session record carries the free-launch + budget config (FR-17 Slice 5)
-  // the WS event stream doesn't: max_steps/max_seconds are immutable, and the
+  // the WS event stream doesn't: max_steps is immutable, and the
   // *initial* free_launch seeds the derivation below. One fetch is enough — live
   // toggles arrive as `free_launch_changed` events, tracked by `currentFreeLaunch`.
   const { data: record } = useQuery({
@@ -240,6 +243,18 @@ export function RetestSession({
   });
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
+  // Pause-and-ask (ADR-0034): when the session is paused for guidance, Keep going
+  // raises the budget and resumes; Conclude records the operator's determination.
+  const continueMutation = useMutation({
+    mutationFn: () => continueSession(id),
+  });
+  const concludeMutation = useMutation({
+    mutationFn: (v: { status: string; rationale: string }) =>
+      concludeSession(id, v.status, v.rationale),
+  });
+  const [concluding, setConcluding] = useState(false);
+  const [concludeStatus, setConcludeStatus] = useState<VerdictStatus>("inconclusive");
+  const [concludeRationale, setConcludeRationale] = useState("");
 
   const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
   const stepsDone = stepsUsed(events);
@@ -449,9 +464,108 @@ export function RetestSession({
               <p className="text-sm text-dim">The agent is preparing its first step…</p>
             )}
             {chatItems}
-            {status === "given_up" ? (
-              // The agent hit a budget bound (step or wall-clock). Rendered
-              // distinctly from a reasoned verdict or an operator-ended session.
+            {status === "needs_guidance" ? (
+              // Paused for guidance (ADR-0034): a spent budget, or the agent
+              // handing back. The operator steers (chat/commands below) and keeps
+              // going, or concludes the retest themselves. The sandbox stays alive.
+              <div
+                aria-label="needs guidance"
+                className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
+              >
+                <div>
+                  <Eyebrow>Paused — needs your guidance</Eyebrow>
+                  <p className="mt-1 text-sm text-fg">
+                    {guidanceReason(events) ?? "The agent asked for your guidance."}
+                  </p>
+                  <p className="mt-1 text-xs text-dim">
+                    Steer it with a message or a command below, then keep going — or conclude the
+                    retest yourself.
+                  </p>
+                </div>
+                {concluding ? (
+                  <div className="space-y-2">
+                    <select
+                      aria-label="conclude status"
+                      value={concludeStatus}
+                      onChange={(e) => {
+                        setConcludeStatus(e.target.value as VerdictStatus);
+                      }}
+                      className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                    >
+                      {VERDICT_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {STATUS_META[s].label}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      aria-label="conclude rationale"
+                      value={concludeRationale}
+                      onChange={(e) => {
+                        setConcludeRationale(e.target.value);
+                      }}
+                      placeholder="Your determination and why…"
+                      rows={2}
+                      className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="accent"
+                        disabled={concludeMutation.isPending}
+                        onClick={() => {
+                          concludeMutation.mutate({
+                            status: concludeStatus,
+                            rationale: concludeRationale,
+                          });
+                        }}
+                      >
+                        Record verdict
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setConcluding(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="accent"
+                      disabled={continueMutation.isPending}
+                      onClick={() => {
+                        continueMutation.mutate();
+                      }}
+                    >
+                      Keep going
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setConcluding(true);
+                      }}
+                    >
+                      Conclude…
+                    </Button>
+                  </div>
+                )}
+                {continueMutation.isError && (
+                  <p role="alert" className="text-xs text-danger-fg">
+                    {errorMessage(continueMutation.error)}
+                  </p>
+                )}
+                {concludeMutation.isError && (
+                  <p role="alert" className="text-xs text-danger-fg">
+                    {errorMessage(concludeMutation.error)}
+                  </p>
+                )}
+              </div>
+            ) : status === "given_up" ? (
+              // Legacy: sessions from before ADR-0034 could reach a terminal
+              // give-up. New sessions pause for guidance instead.
               <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
                 <Eyebrow>Agent gave up</Eyebrow>
                 <p className="mt-1 text-sm text-warn-fg">

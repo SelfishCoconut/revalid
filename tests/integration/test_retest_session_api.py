@@ -19,6 +19,8 @@ from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from tests._retest_helpers import (
+    script_conclude_inconclusive,
+    script_inconclusive_then_conclude_on_message,
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
 )
@@ -485,4 +487,50 @@ def test_get_session_returns_budget_defaults() -> None:
         got = client.get(f"/api/retest-sessions/{sid}").json()
         assert got["free_launch"] is False
         assert got["max_steps"] == 8
-        assert got["max_seconds"] is None
+
+
+def _paused_client(script: Any) -> TestClient:
+    """A client whose agent hands back `inconclusive` — the session pauses (ADR-0034)."""
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(FunctionModel(script))
+    _override_goal_agent(app)
+    box = FakeSandbox(lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1))
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    return TestClient(app)
+
+
+def test_pause_then_operator_conclude_writes_a_verdict() -> None:
+    """The agent hands back → the session pauses; the operator concludes → verdict (ADR-0034)."""
+    with _paused_client(script_conclude_inconclusive) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "needs_guidance"
+        assert state["verdict_status"] is None
+        assert any(e["kind"] == "needs_guidance" for e in state["events"])
+
+        resp = client.post(
+            f"/api/retest-sessions/{sid}/conclude",
+            json={"status": "fixed", "rationale": "verified patched by hand"},
+        )
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "concluded"
+        assert state["verdict_status"] == "fixed"
+        verdicts = client.get("/api/verdicts").json()
+        assert [v["status"] for v in verdicts] == ["fixed"]
+
+
+def test_pause_then_continue_with_guidance_reaches_a_verdict() -> None:
+    """Keep going after a message resumes the agent to a determination (ADR-0034)."""
+    with _paused_client(script_inconclusive_then_conclude_on_message) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "needs_guidance"
+
+        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
+        resp = client.post(f"/api/retest-sessions/{sid}/continue", json={"extra_steps": 4})
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "concluded"
+        assert state["verdict_status"] == "still_open"
