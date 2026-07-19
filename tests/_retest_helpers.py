@@ -73,9 +73,9 @@ def script_always_propose(messages: list[ModelMessage], info: AgentInfo) -> Mode
 
     Unlike :func:`script_run_then_conclude`, this never calls the output tool —
     every turn re-proposes the same ``run_command`` call regardless of history.
-    Used to exercise the orchestrator's step-budget backstop (Task 5): an
-    agent that never concludes on its own must still be forced to a verdict
-    once ``max_steps`` approved commands have run.
+    Used to exercise an agent that never concludes on its own: the orchestrator
+    keeps gating each command and only ever pauses when the agent hands back,
+    never on a step count (ADR-0034).
     """
     return ModelResponse(
         parts=[

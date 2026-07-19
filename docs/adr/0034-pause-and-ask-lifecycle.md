@@ -4,6 +4,11 @@ Date: 2026-07-19
 
 Status: proposed
 
+> **Amended by [0035](0035-remove-retest-step-budget.md):** pause trigger 1 (the
+> step budget) is removed. The only remaining trigger is trigger 2 — the agent
+> handing back after exhausting its options. `continue` no longer raises a budget;
+> it just resumes.
+
 ## Context
 
 Since ADR-0025 the agentic retest session has had a **give-up** backstop: a step

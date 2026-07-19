@@ -30,9 +30,6 @@ class Settings(BaseModel):
         base_url: Provider base URL for OpenAI-compatible backends (Ollama and
             friends); ``None`` for native providers configured from the environment.
         api_key: Provider API key, or ``None`` when supplied via the environment.
-        default_max_steps: Default step budget for a new retest session — approved
-            commands before the session pauses for operator guidance (ADR-0034);
-            ``None`` means **no limit** (never pause on the budget).
     """
 
     model_config = ConfigDict(frozen=True, protected_namespaces=())
@@ -40,7 +37,6 @@ class Settings(BaseModel):
     model: str = Field(min_length=1)
     base_url: str | None = None
     api_key: str | None = None
-    default_max_steps: int | None = 8
 
 
 class Finding(BaseModel):
@@ -125,12 +121,15 @@ class RetestSessionStatus(enum.StrEnum):
     """
 
     STARTING = "starting"
+    #: The agent is computing its next turn (an LLM call is in flight). Emitted
+    #: before each ``agent.run_sync`` so the console can show a live "thinking"
+    #: indicator while local models — which can take a while — work (FR-17).
     THINKING = "thinking"
     AWAITING_COMMAND = "awaiting_command"
     RUNNING_COMMAND = "running_command"
-    #: Paused mid-session: a step budget was reached or the agent exhausted its
-    #: options and handed back to the operator (ADR-0034). Non-terminal — the
-    #: sandbox stays alive; the operator keeps going or concludes.
+    #: Paused mid-session: the agent exhausted the options it could think of and
+    #: handed back to the operator (ADR-0034). Non-terminal — the sandbox stays
+    #: alive; the operator steers and keeps going, or concludes.
     NEEDS_GUIDANCE = "needs_guidance"
     CONCLUDED = "concluded"
     GIVEN_UP = "given_up"
@@ -151,7 +150,7 @@ class SessionEventKind(enum.StrEnum):
     # The current guiding goal (FR-17 6b-ii: user-owned; formerly the agent's set_plan).
     PLAN_UPDATED = "plan_updated"
     #: The session paused for operator guidance (ADR-0034); payload carries the
-    #: human-readable ``reason`` (budget reached, or the agent's own hand-back).
+    #: human-readable ``reason`` the agent gave when it handed back.
     NEEDS_GUIDANCE = "needs_guidance"
     STATE_CHANGE = "state_change"
     FREE_LAUNCH_CHANGED = "free_launch_changed"

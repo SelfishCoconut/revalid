@@ -28,7 +28,6 @@ function mockRecord(overrides: Partial<client.RetestSession> = {}): void {
     verdict_status: null,
     verdict_rationale: null,
     free_launch: false,
-    max_steps: 8,
     events: [],
     ...overrides,
   });
@@ -263,7 +262,7 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByText(/command rejected: too destructive/)).toBeInTheDocument();
+    expect(screen.getByText(/command declined: too destructive/i)).toBeInTheDocument();
     // A rejected command never ran, so it does not carry an approve control.
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
@@ -347,7 +346,6 @@ describe("RetestSession", () => {
       verdict_status: null,
       verdict_rationale: null,
       free_launch: false,
-      max_steps: 8,
       events: [],
     });
 
@@ -425,7 +423,7 @@ describe("RetestSession", () => {
     expect(screen.getByLabelText(/terminal command input/i)).toBeDisabled();
   });
 
-  it("shows the current guiding plan in the plan panel", () => {
+  it("shows the current guiding goal in the goal panel", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [
         { seq: 1, kind: "plan_updated", payload: { steps: ["Retry the payload", "Baseline creds"] } },
@@ -439,7 +437,7 @@ describe("RetestSession", () => {
 
     expect(screen.getByText("Retry the payload")).toBeInTheDocument();
     expect(screen.getByText("Baseline creds")).toBeInTheDocument();
-    expect(screen.getByText(/2 steps/)).toBeInTheDocument();
+    expect(screen.getByText(/current goal/i)).toBeInTheDocument();
   });
 
   it("shows a placeholder in the goal panel before any goal exists", () => {
@@ -501,26 +499,20 @@ describe("RetestSession", () => {
     expect(screen.queryByRole("button", { name: /edit goal/i })).not.toBeInTheDocument();
   });
 
-  it("shows the step-budget meter (steps used / max)", async () => {
-    mockRecord({ max_steps: 5 });
+  it("shows a live thinking indicator while the agent computes a turn", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
-      events: [
-        { seq: 1, kind: "command_approved", payload: { auto: true } },
-        { seq: 2, kind: "command_output", payload: { command: "id", stdout: "ok" } },
-      ],
-      status: "awaiting_command",
+      events: [],
+      status: "thinking",
       verdict: null,
       connected: true,
     });
 
     renderAt(1);
 
-    // The meter first renders with the default budget, then updates to 5 once
-    // the config query resolves — wait for the updated readout.
-    expect(await screen.findByText("1 / 5 steps")).toBeInTheDocument();
+    expect(screen.getByLabelText(/agent thinking/i)).toBeInTheDocument();
   });
 
-  it("toggles free-launch via the endpoint", async () => {
+  it("toggles auto-run via the endpoint", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "awaiting_command",
@@ -531,7 +523,7 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: /free-launch/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /auto-run/i }));
     expect(client.setFreeLaunch).toHaveBeenCalledWith(1, true);
   });
 
@@ -549,23 +541,29 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByText("auto")).toBeInTheDocument();
+    expect(screen.getByText(/ran automatically/i)).toBeInTheDocument();
     // Auto-run commands never showed an approve/reject card.
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 
-  it("renders a distinct given-up banner citing the budget reason", () => {
+  it("renders a distinct ended banner citing the agent's reason", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
-      events: [{ seq: 1, kind: "verdict", payload: { status: "inconclusive", rationale: "budget exhausted" } }],
+      events: [
+        {
+          seq: 1,
+          kind: "verdict",
+          payload: { status: "inconclusive", rationale: "no exploit path found" },
+        },
+      ],
       status: "given_up",
-      verdict: { status: "inconclusive", rationale: "budget exhausted" },
+      verdict: { status: "inconclusive", rationale: "no exploit path found" },
       connected: true,
     });
 
     renderAt(1);
 
-    expect(screen.getByText(/agent gave up/i)).toBeInTheDocument();
-    expect(screen.getByText("budget exhausted")).toBeInTheDocument();
+    expect(screen.getByText(/retest ended/i)).toBeInTheDocument();
+    expect(screen.getByText("no exploit path found")).toBeInTheDocument();
     // Not rendered as an ordinary "Verdict" box.
     expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
   });

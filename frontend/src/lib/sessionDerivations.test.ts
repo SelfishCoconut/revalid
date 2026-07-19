@@ -3,26 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "../api/client";
 import {
   autoApprovedSeqs,
-  budgetLabel,
   currentFreeLaunch,
   givenUpReason,
-  stepsUsed,
-} from "./sessionBudget";
+} from "./sessionDerivations";
 
 const ev = (kind: string, payload: Record<string, unknown> = {}, seq = 0): SessionEvent => ({
   seq,
   kind,
   payload,
-});
-
-describe("stepsUsed", () => {
-  it("counts command_approved events", () => {
-    const events = [ev("command_approved"), ev("command_output"), ev("command_approved")];
-    expect(stepsUsed(events)).toBe(2);
-  });
-  it("is zero when there are none", () => {
-    expect(stepsUsed([ev("command_proposed")])).toBe(0);
-  });
 });
 
 describe("currentFreeLaunch", () => {
@@ -38,20 +26,10 @@ describe("currentFreeLaunch", () => {
   });
 });
 
-describe("budgetLabel", () => {
-  it("formats used / max", () => {
-    expect(budgetLabel(3, 8)).toBe("3 / 8 steps");
-  });
-
-  it("shows no-limit when max is null", () => {
-    expect(budgetLabel(3, null)).toBe("3 steps · no limit");
-  });
-});
-
 describe("givenUpReason", () => {
   it("returns the verdict rationale of a given-up session", () => {
-    const events = [ev("verdict", { status: "inconclusive", rationale: "budget exhausted" })];
-    expect(givenUpReason(events)).toBe("budget exhausted");
+    const events = [ev("verdict", { status: "inconclusive", rationale: "no exploit path found" })];
+    expect(givenUpReason(events)).toBe("no exploit path found");
   });
   it("returns null when no verdict is present", () => {
     expect(givenUpReason([ev("command_output")])).toBeNull();

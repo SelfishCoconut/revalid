@@ -1,15 +1,10 @@
 import type { SessionEvent } from "../api/client";
 
 /**
- * Pure derivations for the FR-17 Slice 5 budget/free-launch UI. The transcript
- * (the WS event stream) is the source of truth: steps-used and the live
- * free-launch state are both derived from events so they survive a reload.
+ * Pure derivations from a retest session's transcript (the WS event stream, the
+ * source of truth). The live free-launch state, the auto-run set, and pause/verdict
+ * reasons are all derived from events so they survive a reload (FR-17).
  */
-
-/** Steps used so far = the number of approved commands (human or auto). */
-export function stepsUsed(events: SessionEvent[]): number {
-  return events.filter((e) => e.kind === "command_approved").length;
-}
 
 /**
  * The session's current free-launch state: the latest `free_launch_changed`
@@ -18,12 +13,6 @@ export function stepsUsed(events: SessionEvent[]): number {
 export function currentFreeLaunch(events: SessionEvent[], initial: boolean): boolean {
   const latest = [...events].reverse().find((e) => e.kind === "free_launch_changed");
   return latest ? Boolean(latest.payload.enabled) : initial;
-}
-
-/** "3 / 8 steps" — the step-budget meter label. */
-export function budgetLabel(used: number, max: number | null): string {
-  if (max === null) return `${String(used)} steps · no limit`;
-  return `${String(used)} / ${String(max)} steps`;
 }
 
 /** The rationale of a given-up session's verdict, or null if none is recorded. */
@@ -35,8 +24,8 @@ export function givenUpReason(events: SessionEvent[]): string | null {
 
 /**
  * Why a session paused for operator guidance (ADR-0034): the reason on the latest
- * `needs_guidance` event — a spent step budget, or the agent handing back after
- * exhausting its options. Null if no such event has arrived.
+ * `needs_guidance` event — the agent handing back after exhausting the options it
+ * could think of. Null if no such event has arrived.
  */
 export function guidanceReason(events: SessionEvent[]): string | null {
   const paused = [...events].reverse().find((e) => e.kind === "needs_guidance");

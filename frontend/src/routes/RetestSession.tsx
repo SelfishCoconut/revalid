@@ -28,12 +28,10 @@ import { useRetestSession } from "../hooks/useRetestSession";
 import { errorMessage } from "../lib/format";
 import {
   autoApprovedSeqs,
-  budgetLabel,
   currentFreeLaunch,
   givenUpReason,
   guidanceReason,
-  stepsUsed,
-} from "../lib/sessionBudget";
+} from "../lib/sessionDerivations";
 import { STATUS_META, type KnownStatus } from "../lib/status";
 import type { VerdictStatus } from "../api/types";
 
@@ -95,9 +93,53 @@ function StepList({ steps }: { steps: string[] }) {
   );
 }
 
-/** A humanized, non-badge label for the session's own lifecycle status. */
-function humanizeStatus(status: string): string {
-  return status.replace(/_/g, " ");
+/** Statuses where the agent is computing its next turn (an LLM call is in flight). */
+const THINKING_STATUSES = new Set(["starting", "thinking", "running_command"]);
+
+/** Whether the agent is actively working — drives the live "thinking" indicator. */
+function isThinking(status: string): boolean {
+  return THINKING_STATUSES.has(status);
+}
+
+/** A short, user-facing label for the session's lifecycle status. */
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    starting: "Working",
+    thinking: "Working",
+    running_command: "Working",
+    awaiting_command: "Awaiting your approval",
+    needs_guidance: "Paused — needs you",
+    concluded: "Concluded",
+    given_up: "Ended",
+    ended: "Ended",
+    error: "Error",
+  };
+  return labels[status] ?? status.replace(/_/g, " ");
+}
+
+/**
+ * A live "the agent is thinking" bubble: three dots gently pulsing in sequence.
+ * Shown while an LLM call is in flight (local models can take a while), so a slow
+ * turn reads as working rather than frozen.
+ */
+function ThinkingBubble() {
+  return (
+    <div className="flex gap-3" aria-label="agent thinking">
+      <span
+        className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full bg-iris shadow-[0_0_8px_var(--color-iris)]"
+        aria-hidden
+      />
+      <div className="flex items-center gap-1.5 rounded-lg border border-line bg-panel-2/50 px-4 py-3">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-dim"
+            style={{ animationDelay: `${String(delay)}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -212,10 +254,9 @@ export function RetestSession({
   const messageMutation = useMutation({
     mutationFn: (text: string) => submitMessage(id, text),
   });
-  // The session record carries the free-launch + budget config (FR-17 Slice 5)
-  // the WS event stream doesn't: max_steps is immutable, and the
-  // *initial* free_launch seeds the derivation below. One fetch is enough — live
-  // toggles arrive as `free_launch_changed` events, tracked by `currentFreeLaunch`.
+  // The session record carries the *initial* free-launch mode (FR-17 Slice 5) that
+  // the WS event stream doesn't, seeding the derivation below. One fetch is enough —
+  // live toggles arrive as `free_launch_changed` events, tracked by `currentFreeLaunch`.
   const { data: record } = useQuery({
     queryKey: queryKeys.retestSession(id),
     queryFn: () => getRetestSession(id),
@@ -257,10 +298,6 @@ export function RetestSession({
   const [concludeRationale, setConcludeRationale] = useState("");
 
   const freeLaunch = currentFreeLaunch(events, record?.free_launch ?? false);
-  const stepsDone = stepsUsed(events);
-  // `record.max_steps` is `null` for a no-limit session (a real value, distinct
-  // from the still-loading `undefined` — which falls back to the default meter).
-  const maxSteps = record ? record.max_steps : 8;
   const autoSeqs = autoApprovedSeqs(events);
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);
@@ -357,11 +394,7 @@ export function RetestSession({
         <AgentTurn key={event.seq}>
           <div className="flex items-start justify-between gap-2">
             <p className="text-sm text-dim">{String(event.payload.rationale ?? "")}</p>
-            {wasAuto && (
-              <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-iris-fg ring-1 ring-iris/30">
-                auto
-              </span>
-            )}
+            {wasAuto && <span className="shrink-0 text-[11px] text-faint">ran automatically</span>}
           </div>
           <code className="mt-2 block overflow-x-auto rounded-md border border-line bg-ink/50 px-3 py-2 font-mono text-[13px] text-fg">
             <span className="text-faint">$</span> {String(event.payload.command ?? "")}
@@ -369,7 +402,7 @@ export function RetestSession({
           {isPending &&
             renderApproval(
               String(event.payload.tool_call_id),
-              "runs once in the egress-locked sandbox",
+              "Runs once in the isolated sandbox.",
             )}
         </AgentTurn>,
       ];
@@ -378,7 +411,7 @@ export function RetestSession({
       const reason = String(event.payload.reason ?? "");
       return [
         <p key={event.seq} className="pl-5 text-[12px] text-faint">
-          ✗ command rejected{reason ? `: ${reason}` : ""}
+          Command declined{reason ? `: ${reason}` : ""}
         </p>,
       ];
     }
@@ -392,17 +425,23 @@ export function RetestSession({
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-baseline gap-3">
-          <Eyebrow>Agentic retest session</Eyebrow>
-          <span className="font-mono text-[12px] text-dim">{humanizeStatus(status)}</span>
-          {/* Step budget meter — steps used / max (auto or human approvals). */}
-          <span className="font-mono text-[12px] text-faint" aria-label="step budget">
-            {budgetLabel(stepsDone, maxSteps)}
-          </span>
+        <div className="flex items-center gap-2">
+          {/* Live status dot: pulses while the agent works, steady otherwise. */}
+          <span
+            className={`h-2 w-2 rounded-full ${
+              isThinking(status)
+                ? "animate-pulse bg-iris shadow-[0_0_8px_var(--color-iris)]"
+                : sessionOver
+                  ? "bg-faint"
+                  : "bg-ok"
+            }`}
+            aria-hidden
+          />
+          <span className="text-[13px] font-medium text-fg">{statusLabel(status)}</span>
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-3">
-            {/* Free-launch — auto-approve the agent's commands (plan changes stay gated). */}
+            {/* Auto-run — approve the agent's commands automatically (plan changes stay gated). */}
             <label className="flex items-center gap-2 text-[13px] text-dim">
               <input
                 type="checkbox"
@@ -413,7 +452,7 @@ export function RetestSession({
                 }}
                 className="accent-iris disabled:opacity-45"
               />
-              Free-launch
+              Auto-run
             </label>
             <Button
               variant="ghost"
@@ -452,24 +491,107 @@ export function RetestSession({
         </div>
       </div>
 
-      {/* main: chat (left, grows) + goal (right column) */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        {/* Chat — the left column, the agent's voice. */}
+      {/* main: the goal (full width, right below the stages bar) then the boxed chat */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        {/* Current goal — the user-owned checklist, full width below the stages bar (FR-17 6b-ii). */}
+        <Panel className="shrink-0">
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <Eyebrow>Current goal</Eyebrow>
+          </div>
+          <div className="space-y-3 p-4">
+            {editingGoal ? (
+              <div className="space-y-2">
+                <textarea
+                  aria-label="goal steps"
+                  value={goalDraft}
+                  onChange={(e) => {
+                    setGoalDraft(e.target.value);
+                  }}
+                  rows={4}
+                  className="w-full rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
+                  placeholder="One step per line…"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="accent"
+                    disabled={goalMutation.isPending}
+                    onClick={() => {
+                      const steps = goalDraft
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      goalMutation.mutate(steps);
+                      setEditingGoal(false);
+                    }}
+                  >
+                    Save goal
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setEditingGoal(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {planSteps.length > 0 ? (
+                  <StepList steps={planSteps} />
+                ) : (
+                  <p className="text-sm text-dim">No goal set yet.</p>
+                )}
+                {!sessionOver && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setGoalDraft(planSteps.join("\n"));
+                        setEditingGoal(true);
+                      }}
+                    >
+                      Edit goal
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={regenerateGoalMutation.isPending}
+                      onClick={() => {
+                        regenerateGoalMutation.mutate();
+                      }}
+                    >
+                      {regenerateGoalMutation.isPending ? "Regenerating…" : "Regenerate goal"}
+                    </Button>
+                  </div>
+                )}
+                {regenerateGoalMutation.isError && (
+                  <p role="alert" className="text-sm text-danger-fg">
+                    {errorMessage(regenerateGoalMutation.error)}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </Panel>
+
+        {/* Conversation — a boxed chat with the agent. */}
         <div
           ref={chatRef}
           role="log"
           aria-label="Agent conversation"
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-line bg-panel/40 p-4"
         >
           <div className="mx-auto flex max-w-[68rem] flex-col gap-3 pb-1">
-            {chatItems.length === 0 && !verdict && (
-              <p className="text-sm text-dim">The agent is preparing its first step…</p>
+            {chatItems.length === 0 && !verdict && !isThinking(status) && (
+              <p className="text-sm text-dim">Starting the sandboxed retest…</p>
             )}
             {chatItems}
+            {isThinking(status) && !awaitingApproval && !verdict && <ThinkingBubble />}
             {status === "needs_guidance" ? (
-              // Paused for guidance (ADR-0034): a spent budget, or the agent
-              // handing back. The operator steers (chat/commands below) and keeps
-              // going, or concludes the retest themselves. The sandbox stays alive.
+              // Paused for guidance (ADR-0034): the agent handed back after
+              // exhausting its options. The operator steers (chat/commands below)
+              // and keeps going, or concludes the retest themselves. Sandbox alive.
               <div
                 aria-label="needs guidance"
                 className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
@@ -569,9 +691,9 @@ export function RetestSession({
               // Legacy: sessions from before ADR-0034 could reach a terminal
               // give-up. New sessions pause for guidance instead.
               <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
-                <Eyebrow>Agent gave up</Eyebrow>
+                <Eyebrow>Retest ended</Eyebrow>
                 <p className="mt-1 text-sm text-warn-fg">
-                  {givenUpReason(events) ?? "budget exhausted"}
+                  {givenUpReason(events) ?? "The agent stopped without a determination."}
                 </p>
               </div>
             ) : (
@@ -692,87 +814,6 @@ export function RetestSession({
           </div>
         </div>
 
-        {/* Current goal — the user-owned checklist the agent works to (FR-17 6b-ii). */}
-        <aside className="shrink-0 lg:w-[20rem] xl:w-[22rem]">
-          <Panel className="shrink-0">
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <Eyebrow>Current goal</Eyebrow>
-              <span className="font-mono text-[11px] text-faint">
-                {planSteps.length} {planSteps.length === 1 ? "step" : "steps"}
-              </span>
-            </div>
-            <div className="space-y-3 p-4">
-              {editingGoal ? (
-                <div className="space-y-2">
-                  <textarea
-                    aria-label="goal steps"
-                    value={goalDraft}
-                    onChange={(e) => {
-                      setGoalDraft(e.target.value);
-                    }}
-                    rows={4}
-                    className="w-full rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
-                    placeholder="One step per line…"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="accent"
-                      disabled={goalMutation.isPending}
-                      onClick={() => {
-                        const steps = goalDraft
-                          .split("\n")
-                          .map((s) => s.trim())
-                          .filter(Boolean);
-                        goalMutation.mutate(steps);
-                        setEditingGoal(false);
-                      }}
-                    >
-                      Save goal
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setEditingGoal(false);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {planSteps.length > 0 ? (
-                    <StepList steps={planSteps} />
-                  ) : (
-                    <p className="text-sm text-dim">No goal set yet.</p>
-                  )}
-                  {!sessionOver && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setGoalDraft(planSteps.join("\n"));
-                          setEditingGoal(true);
-                        }}
-                      >
-                        Edit goal
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={regenerateGoalMutation.isPending}
-                        onClick={() => {
-                          regenerateGoalMutation.mutate();
-                        }}
-                      >
-                        Regenerate goal
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </Panel>
-        </aside>
       </div>
 
       {/* Composer — a chat message to the agent, read on its next turn (Slice 4). */}
@@ -802,7 +843,7 @@ export function RetestSession({
         </div>
         {!sessionOver && (
           <p className="mt-1 px-1 text-[11px] text-faint">
-            Read on the agent&apos;s next turn — approve or reject a pending step to deliver it now.
+            The agent reads your message on its next turn.
           </p>
         )}
         {messageMutation.isError && (
@@ -813,8 +854,8 @@ export function RetestSession({
       </form>
 
       {/* Terminal — docked below the conversation: executed output plus your own
-          prompt. A command you run here executes once in the egress-locked sandbox
-          and the agent observes it on its next turn, as if it had run it itself. */}
+          prompt. A command you run here executes once in the isolated sandbox and
+          the agent observes it on its next turn, as if it had run it itself. */}
       <Panel className="shrink-0">
         <button
           type="button"
@@ -850,9 +891,7 @@ export function RetestSession({
                   onChange={(event) => {
                     setCommand(event.target.value);
                   }}
-                  placeholder={
-                    sessionOver ? "sandbox closed" : "run a command — the agent reads it as its own"
-                  }
+                  placeholder={sessionOver ? "Sandbox closed" : "Run a command in the sandbox…"}
                   disabled={sessionOver}
                   aria-label="Terminal command input"
                   className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-faint disabled:opacity-45"

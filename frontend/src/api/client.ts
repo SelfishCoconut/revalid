@@ -170,14 +170,12 @@ export interface RetestSession {
   verdict_status: string | null;
   verdict_rationale: string | null;
   free_launch: boolean;
-  max_steps: number | null;
   events: SessionEvent[];
 }
 
-/** Free-launch + budget config for a new session (FR-17 Slice 5); all optional. */
+/** Free-launch + seed goal for a new session (FR-17 Slice 5); all optional. */
 export interface StartSessionOptions {
   free_launch?: boolean;
-  max_steps?: number;
   /** A pre-start user-owned goal (FR-17 6b-iii-b); seeded verbatim if present. */
   initial_goal?: string[];
 }
@@ -229,15 +227,11 @@ export function endRetestSession(id: number): Promise<{ status: string }> {
 }
 
 /**
- * Keep going on a session paused for guidance (ADR-0034): raise its step budget
- * by `extraSteps` and resume the agent. A no-op server-side unless the session is
- * paused with a live agent.
+ * Keep going on a session paused for guidance (ADR-0034): resume the agent. A
+ * no-op server-side unless the session is paused with a live agent.
  */
-export function continueSession(id: number, extraSteps = 8): Promise<{ status: string }> {
-  return request<{ status: string }>(
-    `/retest-sessions/${String(id)}/continue`,
-    jsonInit("POST", { extra_steps: extraSteps }),
-  );
+export function continueSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/continue`, { method: "POST" });
 }
 
 /**

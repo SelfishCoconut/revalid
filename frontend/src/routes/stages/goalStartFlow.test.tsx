@@ -50,7 +50,6 @@ const createdSession: RetestSession = {
   verdict_status: null,
   verdict_rationale: null,
   free_launch: false,
-  max_steps: 20,
   events: [],
 };
 
