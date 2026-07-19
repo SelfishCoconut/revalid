@@ -10,9 +10,8 @@ import { ReportDetail } from "./routes/ReportDetail";
 import { ReportsOverview } from "./routes/ReportsOverview";
 import { RetestSession } from "./routes/RetestSession";
 import Settings from "./routes/Settings";
-import { ApproveStage } from "./routes/stages/ApproveStage";
 import { ExtractStage } from "./routes/stages/ExtractStage";
-import { PlanStage } from "./routes/stages/PlanStage";
+import { GoalStage } from "./routes/stages/GoalStage";
 import { RetestStage } from "./routes/stages/RetestStage";
 import { StageRedirect } from "./routes/stages/StageRedirect";
 import { VerdictStage } from "./routes/stages/VerdictStage";
@@ -80,8 +79,7 @@ export function App() {
             <Route path="/findings/:id" element={<FindingLayout />}>
               <Route index element={<StageRedirect />} />
               <Route path="extract" element={<ExtractStage />} />
-              <Route path="plan" element={<PlanStage />} />
-              <Route path="approve" element={<ApproveStage />} />
+              <Route path="goal" element={<GoalStage />} />
               <Route path="retest" element={<RetestStage />} />
               <Route path="verdict" element={<VerdictStage />} />
             </Route>
