@@ -1,23 +1,53 @@
 import { useRef, useState } from "react";
 
-import { errorMessage } from "../lib/format";
+import { Link } from "react-router-dom";
+
+import { DuplicateReportError } from "../api/client";
+import type { DuplicateReport } from "../api/types";
 import { useUploadReport } from "../hooks/useReports";
+import { formatDate, useDateFormat } from "../lib/dateFormat";
+import { errorMessage } from "../lib/format";
 import { Button } from "./ui/Button";
 import { Eyebrow, Panel } from "./ui/Panel";
 import { StatusBadge } from "./StatusBadge";
 
 /**
  * PDF upload control (button + drag-and-drop). POSTs to `/api/reports` and
- * surfaces the freshly-created report, which starts life in `extracting`.
+ * surfaces the freshly-created report, which starts life in `extracting`. If the
+ * bytes match an existing report the backend replies 409; we then show a warning
+ * with the matches and let the operator cancel or upload anyway (#134).
  */
 export function UploadReport() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateReport[] | null>(null);
+  const dateFormat = useDateFormat();
   const upload = useUploadReport();
 
-  function submit(file: File | undefined) {
-    if (file) upload.mutate(file);
+  function submit(file: File | undefined, force = false) {
+    if (!file) return;
+    setDuplicates(null);
+    upload.mutate(
+      { file, force },
+      {
+        onError: (error) => {
+          if (error instanceof DuplicateReportError) {
+            setPendingFile(file);
+            setDuplicates(error.duplicates);
+          }
+        },
+      },
+    );
   }
+
+  function cancelDuplicate() {
+    setDuplicates(null);
+    setPendingFile(null);
+    upload.reset();
+  }
+
+  const genericError = upload.isError && !(upload.error instanceof DuplicateReportError);
 
   return (
     <Panel className="p-4">
@@ -67,13 +97,8 @@ export function UploadReport() {
             strokeLinecap="round"
           />
         </svg>
-        <p className="text-sm text-dim">
-          Drag a pentest PDF here, or
-        </p>
-        <Button
-          onClick={() => inputRef.current?.click()}
-          disabled={upload.isPending}
-        >
+        <p className="text-sm text-dim">Drag a pentest PDF here, or</p>
+        <Button onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? "Uploading…" : "Choose PDF"}
         </Button>
         <input
@@ -89,17 +114,48 @@ export function UploadReport() {
         />
       </div>
 
-      {upload.isError && (
+      {duplicates && (
+        <div role="alert" className="mt-3 rounded-lg border border-warn/40 bg-warn/10 p-3">
+          <p className="text-sm font-medium text-warn-fg">This report was already uploaded.</p>
+          <ul className="mt-2 space-y-1">
+            {duplicates.map((dupe) => (
+              <li key={dupe.id} className="text-[13px]">
+                <Link
+                  to={`/reports/${String(dupe.id)}`}
+                  className="font-mono text-iris-fg hover:underline"
+                >
+                  {dupe.filename}
+                </Link>
+                <span className="text-faint"> · {formatDate(dupe.created_at, dateFormat)}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={cancelDuplicate}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                submit(pendingFile ?? undefined, true);
+              }}
+            >
+              Upload anyway
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {genericError && (
         <p role="alert" className="mt-3 text-sm text-danger-fg">
           Upload failed: {errorMessage(upload.error)}
         </p>
       )}
 
-      {upload.isSuccess && (
+      {upload.isSuccess && !duplicates && (
         <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-dim">
           <span>
-            Uploaded{" "}
-            <span className="font-mono font-medium text-fg">{upload.data.filename}</span>
+            Uploaded <span className="font-mono font-medium text-fg">{upload.data.filename}</span>
           </span>
           <StatusBadge status={upload.data.status} />
         </p>

@@ -18,6 +18,7 @@ const readyReport: Report = {
   error: null,
   finding_count: 1,
   archived: false,
+  content_hash: null,
   created_at: "2026-07-15T10:00:00Z",
 };
 

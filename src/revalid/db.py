@@ -48,6 +48,8 @@ class ReportRecord(Base):
     finding_count: Mapped[int] = mapped_column(default=0)
     #: Soft-hidden from the overview but kept (reversible); deletable (FR-11, #128).
     archived: Mapped[bool] = mapped_column(default=False)
+    #: SHA-256 of the uploaded bytes, for duplicate-upload detection (FR-01, #134).
+    content_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -327,7 +329,8 @@ def _ensure_columns(engine: Engine) -> None:
     """
     additions = {
         "reports": {
-            "archived": "ALTER TABLE reports ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"
+            "archived": "ALTER TABLE reports ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0",
+            "content_hash": "ALTER TABLE reports ADD COLUMN content_hash VARCHAR(64)",
         },
     }
     with engine.begin() as conn:

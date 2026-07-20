@@ -70,6 +70,31 @@ def test_startup_fails_reports_orphaned_in_extracting() -> None:
     assert "interrupted" in reports[0]["error"]
 
 
+def test_duplicate_upload_is_rejected_until_forced(
+    extraction_agent: Agent[None, list[ExtractedFinding]],
+) -> None:
+    """Re-uploading identical bytes returns 409 with the matches; force re-ingests (#134)."""
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_extraction_agent] = lambda: extraction_agent
+    client = TestClient(app)
+    pdf = FIXTURE.read_bytes()
+
+    first = client.post("/api/reports", files={"file": ("r.pdf", pdf, "application/pdf")})
+    assert first.status_code == 202
+    assert len(first.json()["content_hash"]) == 64
+
+    dup = client.post("/api/reports", files={"file": ("r.pdf", pdf, "application/pdf")})
+    assert dup.status_code == 409
+    duplicates = dup.json()["detail"]["duplicates"]
+    assert [d["id"] for d in duplicates] == [first.json()["id"]]
+
+    forced = client.post(
+        "/api/reports", params={"force": "true"}, files={"file": ("r.pdf", pdf, "application/pdf")}
+    )
+    assert forced.status_code == 202
+    assert forced.json()["id"] != first.json()["id"]
+
+
 def test_archive_hides_report_and_delete_cascades() -> None:
     """Archiving soft-hides a report; deleting removes it and its findings (#128)."""
     app = create_app(engine=create_db_engine(IN_MEMORY))

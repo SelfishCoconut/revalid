@@ -10,6 +10,7 @@ authentication in TFG scope.
 
 import asyncio
 import contextlib
+import hashlib
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -398,6 +399,7 @@ class ReportOut(BaseModel):
     error: str | None
     finding_count: int
     archived: bool
+    content_hash: str | None
     created_at: datetime
 
     @classmethod
@@ -411,6 +413,7 @@ class ReportOut(BaseModel):
             error=record.error,
             finding_count=record.finding_count,
             archived=record.archived,
+            content_hash=record.content_hash,
             created_at=record.created_at,
         )
 
@@ -1041,16 +1044,25 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         background: BackgroundTasks,
         session: SessionDep,
         agent: ExtractionAgentDep,
+        force: bool = False,
     ) -> ReportOut:
-        """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11)."""
+        """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11).
+
+        The bytes are SHA-256 hashed; if an identical report already exists and
+        ``force`` is not set, responds ``409`` listing the duplicates so the
+        operator can cancel or knowingly re-ingest (#134).
+        """
         data = await file.read()
         if not data:
             raise HTTPException(status_code=422, detail="empty upload")
+        content_hash = hashlib.sha256(data).hexdigest()
+        _reject_if_duplicate(session, content_hash, force=force)
         report = ReportRecord(
             filename=file.filename or "report.pdf",
             status=ReportStatus.EXTRACTING.value,
             model=agent_model_name(agent),
             finding_count=0,
+            content_hash=content_hash,
         )
         session.add(report)
         session.commit()
@@ -1623,6 +1635,34 @@ def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
         if full_path and candidate.is_file() and dist in candidate.parents:
             return FileResponse(candidate)
         return FileResponse(index)
+
+
+def _reject_if_duplicate(session: Session, content_hash: str, *, force: bool) -> None:
+    """Refuse a re-upload of already-ingested bytes unless the operator forces it (#134).
+
+    Raises ``409`` listing the matching reports (id/filename/created_at) so the UI
+    can offer cancel-or-continue; a truthy ``force`` skips the check for a knowing
+    re-ingest. Extracted as a helper so the upload route stays under the gate.
+    """
+    if force:
+        return
+    dupes = session.scalars(
+        select(ReportRecord)
+        .where(ReportRecord.content_hash == content_hash)
+        .order_by(ReportRecord.id.desc())
+    ).all()
+    if not dupes:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "message": "This report has already been uploaded.",
+            "duplicates": [
+                {"id": d.id, "filename": d.filename, "created_at": d.created_at.isoformat()}
+                for d in dupes
+            ],
+        },
+    )
 
 
 def _cascade_delete_report(session: Session, report: ReportRecord) -> None:

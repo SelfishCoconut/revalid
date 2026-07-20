@@ -55,11 +55,11 @@ export function useReport(id: number) {
   });
 }
 
-/** Upload a PDF; on success refresh the reports list. */
+/** Upload a PDF (optionally forcing past a duplicate); on success refresh the list. */
 export function useUploadReport() {
   const client = useQueryClient();
-  return useMutation<Report, Error, File>({
-    mutationFn: uploadReport,
+  return useMutation<Report, Error, { file: File; force?: boolean }>({
+    mutationFn: ({ file, force }) => uploadReport(file, force),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.reports });
     },

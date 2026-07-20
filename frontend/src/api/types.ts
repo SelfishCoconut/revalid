@@ -12,6 +12,15 @@ export interface Report {
   finding_count: number;
   /** Soft-hidden from the overview but kept and reversible (#128). */
   archived: boolean;
+  /** SHA-256 of the uploaded bytes (null for manually-entered reports) (#134). */
+  content_hash: string | null;
+  created_at: string;
+}
+
+/** A prior report that matches an upload's hash, surfaced on the dedup warning (#134). */
+export interface DuplicateReport {
+  id: number;
+  filename: string;
   created_at: string;
 }
 
