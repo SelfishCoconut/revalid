@@ -193,6 +193,16 @@ non-lab targets, destructive exploitation.
   - [x] **AC4**: read-only + backend-agnostic — no tool mutates data or starts a retest, and the agent is built from the FR-13 setting (`build_model`); backend tools + endpoints are unit/integration-tested with a Pydantic AI stand-in, the SPA view has vitest coverage, all CI gates green.
 - **Traces to**: issue #136, ADR-0036 (proposed), milestone M6.
 
+### FR-19 — CVSS + MITRE ATT&CK enrichment of findings
+- **Priority**: Should · **Source**: change request 2026-07-20 (ADR-0037, issue #144)
+- **Description**: The system shall attach to each ingested finding a **CVSS code** (base vector + score) and a **MITRE ATT&CK technique mapping**, realising the §2.1.3 requirement that findings be mapped onto the standard reference frameworks. Values **stated in the report** are captured verbatim; when the report is silent the extraction model **derives** a best-estimate CVSS v3.1 vector/score and the most applicable ATT&CK technique IDs, each flagged `inferred` so an estimate is always distinguishable from a stated value. The taxonomy fields are classificatory metadata only — they never feed the retest verdict (ADR-0037).
+- **Acceptance criteria**:
+  - [x] **AC1**: ingestion attaches `cvss` (`vector`, `base_score`, `inferred`) and `mitre` (`techniques`, `inferred`) to every finding; a stated code maps through with `inferred=false`, an absent one is derived with `inferred=true`. *(`ExtractedFinding`, `_to_finding`, extraction instructions.)*
+  - [x] **AC2**: the fields persist as first-class columns and survive the FR-16 version round trip — not only inside the `raw` audit blob. *(`FindingVersionRecord.cvss`/`.mitre`, `from_domain`/`to_domain`.)*
+  - [x] **AC3**: extraction + round-trip are unit-tested with a Pydantic AI stand-in (stated / inferred / absent), mypy `--strict`, ruff and coverage all green.
+  - [ ] **AC4**: the `/api` finding payload and the SPA finding view surface the CVSS code and ATT&CK techniques with their `inferred` provenance, and the evaluation ground truth is tagged with them. *(Follow-up slice.)*
+- **Traces to**: issue #144, ADR-0037 (proposed), milestone M2.
+
 ## 3. Non-functional requirements
 
 ### NFR-01 — Verdict reliability

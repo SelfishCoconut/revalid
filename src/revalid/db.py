@@ -14,8 +14,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from sqlalchemy.pool import StaticPool
 
 from revalid.domain import (
+    CvssCode,
     Finding,
     FindingOrigin,
+    MitreMapping,
     Settings,
     Severity,
     VerdictStatus,
@@ -94,6 +96,8 @@ class FindingVersionRecord(Base):
     attack_vector: Mapped[str] = mapped_column(default="")
     affected_endpoints: Mapped[list[str]] = mapped_column(JSON)
     reproduction_steps: Mapped[list[str]] = mapped_column(JSON)
+    cvss: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    mitre: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     raw: Mapped[dict[str, Any]] = mapped_column(JSON)
     edited_by: Mapped[str | None] = mapped_column(String(32), default=None)
     reason: Mapped[str] = mapped_column(default="")
@@ -122,6 +126,8 @@ class FindingVersionRecord(Base):
             attack_vector=finding.attack_vector,
             affected_endpoints=list(finding.affected_endpoints),
             reproduction_steps=list(finding.reproduction_steps),
+            cvss=finding.cvss.model_dump(mode="json"),
+            mitre=finding.mitre.model_dump(mode="json"),
             raw=finding.raw,
             edited_by=edited_by,
             reason=reason,
@@ -137,6 +143,8 @@ class FindingVersionRecord(Base):
             attack_vector=self.attack_vector,
             affected_endpoints=tuple(self.affected_endpoints),
             reproduction_steps=tuple(self.reproduction_steps),
+            cvss=CvssCode.model_validate(self.cvss or {}),
+            mitre=MitreMapping.model_validate(self.mitre or {}),
             raw=self.raw,
         )
 

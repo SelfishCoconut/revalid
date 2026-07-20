@@ -39,6 +39,39 @@ class Settings(BaseModel):
     api_key: str | None = None
 
 
+class CvssCode(BaseModel):
+    """CVSS severity code attached to a finding at ingestion (FR-19).
+
+    ``vector`` is the CVSS base vector string (e.g.
+    ``CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H``); ``base_score`` is the
+    derived 0.0--10.0 base score. ``inferred`` records provenance: ``False``
+    when the code was read from the report verbatim, ``True`` when the model
+    derived it because the report stated none. An empty ``vector`` with
+    ``inferred=False`` means the report had no CVSS code and none was derived.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    vector: str = ""
+    base_score: float | None = None
+    inferred: bool = False
+
+
+class MitreMapping(BaseModel):
+    """MITRE ATT&CK technique mapping for a finding (FR-19).
+
+    ``techniques`` are ATT&CK technique IDs (e.g. ``T1190``,
+    ``T1110``) the finding maps onto; ``inferred`` is ``True`` when the model
+    derived the mapping rather than reading it from the report. Empty
+    ``techniques`` with ``inferred=False`` means none stated and none derived.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    techniques: tuple[str, ...] = ()
+    inferred: bool = False
+
+
 class Finding(BaseModel):
     """A single pentest finding in the internal model (FR-02/FR-03).
 
@@ -50,6 +83,10 @@ class Finding(BaseModel):
         attack_vector: How the vulnerability is reached and exploited (FR-03).
         affected_endpoints: URLs or endpoint identifiers the finding applies to.
         reproduction_steps: Ordered steps to reproduce the issue.
+        cvss: CVSS severity code, read from the report or derived at ingestion
+            (FR-19). Provenance is on the ``inferred`` flag.
+        mitre: MITRE ATT&CK technique mapping, read or derived at ingestion
+            (FR-19). Provenance is on the ``inferred`` flag.
         raw: Complete source payload as ingested, preserving fields the
             internal model does not map (FR-02 audit criterion). For
             LLM-extracted findings it also carries extraction lineage — model
@@ -65,6 +102,8 @@ class Finding(BaseModel):
     attack_vector: str = ""
     affected_endpoints: tuple[str, ...] = ()
     reproduction_steps: tuple[str, ...] = ()
+    cvss: CvssCode = Field(default_factory=CvssCode)
+    mitre: MitreMapping = Field(default_factory=MitreMapping)
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
