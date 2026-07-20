@@ -78,14 +78,18 @@ describe("Settings", () => {
     renderWithProviders(<Settings />, "/settings");
     await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
 
-    await userEvent.click(screen.getByRole("button", { name: /refresh models/i }));
+    await userEvent.click(screen.getByRole("button", { name: /discover models/i }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Reachable — 2 models discovered.",
     );
     expect(client.probeProvider).toHaveBeenCalled();
     const [probePayload] = vi.mocked(client.probeProvider).mock.calls[0];
-    expect(probePayload).toEqual({ base_url: "http://localhost:11434/v1", api_key: null });
+    expect(probePayload).toEqual({
+      provider: "ollama",
+      base_url: "http://localhost:11434/v1",
+      api_key: null,
+    });
 
     // The base URL looks like Ollama, so discovered ids must be re-prefixed
     // with "ollama:" before landing in the radio group.
@@ -104,11 +108,57 @@ describe("Settings", () => {
 
     renderWithProviders(<Settings />, "/settings");
     await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
-    await userEvent.click(screen.getByRole("button", { name: /refresh models/i }));
+    await userEvent.click(screen.getByRole("button", { name: /discover models/i }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Unreachable — connection refused",
     );
+  });
+
+  it("discovers Claude models under the Anthropic provider and saves without a base URL", async () => {
+    // Switching to Claude hides the base URL (native provider) and probes with
+    // provider=anthropic; discovered ids are prefixed `anthropic:` and saved
+    // with base_url null so the backend builds a native AnthropicModel.
+    vi.mocked(client.probeProvider).mockResolvedValue({
+      reachable: true,
+      models: ["claude-sonnet-5", "claude-opus-4-8"],
+      error: null,
+    });
+    vi.mocked(client.updateSettings).mockResolvedValue({
+      ...current,
+      model: "anthropic:claude-sonnet-5",
+      base_url: null,
+    });
+
+    renderWithProviders(<Settings />, "/settings");
+    await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
+
+    await userEvent.click(screen.getByRole("radio", { name: /claude \(anthropic\)/i }));
+    // Base URL field is gone for the native Anthropic provider.
+    expect(screen.queryByLabelText(/base url/i)).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-test");
+    await userEvent.click(screen.getByRole("button", { name: /discover models/i }));
+
+    const [probePayload] = vi.mocked(client.probeProvider).mock.calls.at(-1) ?? [];
+    expect(probePayload).toEqual({
+      provider: "anthropic",
+      base_url: null,
+      api_key: "sk-ant-test",
+    });
+
+    await userEvent.click(
+      await screen.findByRole("radio", { name: "anthropic:claude-sonnet-5" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalled());
+    const [savePayload] = vi.mocked(client.updateSettings).mock.calls[0];
+    expect(savePayload).toEqual({
+      model: "anthropic:claude-sonnet-5",
+      base_url: null,
+      api_key: "sk-ant-test",
+    });
   });
 
   it("shows a masked hint for an existing key and lets base URL be edited", async () => {

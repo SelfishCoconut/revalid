@@ -172,7 +172,11 @@ export interface SettingsUpdate {
   clear_key?: boolean;
 }
 
+/** Which provider to discover models from; drives the probe's auth scheme. */
+export type ProviderKind = "ollama" | "anthropic" | "openai";
+
 export interface ProbeInput {
+  provider?: ProviderKind | null;
   base_url: string | null;
   api_key?: string | null;
 }

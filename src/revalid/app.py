@@ -108,7 +108,7 @@ from revalid.retest_session import (
     submit_message,
 )
 from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
-from revalid.settings import ProbeResult, load_or_seed, probe_provider, save
+from revalid.settings import ProbeResult, discover_models, load_or_seed, probe_provider, save
 
 #: The retest agent's static output type: a verdict, or a deferred approval request.
 RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
@@ -478,8 +478,13 @@ class SettingsUpdateIn(BaseModel):
 
 
 class ProbeIn(BaseModel):
-    """Probe request: which endpoint (and optional key) to discover models from."""
+    """Probe request: which provider/endpoint (and optional key) to discover from.
 
+    ``provider`` selects the discovery scheme (``anthropic`` uses the Anthropic
+    model list; anything else uses the OpenAI-compatible ``{base_url}/models``).
+    """
+
+    provider: str | None = None
     base_url: str | None = None
     api_key: str | None = None
 
@@ -1629,8 +1634,13 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
 
     @router.post("/settings/probe", response_model=ProbeResult)
     def probe_settings(body: ProbeIn) -> ProbeResult:
-        """Discover models / test reachability for a provider base URL (ADR-0021)."""
-        return probe_provider(body.base_url, body.api_key)
+        """Discover models / test reachability for a provider (ADR-0021).
+
+        Dispatches on ``provider``: ``anthropic`` lists Claude models via the
+        Anthropic API; any other provider probes the OpenAI-compatible
+        ``{base_url}/models`` endpoint (Ollama, OpenAI, or a compatible host).
+        """
+        return discover_models(body.provider, body.base_url, body.api_key)
 
     @router.get("/settings/status", response_model=BackendStatusOut)
     def backend_status(session: SessionDep) -> BackendStatusOut:

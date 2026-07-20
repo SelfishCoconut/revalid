@@ -59,3 +59,13 @@ def test_probe_endpoint_reports_unreachable_localhost(client: TestClient) -> Non
     body = client.post("/api/settings/probe", json={"base_url": "http://127.0.0.1:1/v1"}).json()
     assert body["reachable"] is False
     assert body["error"]
+
+
+def test_probe_endpoint_dispatches_anthropic_without_a_key(client: TestClient) -> None:
+    # provider=anthropic with no key must resolve to the Anthropic probe and
+    # report a structured "key required" — never fall through to a base-URL probe.
+    body = client.post(
+        "/api/settings/probe", json={"provider": "anthropic", "base_url": None, "api_key": None}
+    ).json()
+    assert body["reachable"] is False
+    assert "key" in body["error"].lower()

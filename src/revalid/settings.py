@@ -21,6 +21,12 @@ from revalid.llm import DEFAULT_BASE_URL, DEFAULT_MODEL
 SETTINGS_ID = 1
 """Primary key of the singleton settings row."""
 
+ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
+"""Anthropic model-list endpoint (authenticated differently from OpenAI's)."""
+
+ANTHROPIC_VERSION = "2023-06-01"
+"""Required ``anthropic-version`` header for the Anthropic REST API."""
+
 
 class ProbeResult(BaseModel):
     """Outcome of a provider connection probe / model discovery (ADR-0021)."""
@@ -28,6 +34,16 @@ class ProbeResult(BaseModel):
     reachable: bool
     models: tuple[str, ...] = ()
     error: str | None = None
+
+
+def _extract_model_ids(payload: object) -> tuple[str, ...]:
+    """Pull model ids from an OpenAI-/Anthropic-style ``{"data": [{"id": ...}]}`` body.
+
+    Both providers return the model list under a ``data`` array of objects with
+    an ``id``; a non-object or missing ``data`` yields no models (never raises).
+    """
+    data = payload.get("data", []) if isinstance(payload, dict) else []
+    return tuple(str(item["id"]) for item in data if isinstance(item, dict) and "id" in item)
 
 
 def probe_provider(
@@ -38,9 +54,9 @@ def probe_provider(
 ) -> ProbeResult:
     """Probe an OpenAI-compatible provider and list its models (ADR-0021).
 
-    Hits ``{base_url}/models`` (e.g. Ollama's OpenAI-compatible endpoint). This
-    deliberately bypasses the FR-06 allowlist: the LLM host is infrastructure the
-    operator configures, not a pentest target (ADR-0008).
+    Hits ``{base_url}/models`` (e.g. Ollama's or OpenAI's OpenAI-compatible
+    endpoint). This deliberately bypasses the FR-06 allowlist: the LLM host is
+    infrastructure the operator configures, not a pentest target (ADR-0008).
 
     Args:
         base_url: The provider base URL (must already include any ``/v1`` suffix).
@@ -59,15 +75,77 @@ def probe_provider(
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         response = client.get(f"{base_url.rstrip('/')}/models", headers=headers)
         response.raise_for_status()
-        payload = response.json()
-        data = payload.get("data", []) if isinstance(payload, dict) else []
-        models = tuple(str(item["id"]) for item in data if isinstance(item, dict) and "id" in item)
-        return ProbeResult(reachable=True, models=models)
+        return ProbeResult(reachable=True, models=_extract_model_ids(response.json()))
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return ProbeResult(reachable=False, error=str(exc))
     finally:
         if owns:
             client.close()
+
+
+def probe_anthropic(
+    api_key: str | None,
+    *,
+    client: httpx.Client | None = None,
+) -> ProbeResult:
+    """Discover Claude models from the Anthropic API (ADR-0021).
+
+    Anthropic's model list authenticates with ``x-api-key`` + ``anthropic-version``
+    headers rather than OpenAI's bearer scheme, so it needs its own probe. A key
+    is required — without one this reports unreachable rather than calling out.
+
+    Args:
+        api_key: The Anthropic API key.
+        client: Injectable HTTP client (tests pass a ``MockTransport`` client).
+
+    Returns:
+        A :class:`ProbeResult`; ``reachable`` is false with an ``error`` message
+        on any failure (no exception escapes).
+    """
+    if not api_key:
+        return ProbeResult(reachable=False, error="an Anthropic API key is required")
+    owns = client is None
+    client = client or httpx.Client(timeout=10.0)
+    try:
+        response = client.get(
+            ANTHROPIC_MODELS_URL,
+            headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+        )
+        response.raise_for_status()
+        return ProbeResult(reachable=True, models=_extract_model_ids(response.json()))
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return ProbeResult(reachable=False, error=str(exc))
+    finally:
+        if owns:
+            client.close()
+
+
+def discover_models(
+    provider: str | None,
+    base_url: str | None,
+    api_key: str | None,
+    *,
+    client: httpx.Client | None = None,
+) -> ProbeResult:
+    """Discover a provider's models, dispatching on its authentication scheme.
+
+    ``anthropic`` uses the Anthropic model list (:func:`probe_anthropic`); every
+    other provider (``ollama``, ``openai``, or any OpenAI-compatible host) uses
+    the OpenAI-compatible ``{base_url}/models`` endpoint (:func:`probe_provider`).
+
+    Args:
+        provider: The selected provider id (``ollama`` / ``anthropic`` / ``openai``);
+            ``None`` falls back to the OpenAI-compatible probe.
+        base_url: Provider base URL (used by the OpenAI-compatible path).
+        api_key: Provider API key (required for Anthropic/OpenAI).
+        client: Injectable HTTP client (tests pass a ``MockTransport`` client).
+
+    Returns:
+        A :class:`ProbeResult` — never raises.
+    """
+    if provider == "anthropic":
+        return probe_anthropic(api_key, client=client)
+    return probe_provider(base_url, api_key, client=client)
 
 
 def _seed_from_env() -> Settings:
