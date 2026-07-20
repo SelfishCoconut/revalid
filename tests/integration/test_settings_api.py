@@ -44,6 +44,16 @@ def test_put_rejects_empty_model(client: TestClient) -> None:
     assert client.put("/api/settings", json={"model": "", "base_url": None}).status_code == 422
 
 
+def test_status_native_provider_reports_connected(client: TestClient) -> None:
+    """A provider with no base URL can't be probed, so status reports it connected."""
+    client.put(
+        "/api/settings",
+        json={"model": "anthropic:claude-sonnet-5", "base_url": None, "api_key": "sk-x"},
+    )
+    body = client.get("/api/settings/status").json()
+    assert body == {"connected": True, "model": "anthropic:claude-sonnet-5"}
+
+
 def test_probe_endpoint_reports_unreachable_localhost(client: TestClient) -> None:
     # No Ollama in CI: the probe must return a structured "unreachable", never 500.
     body = client.post("/api/settings/probe", json={"base_url": "http://127.0.0.1:1/v1"}).json()

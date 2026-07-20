@@ -421,6 +421,15 @@ class ReportPatchIn(BaseModel):
     archived: bool
 
 
+class BackendStatusOut(BaseModel):
+    """Live LLM-backend reachability + active model, for the sidebar status pill."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    connected: bool
+    model: str
+
+
 class SettingsOut(BaseModel):
     """Public view of the model/provider setting; the key is write-only (ADR-0021)."""
 
@@ -1576,6 +1585,21 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
     def probe_settings(body: ProbeIn) -> ProbeResult:
         """Discover models / test reachability for a provider base URL (ADR-0021)."""
         return probe_provider(body.base_url, body.api_key)
+
+    @router.get("/settings/status", response_model=BackendStatusOut)
+    def backend_status(session: SessionDep) -> BackendStatusOut:
+        """Report whether the configured LLM backend is reachable + the active model.
+
+        Probes the stored provider config (so keyed backends work without the UI
+        re-sending the key) and feeds the sidebar's connection pill. A native
+        provider with no base URL can't be cheaply probed, so it reports its
+        model as connected rather than falsely red.
+        """
+        cfg = load_or_seed(session)
+        connected = (
+            True if not cfg.base_url else probe_provider(cfg.base_url, cfg.api_key).reachable
+        )
+        return BackendStatusOut(connected=connected, model=cfg.model)
 
 
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:

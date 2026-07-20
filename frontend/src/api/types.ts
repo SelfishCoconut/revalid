@@ -134,6 +134,12 @@ export interface Settings {
   api_key_hint: string | null;
 }
 
+/** Live LLM-backend reachability + active model, for the sidebar status pill. */
+export interface BackendStatus {
+  connected: boolean;
+  model: string;
+}
+
 export interface SettingsUpdate {
   model: string;
   base_url: string | null;

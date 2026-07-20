@@ -4,6 +4,7 @@
 // FastAPI `detail` string so the UI can surface actionable messages.
 
 import type {
+  BackendStatus,
   Finding,
   FindingEdit,
   FindingStage,
@@ -149,6 +150,11 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
 
 export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
   return request<ProbeResult>("/settings/probe", jsonInit("POST", body));
+}
+
+/** Live backend reachability + active model, for the sidebar status pill. */
+export function getBackendStatus(): Promise<BackendStatus> {
+  return request<BackendStatus>("/settings/status");
 }
 
 // --- Agentic retest sessions (FR-17) ---------------------------------------
