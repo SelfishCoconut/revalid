@@ -27,6 +27,13 @@ describe("Settings", () => {
   it("renders the current model and saves an edit", async () => {
     const saved: SettingsData = { ...current, model: "ollama:qwen3:14b" };
     vi.mocked(client.updateSettings).mockResolvedValue(saved);
+    // Model choices are discovered (not hardcoded); the form auto-probes on
+    // mount, so the host's models surface as radios without pressing Refresh.
+    vi.mocked(client.probeProvider).mockResolvedValue({
+      reachable: true,
+      models: ["qwen3:14b"],
+      error: null,
+    });
 
     renderWithProviders(<Settings />, "/settings");
 
@@ -34,8 +41,8 @@ describe("Settings", () => {
     const currentRadio = await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
     expect(currentRadio).toBeChecked();
 
-    // Switch to another known model by selecting its radio.
-    await userEvent.click(screen.getByRole("radio", { name: "ollama:qwen3:14b" }));
+    // Switch to a discovered model by selecting its radio.
+    await userEvent.click(await screen.findByRole("radio", { name: "ollama:qwen3:14b" }));
 
     const keyInput = screen.getByLabelText(/api key/i);
     await userEvent.type(keyInput, "sk-secret");

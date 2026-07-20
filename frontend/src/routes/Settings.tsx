@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProbeResult, Settings as SettingsData } from "../api/types";
 import { Button } from "../components/ui/Button";
@@ -6,14 +6,6 @@ import { Eyebrow, Panel } from "../components/ui/Panel";
 import { Spinner } from "../components/Spinner";
 import { useProbeProvider, useSettings, useUpdateSettings } from "../hooks/useSettings";
 import { errorMessage } from "../lib/format";
-
-/**
- * Curated backends known to work with this tool: the ADR-0021 local-first
- * default, a lighter local variant, and the native Anthropic fallback. The
- * probe below adds whatever a live host actually discovers, so this list is a
- * starting point, not a restriction — the field accepts any string.
- */
-const KNOWN_MODELS = ["ollama:qwen3.6:27b", "ollama:qwen3:14b", "anthropic:claude-sonnet-5"];
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 text-[13px] text-fg transition-colors placeholder:text-faint focus:border-iris/60 disabled:opacity-55";
@@ -54,11 +46,11 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
     return probeResult.models.map((id) => (prefixed ? `ollama:${id}` : id));
   }, [probeResult, baseUrl]);
 
-  // The current model is always a first-class radio (even before a refresh, and
-  // even if the host is offline), so a saved custom/offline model never
-  // silently disappears from the choices.
+  // No hardcoded model list — the choices are exactly what the configured host
+  // exposes (discovered below), plus the current model so a saved/offline
+  // selection never silently disappears from the radio group.
   const modelOptions = useMemo(
-    () => [...new Set([initial.model, ...KNOWN_MODELS, ...discoveredModels])],
+    () => [...new Set([initial.model, ...discoveredModels])],
     [discoveredModels, initial.model],
   );
 
@@ -73,6 +65,16 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       { onSuccess: setProbeResult },
     );
   }
+
+  // Discover models from the configured host on first mount, so the group
+  // reflects what this backend actually offers without the operator having to
+  // click Refresh. The ref guard keeps it to a single probe.
+  const didAutoProbe = useRef(false);
+  useEffect(() => {
+    if (didAutoProbe.current || !baseUrl) return;
+    didAutoProbe.current = true;
+    probe.mutate({ base_url: baseUrl, api_key: apiKey || null }, { onSuccess: setProbeResult });
+  }, [baseUrl, apiKey, probe]);
 
   function handleSave() {
     update.mutate({
