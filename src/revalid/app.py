@@ -1185,8 +1185,9 @@ def _register_session_routes(
     ) -> RetestSessionOut:
         """Open an agentic retest session and schedule its first agent step (FR-17).
 
-        An optional body sets the free-launch mode + budget config (FR-17 Slice
-        5); with no body the session is gated with the default step budget.
+        An optional body sets the free-launch mode, a seed goal and the target
+        scope (FR-17); with no body the session runs gated, requiring per-command
+        operator approval.
         """
         cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
