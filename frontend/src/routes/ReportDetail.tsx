@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 
+import { DeterminationMeter } from "../components/DeterminationMeter";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -8,7 +9,7 @@ import { useFindings } from "../hooks/useFindings";
 import { useReport } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-import { latestVerdict } from "../lib/selectors";
+import { latestVerdict, verdictCounts } from "../lib/selectors";
 
 function BackLink({ to, children }: { to: string; children: string }) {
   return (
@@ -43,6 +44,13 @@ export function ReportDetail() {
   }
 
   const data = report.data;
+  // Per-report determination roll-up (issue #130): one current verdict per
+  // finding in this report, aggregated into the still-open/inconclusive/fixed
+  // meter that used to live on each finding's Verdict page.
+  const reportFindingIds = new Set((findings.data ?? []).map((finding) => finding.id));
+  const reportVerdicts = (verdicts.data ?? []).filter((verdict) =>
+    reportFindingIds.has(verdict.finding_id),
+  );
 
   return (
     <div className="rev-rise space-y-6">
@@ -70,6 +78,15 @@ export function ReportDetail() {
           </p>
         )}
       </Panel>
+
+      {ready && (findings.data ?? []).length > 0 && (
+        <Panel className="p-5">
+          <Eyebrow>Determinations</Eyebrow>
+          <div className="mt-4">
+            <DeterminationMeter counts={verdictCounts(reportVerdicts)} />
+          </div>
+        </Panel>
+      )}
 
       {ready && (
         <Panel>
