@@ -36,6 +36,8 @@ from starlette.requests import Request
 from revalid import __version__
 from revalid.audit import rederive_run
 from revalid.db import (
+    ChatMessageRecord,
+    ChatSessionRecord,
     FindingNoteRecord,
     FindingRecord,
     FindingVersionRecord,
@@ -81,6 +83,15 @@ from revalid.plan import (
     GeneratedGoal,
     build_goal_agent,
     generate_goal,
+)
+from revalid.reports_chat import (
+    ReportsChatDeps,
+    answer_question,
+    build_reports_agent,
+    create_chat,
+    delete_chat,
+    list_chats,
+    list_messages,
 )
 from revalid.retest_agent import (
     ConcludeOutput,
@@ -489,6 +500,70 @@ class ProbeIn(BaseModel):
     api_key: str | None = None
 
 
+class ChatOut(BaseModel):
+    """A reports-chat thread summary as returned by the API (FR-18)."""
+
+    id: int
+    title: str
+    model: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_record(cls, record: ChatSessionRecord) -> "ChatOut":
+        """Build the thread-summary view from a persisted chat row."""
+        return cls(
+            id=record.id,
+            title=record.title,
+            model=record.model,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+
+class ChatMessageOut(BaseModel):
+    """One persisted chat turn as returned by the API (FR-18)."""
+
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: ChatMessageRecord) -> "ChatMessageOut":
+        """Build the message view from a persisted chat-message row."""
+        return cls(
+            id=record.id,
+            role=record.role,
+            content=record.content,
+            created_at=record.created_at,
+        )
+
+
+class ChatDetailOut(ChatOut):
+    """A chat thread plus its full ordered transcript (FR-18)."""
+
+    messages: list[ChatMessageOut] = []
+
+    @classmethod
+    def of(cls, record: ChatSessionRecord, messages: list[ChatMessageRecord]) -> "ChatDetailOut":
+        """Build the thread + messages view from a chat row and its turns."""
+        return cls(
+            id=record.id,
+            title=record.title,
+            model=record.model,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            messages=[ChatMessageOut.from_record(m) for m in messages],
+        )
+
+
+class ChatMessageIn(BaseModel):
+    """Body for posting an operator question to a chat thread (FR-18)."""
+
+    content: str = Field(min_length=1)
+
+
 def get_settings_dep(request: Request) -> Settings:
     """Load the persisted model/provider setting, seeding a fresh DB (ADR-0021)."""
     sessions = cast("sessionmaker[Session]", request.app.state.sessions)
@@ -524,6 +599,11 @@ def get_qa_agent(settings: SettingsDep) -> Agent[None, str]:
     return build_qa_agent(build_model(settings))
 
 
+def get_reports_agent(settings: SettingsDep) -> Agent[ReportsChatDeps, str]:
+    """Yield the FR-18 read-only reports assistant built from the persisted setting."""
+    return build_reports_agent(build_model(settings))
+
+
 def get_sandbox_factory() -> SandboxFactory:
     """Yield the production sandbox factory: a fresh egress-locked Docker sandbox per session.
 
@@ -542,6 +622,7 @@ ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_
 MetadataAgentDep = Annotated[Agent[None, ReportMetadata], Depends(get_metadata_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
 QaAgentDep = Annotated[Agent[None, str], Depends(get_qa_agent)]
+ReportsChatAgentDep = Annotated[Agent[ReportsChatDeps, str], Depends(get_reports_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
 
 
@@ -1658,6 +1739,83 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
         return BackendStatusOut(connected=connected, model=cfg.model)
 
 
+def _register_chat_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-18 reports-chat thread routes (create/list/get/delete).
+
+    Threads are persisted so a conversation survives reload. The message-posting
+    route — which runs the read-only assistant — is registered separately
+    (:func:`_register_chat_message_route`) to keep each registrar under the
+    mccabe gate (see :func:`_register_core_routes`).
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/chats", response_model=ChatOut, status_code=201)
+    def new_chat(session: SessionDep) -> ChatOut:
+        """Open a fresh, empty reports-chat thread (FR-18)."""
+        return ChatOut.from_record(create_chat(session))
+
+    @router.get("/chats", response_model=list[ChatOut])
+    def get_chats(session: SessionDep) -> list[ChatOut]:
+        """List reports-chat threads, most-recently-updated first (FR-18)."""
+        return [ChatOut.from_record(c) for c in list_chats(session)]
+
+    @router.get("/chats/{chat_id}", response_model=ChatDetailOut)
+    def get_chat(chat_id: int, session: SessionDep) -> ChatDetailOut:
+        """Return one thread and its full ordered transcript (FR-18)."""
+        chat = session.get(ChatSessionRecord, chat_id)
+        if chat is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+        return ChatDetailOut.of(chat, list_messages(session, chat_id))
+
+    @router.delete("/chats/{chat_id}", status_code=204)
+    def remove_chat(chat_id: int, session: SessionDep) -> None:
+        """Delete a thread and all its messages (FR-18)."""
+        if session.get(ChatSessionRecord, chat_id) is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+        delete_chat(session, chat_id)
+
+
+def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-18 chat message route: ask the read-only reports assistant.
+
+    Runs **inline** (a sync path operation on Starlette's threadpool, not a
+    background task): the assistant's answer is what the caller is waiting for, so
+    the reply is persisted and returned in the same response — unlike the FR-17
+    retest session, whose long-lived run streams over a WebSocket. Split from
+    :func:`_register_chat_routes` for the same mccabe-budget reason.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/chats/{chat_id}/messages", response_model=ChatDetailOut)
+    def post_message(
+        chat_id: int,
+        body: ChatMessageIn,
+        session: SessionDep,
+        agent: ReportsChatAgentDep,
+    ) -> ChatDetailOut:
+        """Answer an operator question over the corpus and append it to the thread (FR-18).
+
+        Records the question, runs the read-only reports assistant (which pulls
+        exact data via its DB tools), persists the reply, and returns the full
+        updated thread so the SPA re-syncs in one round trip.
+        """
+        chat = session.get(ChatSessionRecord, chat_id)
+        if chat is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+        answer_question(agent, session, chat, body.content)
+        return ChatDetailOut.of(chat, list_messages(session, chat_id))
+
+
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
     """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
 
@@ -1805,6 +1963,8 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_session_stream_route(api, sessions)
     _register_export_routes(api, sessions)
     _register_settings_routes(api, sessions)
+    _register_chat_routes(api, sessions)
+    _register_chat_message_route(api, sessions)
     app.include_router(api)
     _mount_spa(app)
 
