@@ -5,6 +5,8 @@
 
 import type {
   BackendStatus,
+  ChatDetail,
+  ChatSummary,
   DuplicateReport,
   Finding,
   FindingEdit,
@@ -187,6 +189,37 @@ export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
 /** Live backend reachability + active model, for the sidebar status pill. */
 export function getBackendStatus(): Promise<BackendStatus> {
   return request<BackendStatus>("/settings/status");
+}
+
+// --- Reports chat (FR-18) --------------------------------------------------
+
+/** List reports-chat threads, most-recently-updated first. */
+export function listChats(): Promise<ChatSummary[]> {
+  return request<ChatSummary[]>("/chats");
+}
+
+/** Open a fresh, empty reports-chat thread; backend replies 201. */
+export function createChat(): Promise<ChatSummary> {
+  return request<ChatSummary>("/chats", { method: "POST" });
+}
+
+/** Fetch one thread and its full transcript. */
+export function getChat(id: number): Promise<ChatDetail> {
+  return request<ChatDetail>(`/chats/${String(id)}`);
+}
+
+/**
+ * Ask the read-only reports assistant a question. The backend records the turn,
+ * runs the agent (which may be slow on a local model), persists the reply, and
+ * returns the whole updated thread so the caller re-syncs in one round trip.
+ */
+export function sendChatMessage(id: number, content: string): Promise<ChatDetail> {
+  return request<ChatDetail>(`/chats/${String(id)}/messages`, jsonInit("POST", { content }));
+}
+
+/** Delete a thread and all its messages. */
+export function deleteChat(id: number): Promise<void> {
+  return request<void>(`/chats/${String(id)}`, { method: "DELETE" });
 }
 
 // --- Agentic retest sessions (FR-17) ---------------------------------------

@@ -56,6 +56,19 @@ function SettingsIcon() {
   );
 }
 
+function ChatIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="shrink-0">
+      <path
+        d="M2 3.2A1.2 1.2 0 0 1 3.2 2h9.6A1.2 1.2 0 0 1 14 3.2v6.6a1.2 1.2 0 0 1-1.2 1.2H6l-3 2.6v-2.6H3.2A1.2 1.2 0 0 1 2 9.8z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /**
  * The console's left rail: identity, primary navigation, a live jump-list of
  * recent reports, and the theme control. Rendered both as the desktop sidebar
@@ -106,6 +119,10 @@ export function SidebarContent({
             <NavLink to="/" end onClick={onNavigate} className={navItemClass}>
               <OverviewIcon />
               Overview
+            </NavLink>
+            <NavLink to="/chat" onClick={onNavigate} className={navItemClass}>
+              <ChatIcon />
+              Chat
             </NavLink>
             <NavLink to="/settings" onClick={onNavigate} className={navItemClass}>
               <SettingsIcon />

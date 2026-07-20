@@ -186,3 +186,27 @@ export interface ProbeResult {
   models: string[];
   error: string | null;
 }
+
+// --- Reports chat (FR-18) --------------------------------------------------
+
+/** A persisted reports-chat thread summary (FR-18). */
+export interface ChatSummary {
+  id: number;
+  title: string;
+  model: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One persisted turn in a reports-chat thread (FR-18). */
+export interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+/** A thread plus its full ordered transcript (FR-18). */
+export interface ChatDetail extends ChatSummary {
+  messages: ChatMessage[];
+}

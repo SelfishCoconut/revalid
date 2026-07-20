@@ -183,6 +183,16 @@ non-lab targets, destructive exploitation.
 - **Remaining**: **none for the core**; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
 - **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
+### FR-18 — Reports chat assistant (corpus Q&A)
+- **Priority**: Should · **Source**: change request 2026-07-20 (ADR-0036, issue #136)
+- **Description**: The system shall provide a **read-only conversational assistant**, reachable from a **Chat** tab in the SPA's left navigation, that answers natural-language questions about the whole corpus of ingested reports, findings, and retest verdicts — e.g. *"how many reports do we have?"*, *"how many findings relate to SQL injection?"*, *"which report has the most criticals?"*. It is a Pydantic AI agent with typed, **read-only** DB query tools (reusing the FR-13 configured backend); it never mutates data and never launches a retest. Conversation threads are **persisted** so a chat survives a page reload.
+- **Acceptance criteria** (met — issue #136, ADR-0036 proposed, 2026-07-20):
+  - [x] **AC1**: a **Chat** tab in the left nav opens the assistant; the operator sends a message and receives an agent reply over `POST /api/chats/{id}/messages`. *(`frontend/src/routes/Chat.tsx`, `_register_chat_message_route`.)*
+  - [x] **AC2**: counts are grounded in read-only tools — `get_corpus_overview` (reports by status, findings by severity, latest verdict per finding), `search_findings` (exact `total` by keyword/severity/report even when the row list is capped), `list_all_reports`, `finding_detail` — so "how many …" answers are exact, not estimated. *(`src/revalid/reports_chat.py`.)*
+  - [x] **AC3**: conversation threads are persisted (`chat_sessions`/`chat_messages`) and survive reload; the operator starts new threads and revisits or deletes prior ones (`GET`/`POST`/`DELETE /api/chats…`). *(FR-18 chosen persisted over ephemeral.)*
+  - [x] **AC4**: read-only + backend-agnostic — no tool mutates data or starts a retest, and the agent is built from the FR-13 setting (`build_model`); backend tools + endpoints are unit/integration-tested with a Pydantic AI stand-in, the SPA view has vitest coverage, all CI gates green.
+- **Traces to**: issue #136, ADR-0036 (proposed), milestone M6.
+
 ## 3. Non-functional requirements
 
 ### NFR-01 — Verdict reliability
