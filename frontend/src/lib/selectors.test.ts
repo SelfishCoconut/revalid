@@ -57,6 +57,17 @@ describe("verdictCounts", () => {
     ];
     expect(verdictCounts(verdicts)).toEqual({ still_open: 1, inconclusive: 0, fixed: 1 });
   });
+
+  it("keeps the highest-id verdict when rows arrive out of order", () => {
+    // The newer determination (id=5, fixed) is seen before the older one
+    // (id=2, still_open); the older must be ignored — exercises the comparator's
+    // false branch (`verdict.id > current.id` is false).
+    const verdicts = [
+      makeVerdict({ id: 5, finding_id: 1, status: "fixed" }),
+      makeVerdict({ id: 2, finding_id: 1, status: "still_open" }),
+    ];
+    expect(verdictCounts(verdicts)).toEqual({ still_open: 0, inconclusive: 0, fixed: 1 });
+  });
 });
 
 describe("pipelineReach (4-stage)", () => {

@@ -4,6 +4,8 @@
 // FastAPI `detail` string so the UI can surface actionable messages.
 
 import type {
+  ChatDetail,
+  ChatSummary,
   Finding,
   FindingEdit,
   FindingStage,
@@ -149,6 +151,37 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
 
 export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
   return request<ProbeResult>("/settings/probe", jsonInit("POST", body));
+}
+
+// --- Reports chat (FR-18) --------------------------------------------------
+
+/** List reports-chat threads, most-recently-updated first. */
+export function listChats(): Promise<ChatSummary[]> {
+  return request<ChatSummary[]>("/chats");
+}
+
+/** Open a fresh, empty reports-chat thread; backend replies 201. */
+export function createChat(): Promise<ChatSummary> {
+  return request<ChatSummary>("/chats", { method: "POST" });
+}
+
+/** Fetch one thread and its full transcript. */
+export function getChat(id: number): Promise<ChatDetail> {
+  return request<ChatDetail>(`/chats/${String(id)}`);
+}
+
+/**
+ * Ask the read-only reports assistant a question. The backend records the turn,
+ * runs the agent (which may be slow on a local model), persists the reply, and
+ * returns the whole updated thread so the caller re-syncs in one round trip.
+ */
+export function sendChatMessage(id: number, content: string): Promise<ChatDetail> {
+  return request<ChatDetail>(`/chats/${String(id)}/messages`, jsonInit("POST", { content }));
+}
+
+/** Delete a thread and all its messages. */
+export function deleteChat(id: number): Promise<void> {
+  return request<void>(`/chats/${String(id)}`, { method: "DELETE" });
 }
 
 // --- Agentic retest sessions (FR-17) ---------------------------------------

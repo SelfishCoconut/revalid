@@ -292,6 +292,46 @@ class SettingsRecord(Base):
         )
 
 
+class ChatSessionRecord(Base):
+    """A persisted reports-chat conversation thread (FR-18).
+
+    The read-only reports assistant answers natural-language questions about the
+    whole corpus (reports, findings, verdicts). A thread is a lightweight
+    container for an append-only sequence of :class:`ChatMessageRecord` turns,
+    persisted so a conversation survives a page reload. ``title`` is a short
+    human label (the first question, truncated) shown in the thread list;
+    ``model`` records the LLM backend that answered (NFR-02 lineage).
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), default="New chat")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChatMessageRecord(Base):
+    """One append-only turn in a reports-chat thread (FR-18).
+
+    ``role`` is ``"user"`` or ``"assistant"``; ``content`` is the plain text.
+    Rows are ordered by ``id`` (monotonic insert order). The assistant re-queries
+    the DB via its read-only tools on every turn, so only the prose is stored — no
+    tool-call parts — and nothing here is ever mutated or deleted in place.
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"))
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 def create_db_engine(path: str = "revalid.db") -> Engine:
     """Create the SQLite engine and ensure the schema exists.
 
