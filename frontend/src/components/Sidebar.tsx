@@ -4,6 +4,7 @@ import type { ReportStatus } from "../api/types";
 import { useReports } from "../hooks/useReports";
 import type { Theme } from "../lib/theme";
 import { BrandMark } from "./BrandMark";
+import { ReportActions } from "./ReportActions";
 import { Spinner } from "./Spinner";
 import { ThemeToggle } from "./ThemeToggle";
 import { Eyebrow } from "./ui/Panel";
@@ -126,21 +127,24 @@ export function SidebarContent({
               <p className="px-2.5 py-1.5 text-[12px] text-faint">No reports yet.</p>
             ) : (
               recent.map((report) => (
-                <NavLink
-                  key={report.id}
-                  to={`/reports/${String(report.id)}`}
-                  onClick={onNavigate}
-                  className={navItemClass}
-                  title={report.filename}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[report.status]}`}
+                <div key={report.id} className="group relative">
+                  <NavLink
+                    to={`/reports/${String(report.id)}`}
+                    onClick={onNavigate}
+                    className={navItemClass}
+                    title={report.filename}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[report.status]}`}
+                    />
+                    <span className="truncate font-mono text-[12px]">{report.filename}</span>
+                  </NavLink>
+                  <ReportActions
+                    report={report}
+                    className="absolute top-1/2 right-1 -translate-y-1/2 rounded-md bg-panel/95 opacity-0 shadow-sm ring-1 ring-line/60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                   />
-                  <span className="truncate font-mono text-[12px]">
-                    {report.filename}
-                  </span>
-                </NavLink>
+                </div>
               ))
             )}
           </div>

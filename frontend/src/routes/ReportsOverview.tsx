@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import type { Report } from "../api/types";
 import { DeterminationMeter } from "../components/DeterminationMeter";
+import { ReportActions } from "../components/ReportActions";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { UploadReport } from "../components/UploadReport";
-import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
-import { useDeleteReport, useReports, useSetReportArchived } from "../hooks/useReports";
+import { useReports } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage, formatDateTime } from "../lib/format";
 import { verdictCounts } from "../lib/selectors";
@@ -37,45 +36,6 @@ function Hero() {
         </div>
       </div>
     </Panel>
-  );
-}
-
-function ReportActions({ report }: { report: Report }) {
-  const setArchived = useSetReportArchived();
-  const remove = useDeleteReport();
-  const busy = setArchived.isPending || remove.isPending;
-
-  function confirmDelete() {
-    const ok = window.confirm(
-      `Delete "${report.filename}" and all its findings, verdicts and retest history?\n` +
-        `This cannot be undone.`,
-    );
-    if (ok) {
-      remove.mutate(report.id);
-    }
-  }
-
-  return (
-    <div className="flex justify-end gap-1.5">
-      <Button
-        variant="ghost"
-        disabled={busy}
-        className="px-2.5 py-1 text-[12px]"
-        onClick={() => {
-          setArchived.mutate({ id: report.id, archived: !report.archived });
-        }}
-      >
-        {report.archived ? "Unarchive" : "Archive"}
-      </Button>
-      <Button
-        variant="danger"
-        disabled={busy}
-        className="px-2.5 py-1 text-[12px]"
-        onClick={confirmDelete}
-      >
-        Delete
-      </Button>
-    </div>
   );
 }
 
@@ -155,7 +115,7 @@ export function ReportsOverview() {
                 </thead>
                 <tbody className="divide-y divide-line/60">
                   {ordered.map((report) => (
-                    <tr key={report.id} className="transition-colors hover:bg-panel-2/40">
+                    <tr key={report.id} className="group transition-colors hover:bg-panel-2/40">
                       <td className="px-4 py-3">
                         <Link
                           to={`/reports/${String(report.id)}`}
@@ -174,7 +134,10 @@ export function ReportsOverview() {
                         {formatDateTime(report.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <ReportActions report={report} />
+                        <ReportActions
+                          report={report}
+                          className="justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                        />
                       </td>
                     </tr>
                   ))}
