@@ -1544,6 +1544,30 @@ def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
         return FileResponse(index)
 
 
+def _fail_orphaned_extractions(sessions: sessionmaker[Session]) -> None:
+    """Settle reports left mid-extraction by a prior crash or restart (FR-01).
+
+    Extraction runs as an in-memory background task, so a process restart
+    orphans any report still in ``extracting``: nothing would ever move it to a
+    terminal state, and the UI's status poll would spin forever. Sweeping these
+    rows to ``failed`` at startup guarantees a report never stays stuck in
+    ``extracting`` (issue #131) — the operator can then re-upload it.
+
+    Args:
+        sessions: The app's session factory.
+    """
+    with sessions() as session:
+        orphaned = session.scalars(
+            select(ReportRecord).where(ReportRecord.status == ReportStatus.EXTRACTING.value)
+        ).all()
+        if not orphaned:
+            return
+        for report in orphaned:
+            report.status = ReportStatus.FAILED.value
+            report.error = "extraction interrupted by a restart — please re-upload the report"
+        session.commit()
+
+
 def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> FastAPI:
     """Build the application with its own database engine.
 
@@ -1557,6 +1581,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     """
     db_engine = engine if engine is not None else create_db_engine(db_path)
     sessions = session_factory(db_engine)
+    _fail_orphaned_extractions(sessions)
     app = FastAPI(title="revalid", version=__version__)
     app.state.sessions = sessions
     registry = SessionRegistry()

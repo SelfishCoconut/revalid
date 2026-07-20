@@ -13,7 +13,8 @@ from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 
 from revalid.app import create_app, get_extraction_agent
-from revalid.db import IN_MEMORY, create_db_engine
+from revalid.db import IN_MEMORY, ReportRecord, create_db_engine, session_factory
+from revalid.domain import ReportStatus
 from revalid.extract import ExtractedFinding
 
 pytestmark = pytest.mark.integration
@@ -40,3 +41,30 @@ def test_ingest_operable_over_api(
     # 2. a finding from that report is now listed over /api.
     findings = client.get("/api/findings", params={"report_id": report_id}).json()
     assert findings and findings[0]["id"]
+
+
+def test_startup_fails_reports_orphaned_in_extracting() -> None:
+    """A report stuck in 'extracting' by a restart is failed on next startup (#131).
+
+    Background extraction is in-memory, so a crash/restart would otherwise leave
+    the row in 'extracting' forever. Rebuilding the app over the same engine must
+    settle it to 'failed' so the UI's status poll always terminates.
+    """
+    engine = create_db_engine(IN_MEMORY)
+    with session_factory(engine)() as session:
+        session.add(
+            ReportRecord(
+                filename="stuck.pdf",
+                status=ReportStatus.EXTRACTING.value,
+                model="stand-in",
+                finding_count=0,
+            )
+        )
+        session.commit()
+
+    app = create_app(engine=engine)  # startup reconcile runs here
+    client = TestClient(app)
+
+    reports = client.get("/api/reports").json()
+    assert reports[0]["status"] == "failed"
+    assert "interrupted" in reports[0]["error"]
