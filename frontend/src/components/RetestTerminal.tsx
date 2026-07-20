@@ -24,8 +24,20 @@ export function RetestTerminal({ lines }: { lines: string[] }) {
     try {
       const instance = new Terminal({
         convertEol: true,
-        fontFamily: "var(--font-mono)",
+        // xterm renders to a canvas and needs a literal font stack — a CSS
+        // `var(--font-mono)` never resolves here and silently falls back to the
+        // browser's default monospace. Spell out IBM Plex Mono to match the app.
+        fontFamily: '"IBM Plex Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
+        fontSize: 12.5,
+        lineHeight: 1.35,
         disableStdin: true,
+        theme: {
+          background: "#0c101a",
+          foreground: "#dbe3ee",
+          cursor: "#8c7bff",
+          cursorAccent: "#0c101a",
+          selectionBackground: "rgba(140, 123, 255, 0.35)",
+        },
       });
       instance.open(host.current);
       term.current = instance;

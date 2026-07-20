@@ -47,12 +47,13 @@ describe("verdictCounts", () => {
   });
 
   it("counts only the latest verdict per finding (supersedes re-runs / adjudications)", () => {
-    // Finding 1 was re-tested / adjudicated three times; only its latest (id=3,
-    // fixed) determination counts. Finding 2 contributes one (still_open).
+    // Finding 1's verdicts arrive out of order (1 → 3 → 2); only its latest by id
+    // (id=3, fixed) counts — the id=2 seen after id=3 exercises the not-latest
+    // (`id > current.id` is false) branch. Finding 2 contributes one (still_open).
     const verdicts = [
       makeVerdict({ id: 1, finding_id: 1, status: "still_open" }),
-      makeVerdict({ id: 2, finding_id: 1, status: "inconclusive" }),
       makeVerdict({ id: 3, finding_id: 1, status: "fixed" }),
+      makeVerdict({ id: 2, finding_id: 1, status: "inconclusive" }),
       makeVerdict({ id: 4, finding_id: 2, status: "still_open" }),
     ];
     expect(verdictCounts(verdicts)).toEqual({ still_open: 1, inconclusive: 0, fixed: 1 });

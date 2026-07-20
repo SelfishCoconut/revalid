@@ -46,6 +46,12 @@ class ReportRecord(Base):
     model: Mapped[str] = mapped_column(String(128))
     error: Mapped[str | None] = mapped_column(default=None)
     finding_count: Mapped[int] = mapped_column(default=0)
+    #: Soft-hidden from the overview but kept (reversible); deletable (FR-11, #128).
+    archived: Mapped[bool] = mapped_column(default=False)
+    #: SHA-256 of the uploaded bytes, for duplicate-upload detection (FR-01, #134).
+    content_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: Document-level metadata extracted from the report, operator-editable (#133).
+    doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -311,7 +317,31 @@ def create_db_engine(path: str = "revalid.db") -> Engine:
     else:
         engine = create_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine)
+    _ensure_columns(engine)
     return engine
+
+
+def _ensure_columns(engine: Engine) -> None:
+    """Add columns introduced after a database was first created (lightweight migration).
+
+    ``create_all`` only creates missing *tables*, never adds columns to existing
+    ones, and this single-file app ships no migration framework (ADR-0002). Each
+    entry here is an idempotent ``ADD COLUMN`` applied only when absent, so an
+    older ``revalid.db`` gains new columns in place instead of needing a reset.
+    """
+    additions = {
+        "reports": {
+            "archived": "ALTER TABLE reports ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0",
+            "content_hash": "ALTER TABLE reports ADD COLUMN content_hash VARCHAR(64)",
+            "doc_metadata": "ALTER TABLE reports ADD COLUMN doc_metadata JSON",
+        },
+    }
+    with engine.begin() as conn:
+        for table, columns in additions.items():
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.exec_driver_sql(ddl)
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:

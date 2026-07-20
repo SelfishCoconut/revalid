@@ -83,9 +83,11 @@ class FindingOrigin(enum.StrEnum):
 class FindingStage(enum.StrEnum):
     """The pipeline stage a note was written on (FR-16, ADR-0024).
 
-    The five stages mirror the finding's lifecycle track
-    (extract → plan → approve → retest → verdict); ``GENERAL`` tags a note left
-    from the finding overview rather than a specific stage.
+    The stages mirror the finding's lifecycle track
+    (extract → goal → retest → verdict); the ``PLAN`` and ``APPROVE`` values are
+    retained for backward compatibility (the goal stage tags its notes ``plan``),
+    while ``GENERAL`` tags a note left from the finding overview rather than a
+    specific stage.
     """
 
     EXTRACT = "extract"

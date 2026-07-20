@@ -1,21 +1,325 @@
-\chapter{Marcas y ayudas}
+\chapter{Methodology}
+\label{ch:methodology}
 
-Se han introducido algunos elementos que permiten dejar marcas para indicar que algunas cosas provisionales se han de corregir. Por ejemplo \verb+\pcite+ deja esta señal \pcite para indicar que se ha de añadir una cita bibliográfica en un punto concreto. \\
+% Allow a little extra line stretch so long technical compounds rebreak
+% cleanly instead of spilling into the margin (no template packages added).
+\setlength{\emergencystretch}{3em}
 
-\ps
+This chapter describes how the project was built rather than what it does. It
+presents the development model adopted --- a design-led, AI-assisted single-developer
+process (Section~\ref{sec:ai-model}); the sequence of earlier attempts and the
+lessons that led to the final approach (Section~\ref{sec:evolution}); the software
+process itself, a continuous-flow adaptation of Agile to a solo developer working
+with an AI assistant (Section~\ref{sec:process}); the technologies and tooling used
+(Section~\ref{sec:tech}); and, as the ESII regulation requires, an explicit
+declaration of the use of artificial-intelligence tools
+(Section~\ref{sec:ai-declaration}).
 
-Las marcas \verb+\ps+ y \verb+\fs+ permiten marcar y delimitar un bloque con contenido provisional, y que debe ser revisado posteriormente.
+\section{A design-led, AI-assisted development model}
+\label{sec:ai-model}
 
-\fs \\
+The defining methodological choice of this project is the division of labour between
+the author and an AI coding assistant. The author acted as \emph{architect and
+designer} --- eliciting requirements, deciding the architecture, and reviewing and
+validating every output --- while the assistant carried out most of the
+implementation under that direction. This inverts the traditional emphasis of a
+software project: the scarce effort was spent on design, software-engineering
+judgement and architecture, not on typing code.
 
+The evidence for this model is the decision trail. Every significant choice was
+recorded as an Architecture Decision Record (ADR) in the lightweight MADR format
+\cite{madr, nygard_adr}; the repository contains \textbf{thirty-five} such records,
+each stating a context, the options considered, and the decision with its
+consequences. Requirements were captured in a Software Requirements Specification
+following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. Because these
+artefacts are authored by the developer and precede the code, they demonstrate that
+the intellectual work --- what to build and why --- remained a human responsibility,
+with the assistant supplying the implementation. It also reflects a disciplined
+approach to AI-assisted development: reviewing every change before accepting it,
+decomposing work into small increments, letting the assistant run the tests under
+supervision, and governing it with a persistent rules file.
 
-Existen métodos más avanzados para hacer anotaciones, como los que ofrece \verb+todonotes+. Permiten insertar notas al margen \todo{Como por ejemplo ésta.}.  \\
+\section{Evolution of the approach}
+\label{sec:evolution}
 
-También  permite utilizar notas en el propio texto.  \todo[inline]{En internet hay combinaciones de colores interesantes para destacar distintos tipos de notas}
+The final method was not the first one tried. It emerged from a series of earlier
+projects whose shortcomings shaped it, and the progression is itself instructive.
 
+\subsection{From a pentesting platform to a retesting tool}
+\label{subsec:prior-attempts}
 
-\section{Figuras}
+The project began under the name \emph{Adeptus} with an ambition that proved too
+broad: a full, locally deployable \emph{penetration-testing platform}. Successive
+iterations explored this idea --- an AI-powered pentesting web application, and then
+a multi-user ``pentest workbench'' pairing each operator with a private AI
+conversation over a shared, engagement-scoped knowledge graph, extensible through
+external tools. The scope was the problem. Building a general offensive platform
+meant most of the effort went into breadth --- orchestration, multi-user concerns,
+tool integration --- rather than into a defensible, evaluable research
+contribution.
 
-Este paquete tiene otros comandos como \verb+\missingfigure+ para indicar que faltan figuras. \\
+The turning point was narrowing the problem from \emph{pentesting} to
+\emph{retesting}. A focused prototype, \emph{Retester}, discarded the platform
+ambition and did one thing: analyse a PDF report, extract each finding, and let an
+AI agent re-verify it against the audited system in an interactive, steerable
+session. That prototype is the conceptual seed of the system presented in this
+dissertation. Table~\ref{tab:evolution} summarises the progression and the role each
+attempt played.
 
-\missingfigure{Aquí se puede escribir la descripción de la figura que falta}
+\begin{table}[htb]
+\footnotesize
+\renewcommand{\arraystretch}{1.3}
+\begin{center}
+\begin{tabular}{|L{2.6cm}|L{3.4cm}|L{3.0cm}|L{4.0cm}|}
+\hline
+\rowcolor{tema!10}
+\bft{Attempt} & \bft{Scope / focus} & \bft{AI-workflow investment} & \bft{Role in the path to this work} \\ \hline
+\emph{Adeptus} (hand-crafted) & AI-powered pentesting platform & Ad-hoc prompting; no skills, hooks or ADRs & First attempt; showed that unstructured AI use does not scale. \\ \hline
+\emph{Adeptus} (workbench) & Multi-user pentest workbench + knowledge graph & Heavy: 13 skills, 7 role-agents, 7 hooks, slice-based flow & Peak tooling; revealed that ceremony had outgrown the task. \\ \hline
+\emph{Retester} & Report-driven vulnerability \emph{revalidation} & Focused; Pydantic AI, swappable Claude/Ollama & The pivot from pentesting to retesting. \\ \hline
+\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & Right-sized: 9 skills, 3 agents, 3 hooks, 35 ADRs, Kanban + CI & The disciplined, evaluable TFG. \\ \hline
+\end{tabular}
+\end{center}
+\caption[Evolution of the project across earlier attempts]{Evolution from the
+\emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool. The
+decisive lessons were to narrow the scope from pentesting to revalidation, and to
+right-size the AI-workflow ceremony to the value of a single-developer thesis.}
+\label{tab:evolution}
+\end{table}
+
+\subsection{From a hybrid process to disciplined iteration}
+\label{subsec:process-evolution}
+
+The way of working evolved in parallel with the scope. The earliest attempts mixed
+an up-front, waterfall-style plan with ad-hoc agile execution, and the combination
+was unwieldy: a large plan invited large, hard-to-review changes, which is precisely
+where AI-assisted development goes wrong. Through trial and error the process
+settled on strict iteration --- build a minimal but working end-to-end slice first,
+then expand it --- which is the walking-skeleton principle applied throughout this
+project.
+
+A second lesson concerned tooling. The workbench iteration of \emph{Adeptus} had
+accumulated thirteen custom assistant skills, seven role-playing agents and a
+seven-hook automation layer; this was more process than a solo thesis could justify.
+The present project deliberately \emph{reduced} that apparatus to nine
+task-specific skills, three quality-oriented agents and three hooks, and made the
+reduction an explicit, recorded decision (ADR-0004, ``ceremony scales with thesis
+value''), trading machinery for discipline.
+
+\section{Software process: Kanban for solo, AI-paced development}
+\label{sec:process}
+
+AI-assisted development compresses the cycle time of a feature from weeks to hours,
+which makes the fixed-length sprints of Scrum \cite{scrumguide} a poor fit. The
+project therefore adopted a continuous-flow \textbf{Kanban} process
+\cite{kanban_anderson} on a GitHub Projects board, as an explicit adaptation of the
+values of the Agile Manifesto \cite{agilemanifesto} to a single developer working
+with an assistant. Work flows continuously from a prioritised backlog; there are no
+sprints and no meetings; and \emph{milestones} mark feature-complete increments
+rather than time boxes. The project passed through six such milestones, from the M1
+walking skeleton to the M6 agentic console; the first four each closed with a
+semantically versioned release \cite{semver} (v0.1.0 through v0.4.0), while M5 and
+M6 were in progress at the time of writing. Figure~\ref{fig:milestones}
+lays out this milestone sequence.
+
+\begin{figure}[htb]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  >={Stealth[length=2mm]},
+  ms/.style={draw=gris50, thick, rounded corners=2pt, align=center, text width=2.3cm, minimum height=1.0cm, fill=gris95, font=\scriptsize, inner sep=3pt},
+  rel/.style={font=\scriptsize\bfseries, text=gris25},
+]
+\draw[->, thick, gris50] (-0.4,0) -- (14.8,0);
+\foreach \x/\m/\l in {1/M1/{walking skeleton}, 3.3/M2/{report understanding}, 5.6/M3/{React SPA}, 7.9/M4/{verdicts, audit, export}, 10.2/M5/{evaluation \& config}, 12.5/M6/{agentic console}} {
+  \draw[gris50, thick] (\x,0.1) -- (\x,-0.1);
+  \node[ms, anchor=south] at (\x,0.35) {\bft{\m}\\\l};
+}
+\foreach \x/\v in {1/{v0.1.0}, 3.3/{v0.2.0}, 5.6/{v0.3.0}, 7.9/{v0.4.0}} {\node[rel, anchor=north] at (\x,-0.22) {\v};}
+\node[font=\scriptsize\itshape, text=gris50, anchor=north] at (11.35,-0.22) {(in progress)};
+\end{tikzpicture}%
+}
+\caption[Milestone sequence of the project]{The six feature-complete milestones, from
+the M1 walking skeleton to the M6 agentic console. Milestones M1--M4 each closed with a
+semantically versioned release (v0.1.0--v0.4.0); M5 and M6 were in progress at the time
+of writing.}
+\label{fig:milestones}
+\end{figure}
+
+Three rules give the flow its discipline. First, work is \emph{issue-first}: no
+feature is written before a board card exists for it, so every change is traceable
+to a requirement. Second, every commit follows the Conventional Commits convention
+\cite{conventionalcommits}, and every AI-assisted commit carries a
+\texttt{Co-Authored-By: Claude} trailer, making AI involvement auditable from the
+git history alone. Third, integration is governed by a \emph{CI-gated auto-merge}
+(ADR-0003): a pull request merges only once the required checks are green, after
+which the author reviews it asynchronously and retains full revert authority.
+Figure~\ref{fig:pipeline} shows this pipeline.
+
+\begin{figure}[htb]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  >={Stealth[length=2.6mm]},
+  stage/.style={draw=gris50, thick, rounded corners, align=center, text width=2.15cm, minimum height=1.25cm, fill=gris95, font=\scriptsize, inner sep=3pt},
+  gate/.style={stage, draw=rojo, very thick, fill=rojo!8},
+]
+\node[stage] (issue) at (0,0)    {\bft{Issue}\\board card (FR-xx)};
+\node[stage] (branch) at (2.7,0) {\bft{Branch}\\feature branch};
+\node[stage] (pr) at (5.4,0)     {\bft{Pull request}\\Closes \#n};
+\node[gate] (ci) at (8.1,0)      {\bft{CI gate}\\mypy, ruff, tests, coverage, xenon};
+\node[stage] (merge) at (10.8,0) {\bft{Auto-merge}\\squash};
+\node[stage] (val) at (13.5,0)   {\bft{Validate}\\author, async};
+\foreach \a/\b in {issue/branch, branch/pr, pr/ci, ci/merge, merge/val} {\draw[->, gris50, thick] (\a) -- (\b);}
+\end{tikzpicture}%
+}
+\caption[The continuous-integration development pipeline]{The development pipeline.
+Each change starts from a board issue and reaches the main branch only through a
+green CI gate (highlighted); the author's validation is asynchronous, after the
+squash auto-merge, and may schedule follow-up work.}
+\label{fig:pipeline}
+\end{figure}
+
+Two further practices keep an AI-driven codebase healthy over time. The Definition
+of Done requires code, tests, docstrings and any affected diagrams to be updated
+together; and a longitudinal quality audit is run before every milestone release to
+catch the pathologies specific to AI-assisted development --- duplication, dead code,
+complexity creep and pattern drift --- which per-change review cannot see.
+
+\section{Technologies and tooling}
+\label{sec:tech}
+
+\subsection{Application stack}
+\label{subsec:stack}
+
+The system is a local, single-process web application. Table~\ref{tab:stack}
+summarises its stack. The backend is written in Python~3.12, managed with the
+\texttt{uv} toolchain, and exposes a FastAPI service that also serves the
+single-page front end. The language-model layer is built on Pydantic~AI, which
+provides the model-agnostic abstraction that lets the same code run against the
+Claude API or a local Ollama model with only a configuration change. The retest
+agent executes its commands inside an egress-locked Docker sandbox, and the front end
+is a React single-page application built with Vite and Tailwind.
+
+\begin{table}[htb]
+\footnotesize
+\renewcommand{\arraystretch}{1.3}
+\begin{center}
+\begin{tabular}{|L{2.8cm}|L{6.3cm}|L{3.4cm}|}
+\hline
+\rowcolor{tema!10}
+\bft{Layer} & \bft{Technology} & \bft{Role} \\ \hline
+Backend & Python 3.12 (\texttt{uv}), FastAPI, SQLAlchemy / SQLite & API, persistence, background jobs \\ \hline
+Language model & Pydantic AI (Claude API; Ollama, local) & Finding extraction and the agentic retest \\ \hline
+Report ingestion & pdfplumber & Parsing PDF reports into text \\ \hline
+Sandbox & Docker (egress-locked network) & Isolated execution of gated commands \\ \hline
+Front end & React 19, Vite, TypeScript, Tailwind CSS 4, React Query & Single-page application (FR-11) \\ \hline
+Quality gates & ruff, mypy \texttt{-{}-strict}, pytest, coverage, xenon & Lint, types, tests, complexity \\ \hline
+\end{tabular}
+\end{center}
+\caption[Technology stack of the system]{The technology stack, by layer. The
+Pydantic AI abstraction is what makes the language-model backend swappable between a
+cloud and a local provider without code changes.}
+\label{tab:stack}
+\end{table}
+
+\subsection{Quality assurance}
+\label{subsec:qa}
+
+Quality is enforced mechanically rather than by convention. The continuous-integration
+gate requires the strict type checker (mypy) and the linter/formatter (ruff) to pass,
+test coverage to stay at or above 80\% of the source, and the cyclomatic-complexity
+checker (xenon) to reject any function above its threshold --- a function that trips
+the gate is refactored, never suppressed. Tests follow the classic pyramid: fast
+unit tests with no input/output (language-model calls stubbed with Pydantic~AI's
+test models), integration tests that wire real components together, and a small
+number of dockerised system tests against the lab targets.
+
+\subsection{The AI development environment}
+\label{subsec:ai-env}
+
+Beyond the application stack, the project relies on a bespoke development environment
+built around Claude Code, the AI assistant. Repeated tasks are encoded as nine
+project-specific \emph{skills} (for example, creating an ADR, adding a requirement,
+opening a board-ready issue, or building the thesis), and quality checks as three
+\emph{agents} (a whole-repository sanity auditor, a documentation curator, and a
+thesis reviewer). Three \emph{hooks} automate governance directly in the editing
+loop: one reminds the developer to open a board issue before coding, one formats
+code on every edit, and one logs each assistant session to the public audit trail.
+The assistant is further extended with a set of enabled plugins (among them GitHub,
+Semgrep security scanning, Pydantic~AI support and up-to-date library documentation),
+and the whole workflow is automated through seven GitHub Actions workflows: the
+Kanban board automation, the CI gate, the documentation build, the pre-milestone
+sanity audit, the security scan, the nightly system tests against the lab, and the
+thesis build.
+
+\subsection{Documentation as code}
+\label{subsec:docs}
+
+The project treats documentation as code: nothing that can be generated is
+maintained by hand. The API reference is generated from the source docstrings with
+mkdocstrings, and the UML class and package diagrams are generated from the code with
+pyreverse, so neither can drift from the implementation. The architecture (a C4
+model) and the sequence diagrams are authored in Mermaid inside the Markdown sources
+and, by rule, updated in the same change as the code they describe. The whole set is
+assembled into a static site with MkDocs --- built under a strict mode that fails on
+any broken reference --- and published to GitHub Pages by a dedicated workflow, so
+the public documentation always reflects the merged code. Documentation is a
+first-class part of the Definition of Done: a change is complete only when its
+docstrings, generated pages and affected diagrams are updated together, and the
+\emph{doc-curator} agent audits for documentation drift as part of review.
+
+\section{Use of Artificial Intelligence Tools}
+\label{sec:ai-declaration}
+
+In compliance with §6 of the ESII TFG regulation, this section declares the use of
+artificial-intelligence tools in the production of this work. It is compiled from
+the project's public audit trail: the curated usage log under
+\texttt{docs/ai-usage/} --- maintained in real time through the early milestones and
+completed retrospectively for the later ones from the automatically recorded session
+files and the git history --- together with the \texttt{Co-Authored-By: Claude}
+trailers in that history. Seventy-four of the eighty-two commits carry the trailer;
+the remaining eight are author-only commits, and, because the project integrates by
+squash-merge, each merge commit inherits the trailers of the assistant-authored work
+it absorbs.
+
+\paragraph{Tools used.} The single AI tool used for development was Claude Code,
+Anthropic's agentic command-line assistant, driven primarily by the Fable~5 model
+family during the early milestones and the Opus~4.x family thereafter, including for
+assistance with this dissertation. Local open-weight models (Ollama, \texttt{qwen}
+family) were used only \emph{as a component and comparison condition of the system
+under study}, never to author the thesis or the code.
+
+\paragraph{Type of use.} The assistance spanned six categories, in every case under
+the author's direction and subject to the author's review:
+\begin{itemize}
+\item \emph{Research and analysis} --- reading the regulations and the proposal and
+  surveying related work.
+\item \emph{Design assistance} --- drafting the development plan and the
+  thirty-five ADRs for the author's decision; the decisions themselves were the
+  author's.
+\item \emph{Code generation} --- implementing the backend (\texttt{src/revalid}) and
+  the React front end (\texttt{frontend/src}) from the author's specifications.
+\item \emph{Test writing} --- unit, integration and system tests across the pyramid.
+\item \emph{Documentation generation} --- API documentation, the C4 architecture
+  and sequence diagrams, and the project roadmap.
+\item \emph{Thesis writing assistance} --- drafting and editing chapters (notably
+  the State of the Art, the Introduction and this Methodology), including verifying
+  that every cited reference resolves to a real source.
+\end{itemize}
+
+\paragraph{Affected areas.} In the repository, assistance touched the backend and
+front-end source, the test suites, the ADRs and requirements, the documentation and
+CI configuration, and the assistant's own skills, agents and hooks. In this
+dissertation, the chapters listed above were drafted with assistance; all were
+reviewed, corrected and approved by the author.
+
+\paragraph{Authorship statement.} All design, architecture and scope decisions were
+made by the author, as evidenced by the thirty-five ADRs and the requirements
+specification that precede the code. Every AI output --- code, tests, documentation
+and thesis prose --- was reviewed and validated by the author before acceptance,
+through pull-request validation and the continuous-integration gate. The author is
+the sole author of, and is responsible for, this work; the AI tool served as an
+assistant that accelerated implementation, not as a substitute for the author's
+judgement. The complete audit trail is public in the project repository under
+\texttt{docs/ai-usage/}.

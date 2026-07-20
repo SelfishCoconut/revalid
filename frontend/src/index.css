@@ -58,23 +58,27 @@
   --color-onaccent: #0a0e15;
 }
 
+/* Light theme, tuned to be easy on the eyes: a soft cool-grey paper with
+   off-white panels (never pure #fff, which glares), gently lifted text instead
+   of near-black, and muted hairlines — lower overall luminance and contrast
+   than a stock light theme while staying legible. */
 :root[data-theme="light"] {
-  --color-ink: #eef1f7;
-  --color-ink-2: #e7ecf4;
-  --color-panel: #ffffff;
-  --color-panel-2: #f1f4f9;
-  --color-line: #dee4ed;
-  --color-line-2: #cbd4e0;
-  --color-fg: #131a26;
-  --color-dim: #4b5766;
-  --color-faint: #7a8695;
+  --color-ink: #e7e9f0;
+  --color-ink-2: #e0e3eb;
+  --color-panel: #f5f6fa;
+  --color-panel-2: #eaecf3;
+  --color-line: #d7dbe6;
+  --color-line-2: #c4cad8;
+  --color-fg: #232a38;
+  --color-dim: #566072;
+  --color-faint: #868f9f;
 
-  --color-iris-fg: #5b46e6;
-  --color-danger-fg: #d1293c;
-  --color-warn-fg: #9a6100;
-  --color-ok-fg: #0b8a5c;
-  --color-high-fg: #c05512;
-  --color-low-fg: #1f7fb0;
+  --color-iris-fg: #5a46e0;
+  --color-danger-fg: #c62b3d;
+  --color-warn-fg: #8f5b00;
+  --color-ok-fg: #0a7d53;
+  --color-high-fg: #b64f10;
+  --color-low-fg: #1c76a6;
 }
 
 @layer base {
@@ -88,9 +92,9 @@
   :root[data-theme="light"] {
     color-scheme: light;
     --panel-shadow:
-      0 1px 2px rgb(16 24 40 / 0.04), 0 14px 34px -22px rgb(16 24 40 / 0.22);
-    --page-glow: color-mix(in oklab, var(--color-iris) 10%, transparent);
-    --page-corner: color-mix(in oklab, #dbe4f2 75%, transparent);
+      0 1px 2px rgb(16 24 40 / 0.04), 0 14px 34px -22px rgb(16 24 40 / 0.18);
+    --page-glow: color-mix(in oklab, var(--color-iris) 5%, transparent);
+    --page-corner: color-mix(in oklab, #d7deec 55%, transparent);
   }
   html,
   body,

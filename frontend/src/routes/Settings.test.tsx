@@ -27,14 +27,22 @@ describe("Settings", () => {
   it("renders the current model and saves an edit", async () => {
     const saved: SettingsData = { ...current, model: "ollama:qwen3:14b" };
     vi.mocked(client.updateSettings).mockResolvedValue(saved);
+    // Model choices are discovered (not hardcoded); the form auto-probes on
+    // mount, so the host's models surface as radios without pressing Refresh.
+    vi.mocked(client.probeProvider).mockResolvedValue({
+      reachable: true,
+      models: ["qwen3:14b"],
+      error: null,
+    });
 
     renderWithProviders(<Settings />, "/settings");
 
-    const modelInput = await screen.findByLabelText(/model/i);
-    expect(modelInput).toHaveValue("ollama:qwen3.6:27b");
+    // The current model is pre-selected as a radio in the group.
+    const currentRadio = await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
+    expect(currentRadio).toBeChecked();
 
-    await userEvent.clear(modelInput);
-    await userEvent.type(modelInput, "ollama:qwen3:14b");
+    // Switch to a discovered model by selecting its radio.
+    await userEvent.click(await screen.findByRole("radio", { name: "ollama:qwen3:14b" }));
 
     const keyInput = screen.getByLabelText(/api key/i);
     await userEvent.type(keyInput, "sk-secret");
@@ -55,9 +63,9 @@ describe("Settings", () => {
     expect(await screen.findByText("Saved.")).toBeInTheDocument();
   });
 
-  it("tests the connection and populates discovered models", async () => {
-    // Deliberately NOT in KNOWN_MODELS: if these ids show up in the datalist
-    // it can only be because the discoveredModels/modelOptions merge (and the
+  it("refreshes and adds discovered models as radios", async () => {
+    // Deliberately NOT in KNOWN_MODELS: if these ids show up as radios it can
+    // only be because the discoveredModels/modelOptions merge (and the
     // looksLikeOllama ":11434" prefixing) actually ran — reusing a
     // KNOWN_MODELS id here would let a broken merge pass unnoticed.
     const probeResult: ProbeResult = {
@@ -68,9 +76,9 @@ describe("Settings", () => {
     vi.mocked(client.probeProvider).mockResolvedValue(probeResult);
 
     renderWithProviders(<Settings />, "/settings");
-    await screen.findByLabelText(/model/i);
+    await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
 
-    await userEvent.click(screen.getByRole("button", { name: /test connection/i }));
+    await userEvent.click(screen.getByRole("button", { name: /refresh models/i }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Reachable — 2 models discovered.",
@@ -80,14 +88,11 @@ describe("Settings", () => {
     expect(probePayload).toEqual({ base_url: "http://localhost:11434/v1", api_key: null });
 
     // The base URL looks like Ollama, so discovered ids must be re-prefixed
-    // with "ollama:" before landing in the model datalist.
-    await waitFor(() => {
-      const options = Array.from(
-        document.querySelectorAll<HTMLOptionElement>("datalist#settings-model-options option"),
-      ).map((option) => option.value);
-      expect(options).toContain("ollama:llama3.2:3b");
-      expect(options).toContain("ollama:mistral:7b");
-    });
+    // with "ollama:" before landing in the radio group.
+    expect(
+      await screen.findByRole("radio", { name: "ollama:llama3.2:3b" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "ollama:mistral:7b" })).toBeInTheDocument();
   });
 
   it("surfaces an unreachable probe result", async () => {
@@ -98,8 +103,8 @@ describe("Settings", () => {
     });
 
     renderWithProviders(<Settings />, "/settings");
-    await screen.findByLabelText(/model/i);
-    await userEvent.click(screen.getByRole("button", { name: /test connection/i }));
+    await screen.findByRole("radio", { name: "ollama:qwen3.6:27b" });
+    await userEvent.click(screen.getByRole("button", { name: /refresh models/i }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Unreachable — connection refused",
@@ -129,6 +134,6 @@ describe("Settings", () => {
     renderWithProviders(<Settings />, "/settings");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("network down");
-    expect(screen.queryByLabelText(/model/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 });

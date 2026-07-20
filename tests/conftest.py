@@ -11,8 +11,14 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.test import TestModel
 
-from revalid.extract import ExtractedFinding, build_extraction_agent
+from revalid.extract import (
+    ExtractedFinding,
+    ReportMetadata,
+    build_extraction_agent,
+    build_metadata_agent,
+)
 
 _SEVERITIES = ("critical", "high", "medium", "low", "info")
 
@@ -50,3 +56,9 @@ def _fake_extractor(messages: list[ModelMessage], info: AgentInfo) -> ModelRespo
 def extraction_agent() -> Agent[None, list[ExtractedFinding]]:
     """A finding-extraction agent backed by a deterministic FunctionModel (no network)."""
     return build_extraction_agent(FunctionModel(_fake_extractor))
+
+
+@pytest.fixture
+def metadata_agent() -> Agent[None, ReportMetadata]:
+    """A document-metadata agent backed by TestModel — valid output, no network (#133)."""
+    return build_metadata_agent(TestModel())

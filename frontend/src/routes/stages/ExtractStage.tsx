@@ -9,7 +9,8 @@ import { Spinner } from "../../components/Spinner";
 import { Button } from "../../components/ui/Button";
 import { Panel, PanelHeader } from "../../components/ui/Panel";
 import { useEditFinding, useFindingVersions } from "../../hooks/useFindingRevision";
-import { errorMessage, formatDateTime } from "../../lib/format";
+import { formatDate, useDateFormat } from "../../lib/dateFormat";
+import { errorMessage } from "../../lib/format";
 
 const SEVERITIES: Severity[] = ["info", "low", "medium", "high", "critical"];
 
@@ -206,6 +207,7 @@ function FindingEditor({ finding }: { finding: Finding }) {
 /** The finding's amend history — every version kept, extraction = v1 (FR-16). */
 function VersionHistory({ findingId }: { findingId: number }) {
   const versions = useFindingVersions(findingId);
+  const dateFormat = useDateFormat();
   const rows = [...(versions.data ?? [])].reverse();
 
   return (
@@ -226,7 +228,7 @@ function VersionHistory({ findingId }: { findingId: number }) {
                   {version.origin}
                 </span>
                 <span className="font-mono text-[11px] text-faint">
-                  {formatDateTime(version.created_at)}
+                  {formatDate(version.created_at, dateFormat)}
                 </span>
                 {version.reason && <span className="text-[13px] text-dim">— {version.reason}</span>}
               </li>

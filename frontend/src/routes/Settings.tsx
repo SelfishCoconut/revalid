@@ -1,19 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProbeResult, Settings as SettingsData } from "../api/types";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
 import { Spinner } from "../components/Spinner";
 import { useProbeProvider, useSettings, useUpdateSettings } from "../hooks/useSettings";
+import { DATE_FORMATS, setDateFormat, useDateFormat } from "../lib/dateFormat";
 import { errorMessage } from "../lib/format";
-
-/**
- * Curated backends known to work with this tool: the ADR-0021 local-first
- * default, a lighter local variant, and the native Anthropic fallback. The
- * probe below adds whatever a live host actually discovers, so this list is a
- * starting point, not a restriction — the field accepts any string.
- */
-const KNOWN_MODELS = ["ollama:qwen3.6:27b", "ollama:qwen3:14b", "anthropic:claude-sonnet-5"];
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 text-[13px] text-fg transition-colors placeholder:text-faint focus:border-iris/60 disabled:opacity-55";
@@ -43,6 +36,7 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   const probe = useProbeProvider();
 
   const [model, setModel] = useState(initial.model);
+  const [custom, setCustom] = useState(false);
   const [baseUrl, setBaseUrl] = useState(initial.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
@@ -53,17 +47,35 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
     return probeResult.models.map((id) => (prefixed ? `ollama:${id}` : id));
   }, [probeResult, baseUrl]);
 
+  // No hardcoded model list — the choices are exactly what the configured host
+  // exposes (discovered below), plus the current model so a saved/offline
+  // selection never silently disappears from the radio group.
   const modelOptions = useMemo(
-    () => [...new Set([...KNOWN_MODELS, ...discoveredModels])],
-    [discoveredModels],
+    () => [...new Set([initial.model, ...discoveredModels])],
+    [discoveredModels, initial.model],
   );
 
-  function handleProbe() {
+  function chooseModel(value: string) {
+    setCustom(false);
+    setModel(value);
+  }
+
+  function handleRefresh() {
     probe.mutate(
       { base_url: baseUrl || null, api_key: apiKey || null },
       { onSuccess: setProbeResult },
     );
   }
+
+  // Discover models from the configured host on first mount, so the group
+  // reflects what this backend actually offers without the operator having to
+  // click Refresh. The ref guard keeps it to a single probe.
+  const didAutoProbe = useRef(false);
+  useEffect(() => {
+    if (didAutoProbe.current || !baseUrl) return;
+    didAutoProbe.current = true;
+    probe.mutate({ base_url: baseUrl, api_key: apiKey || null }, { onSuccess: setProbeResult });
+  }, [baseUrl, apiKey, probe]);
 
   function handleSave() {
     update.mutate({
@@ -83,23 +95,52 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </p>
 
       <div className="mt-5 max-w-md space-y-4">
-        <label className={fieldLabel}>
-          Model
-          <input
-            list="settings-model-options"
-            value={model}
-            onChange={(event) => {
-              setModel(event.target.value);
-            }}
-            placeholder="ollama:qwen3.6:27b"
-            className={`${inputClass} font-mono`}
-          />
-          <datalist id="settings-model-options">
+        <fieldset className="m-0 border-0 p-0">
+          <legend className={fieldLabel}>Model</legend>
+          <div className="mt-1.5 max-h-56 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-panel-2 p-2">
             {modelOptions.map((option) => (
-              <option key={option} value={option} />
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 font-mono text-[13px] text-fg hover:bg-panel"
+              >
+                <input
+                  type="radio"
+                  name="model"
+                  value={option}
+                  checked={!custom && model === option}
+                  onChange={() => {
+                    chooseModel(option);
+                  }}
+                  className="accent-iris"
+                />
+                {option}
+              </label>
             ))}
-          </datalist>
-        </label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] text-dim hover:bg-panel">
+              <input
+                type="radio"
+                name="model"
+                checked={custom}
+                onChange={() => {
+                  setCustom(true);
+                }}
+                className="accent-iris"
+              />
+              Custom…
+            </label>
+          </div>
+          {custom && (
+            <input
+              aria-label="Custom model id"
+              value={model}
+              onChange={(event) => {
+                setModel(event.target.value);
+              }}
+              placeholder="provider:model — e.g. anthropic:claude-opus-4-8"
+              className={`${inputClass} mt-2 font-mono`}
+            />
+          )}
+        </fieldset>
 
         <label className={fieldLabel}>
           Base URL
@@ -133,8 +174,8 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" onClick={handleProbe} disabled={probe.isPending}>
-          {probe.isPending ? "Testing…" : "Test connection"}
+        <Button variant="ghost" onClick={handleRefresh} disabled={probe.isPending}>
+          {probe.isPending ? "Refreshing…" : "Refresh models"}
         </Button>
         <Button onClick={handleSave} disabled={update.isPending || !model.trim()}>
           {update.isPending ? "Saving…" : "Save"}
@@ -172,6 +213,47 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   );
 }
 
+/** Client-side display preferences (stored per browser), starting with date format. */
+function DisplaySettings() {
+  const dateFormat = useDateFormat();
+
+  return (
+    <Panel className="p-5">
+      <Eyebrow>Display</Eyebrow>
+      <h2 className="mt-1.5 font-mono text-lg font-semibold text-fg">Date format</h2>
+      <p className="mt-1 max-w-xl text-[13px] text-dim">
+        How timestamps render across the app. Saved in this browser.
+      </p>
+      <fieldset className="m-0 mt-4 max-w-md border-0 p-0">
+        <legend className="sr-only">Date format</legend>
+        <div className="space-y-0.5 rounded-lg border border-line bg-panel-2 p-2">
+          {DATE_FORMATS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-panel"
+            >
+              <span className="flex items-center gap-2 text-fg">
+                <input
+                  type="radio"
+                  name="date-format"
+                  value={option.id}
+                  checked={dateFormat === option.id}
+                  onChange={() => {
+                    setDateFormat(option.id);
+                  }}
+                  className="accent-iris"
+                />
+                {option.label}
+              </span>
+              <span className="font-mono text-[12px] text-faint">{option.example}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </Panel>
+  );
+}
+
 /** `/settings` route: edit the active LLM backend (FR-13, ADR-0021). */
 export default function Settings() {
   const settings = useSettings();
@@ -197,6 +279,7 @@ export default function Settings() {
   return (
     <div className="rev-rise space-y-6">
       <SettingsForm initial={settings.data} />
+      <DisplaySettings />
     </div>
   );
 }

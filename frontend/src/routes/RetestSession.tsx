@@ -610,7 +610,7 @@ export function RetestSession({
             aria-label="Agent conversation"
             className="min-h-0 flex-1 overflow-y-auto p-4"
           >
-            <div className="mx-auto flex max-w-[68rem] flex-col gap-3 pb-1">
+            <div className="flex w-full flex-col gap-3 pb-1">
             {chatItems.length === 0 && !verdict && !isThinking(status) && (
               <p className="text-sm text-dim">Starting the sandboxed retest…</p>
             )}

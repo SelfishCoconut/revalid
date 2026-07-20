@@ -1,10 +1,9 @@
 import { ApiError } from "../api/client";
+import { formatDate, getDateFormat } from "./dateFormat";
 
-/** Human-readable local timestamp; falls back to the raw string if unparseable. */
+/** Local timestamp in the operator's chosen format (default `yyyy/mm/dd HH:mm`). */
 export function formatDateTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
+  return formatDate(iso, getDateFormat());
 }
 
 /** Best-effort message for anything thrown by a query/mutation. */

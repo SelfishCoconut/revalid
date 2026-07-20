@@ -37,7 +37,10 @@ export function App() {
   // cap the rest of the app uses. Both entry points (the finding stage and the
   // deep-link session route) get it.
   const { pathname } = useLocation();
-  const wideRoute = pathname.endsWith("/retest") || pathname.startsWith("/retest-sessions/");
+  // Every finding stage (extract/goal/retest/verdict) and the retest console
+  // get the full-width shell; overview/report/settings stay in the reading column.
+  const wideRoute =
+    pathname.startsWith("/findings/") || pathname.startsWith("/retest-sessions/");
 
   // Sidebar links close the drawer via onNavigate; also close it on Escape.
   useEffect(() => {

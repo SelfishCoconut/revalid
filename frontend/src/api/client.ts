@@ -4,6 +4,8 @@
 // FastAPI `detail` string so the UI can surface actionable messages.
 
 import type {
+  BackendStatus,
+  DuplicateReport,
   Finding,
   FindingEdit,
   FindingStage,
@@ -13,6 +15,7 @@ import type {
   ProbeInput,
   ProbeResult,
   Report,
+  ReportMetadata,
   RetestSessionSummary,
   Settings,
   SettingsUpdate,
@@ -69,19 +72,60 @@ function jsonInit(method: string, body: unknown): RequestInit {
 
 // --- Reports -------------------------------------------------------------
 
-export function listReports(): Promise<Report[]> {
-  return request<Report[]>("/reports");
+/** List reports — active by default, archived when `archived` is true (#128). */
+export function listReports(archived = false): Promise<Report[]> {
+  return request<Report[]>(`/reports${archived ? "?archived=true" : ""}`);
 }
 
 export function getReport(id: number): Promise<Report> {
   return request<Report>(`/reports/${String(id)}`);
 }
 
-/** Upload a PDF report (multipart form field `file`); backend replies 202. */
-export function uploadReport(file: File): Promise<Report> {
+/** Archive or unarchive a report — a reversible soft-hide (#128). */
+export function setReportArchived(id: number, archived: boolean): Promise<Report> {
+  return request<Report>(`/reports/${String(id)}`, jsonInit("PATCH", { archived }));
+}
+
+/** Permanently delete a report and everything derived from it (#128). */
+export function deleteReport(id: number): Promise<void> {
+  return request<void>(`/reports/${String(id)}`, { method: "DELETE" });
+}
+
+/** Replace a report's document metadata with operator edits (#133). */
+export function updateReportMetadata(id: number, metadata: ReportMetadata): Promise<Report> {
+  return request<Report>(`/reports/${String(id)}/metadata`, jsonInit("PUT", metadata));
+}
+
+/** Thrown when an upload's bytes match an existing report's hash (#134). */
+export class DuplicateReportError extends Error {
+  readonly duplicates: DuplicateReport[];
+
+  constructor(duplicates: DuplicateReport[]) {
+    super("This report has already been uploaded.");
+    this.name = "DuplicateReportError";
+    this.duplicates = duplicates;
+  }
+}
+
+/**
+ * Upload a PDF report (multipart field `file`); backend replies 202. If the
+ * bytes match an existing report and `force` is not set, the backend replies 409
+ * and this throws {@link DuplicateReportError} carrying the matches (#134).
+ */
+export async function uploadReport(file: File, force = false): Promise<Report> {
   const form = new FormData();
   form.append("file", file);
-  return request<Report>("/reports", { method: "POST", body: form });
+  const query = force ? "?force=true" : "";
+  const response = await fetch(`${API_BASE}/reports${query}`, { method: "POST", body: form });
+  if (response.status === 409) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = (body as { detail?: { duplicates?: DuplicateReport[] } } | null)?.detail;
+    throw new DuplicateReportError(detail?.duplicates ?? []);
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractDetail(response));
+  }
+  return (await response.json()) as Report;
 }
 
 /**
@@ -138,6 +182,11 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
 
 export function probeProvider(body: ProbeInput): Promise<ProbeResult> {
   return request<ProbeResult>("/settings/probe", jsonInit("POST", body));
+}
+
+/** Live backend reachability + active model, for the sidebar status pill. */
+export function getBackendStatus(): Promise<BackendStatus> {
+  return request<BackendStatus>("/settings/status");
 }
 
 // --- Agentic retest sessions (FR-17) ---------------------------------------

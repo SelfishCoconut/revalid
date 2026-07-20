@@ -1,8 +1,223 @@
-\chapter{Aspecto}
-\lipsum[1-5]
-\section{Primera sección}
-\lipsum[1-5]
-\section{Segunda sección}
-\lipsum[1-5]
-\subsection{Subsección}
-\lipsum[1-6]
+\chapter{Introduction}
+\label{ch:intro}
+
+% Allow a little extra line stretch so long technical compounds rebreak
+% cleanly instead of spilling into the margin (no template packages added).
+\setlength{\emergencystretch}{3em}
+
+\section{Motivation: an accelerating arms race}
+\label{sec:motivation}
+
+Artificial intelligence is advancing faster than almost any previous computing
+technology, and the capabilities of the underlying models are improving on a
+timescale measured in months rather than years. Each new generation of large
+language model is not only more fluent but more \emph{autonomous}: able to plan,
+use tools, write and debug code, and pursue a goal across many steps with little
+human direction. Cybersecurity sits squarely in the path of this progress,
+because the same reasoning-and-acting ability that makes a model a capable
+programming assistant also makes it a capable attacker. Keeping pace with this
+acceleration is no longer optional for the defensive side; it is a precondition
+for staying relevant.
+
+The offensive use of this technology is already a documented reality rather than
+speculation. Purpose-built ``dark'' language models such as WormGPT and FraudGPT,
+sold on underground forums as safety-stripped alternatives to mainstream
+assistants, lower the barrier to entry for phishing, malware generation and social
+engineering \cite{malla2024}. State-affiliated threat actors from several countries
+have been observed using mainstream models for reconnaissance, scripting and
+translation in support of their operations \cite{openai_threatactors}. Research has
+shown that autonomous agents can exploit real vulnerabilities directly from their
+public descriptions, with no prior knowledge of the flaw \cite{fang2024oneday}. In
+November 2025 this trajectory reached a milestone: the first publicly reported
+cyber-espionage campaign in which an AI agent executed the large majority of the
+intrusion --- reconnaissance, exploitation, credential harvesting and lateral
+movement --- with only sporadic human oversight \cite{anthropic_espionage}.
+
+The frontier has moved further still. In April 2026 Anthropic previewed
+\emph{Mythos}, a model whose cybersecurity capability, described as an emergent
+side-effect of broader gains in reasoning and autonomy, proved strong enough that
+the company declined to release it openly \cite{anthropic_mythos}. Operating with
+little human steering, Mythos discovered thousands of high- and critical-severity
+vulnerabilities across widely used software and produced working exploits in hours
+for flaws that had survived decades of human review, including long-dormant bugs in
+mature, security-focused systems; an independent assessment by the United Kingdom's
+AI Security Institute corroborated the scale of these results
+\cite{aisi_mythos}. Nor is such capability confined to frontier laboratories: the
+autonomous penetration-testing system XBOW climbed to the top of a major public
+bug-bounty leaderboard, out-reporting human researchers over a sustained period
+\cite{xbow}. The economics are shifting decisively --- work that took expert teams
+weeks can increasingly be attempted overnight. Figure~\ref{fig:timeline} places
+these milestones on a single timeline; barely three years separate the first
+commodity malicious chatbot from autonomous exploitation at the frontier.
+
+\begin{figure}[htb]
+\centering
+\begin{tikzpicture}[
+  >={Stealth[length=2mm]},
+  ev/.style={rounded corners=2pt, align=center, inner sep=3pt, text width=2.7cm, font=\scriptsize},
+  off/.style={ev, draw=rojo, thick, fill=rojo!6},
+  def/.style={ev, draw=azul, thick, fill=azul!6},
+]
+\draw[->, thick, gris50] (-0.5,0) -- (14.4,0);
+\foreach \x/\yr in {1/2023, 5/2024, 9/2025, 13/2026} {
+  \draw[gris50, thick] (\x,0.12) -- (\x,-0.12);
+  \node[font=\footnotesize\bfseries, text=gris25] at (\x,-0.42) {\yr};
+}
+\node[off, anchor=south] (worm)   at (1,0.55)  {WormGPT / FraudGPT malicious LLMs};
+\node[off, anchor=south] (nation) at (5,0.55)  {Nation-state LLM misuse};
+\node[off, anchor=south] (xbow)   at (9,0.55)  {XBOW tops bug-bounty leaderboard};
+\node[off, anchor=south] (mythos) at (13,0.55) {\emph{Mythos}: autonomous discovery + exploitation};
+\node[def, anchor=north] (bigsleep) at (5,-0.7)  {Big Sleep finds real-world 0-day};
+\node[off, anchor=north] (esp)      at (9,-0.7)  {First AI-orchestrated espionage campaign};
+\draw[gris50] (1,0)  -- (worm.south);
+\draw[gris50] (5,0)  -- (nation.south);
+\draw[gris50] (9,0)  -- (xbow.south);
+\draw[gris50] (13,0) -- (mythos.south);
+\draw[gris50] (5,0)  -- (bigsleep.north);
+\draw[gris50] (9,0)  -- (esp.north);
+\end{tikzpicture}
+\caption[Timeline of the offensive-AI arms race]{Selected milestones in the use of
+artificial intelligence for cyber-offence (outlined in red) and cyber-defence
+(in blue), 2023--2026. In roughly three years the field moved from commodity
+malicious chatbots to the autonomous discovery and exploitation of previously
+unknown vulnerabilities.}
+\label{fig:timeline}
+\end{figure}
+
+Defenders are not without their own AI. The same class of models has been turned to
+protective ends: Google's Big Sleep agent autonomously found a previously unknown
+vulnerability in production software and later helped pre-empt one that attackers
+were preparing to use \cite{google_bigsleep}. The difficulty is one of balance.
+Offensive capability scales cheaply and runs unattended, whereas much defensive
+work remains gated by manual, human-paced procedures. Where the two sides draw on
+the same technology, the advantage accrues to whoever removes the human bottleneck
+first --- and, on the defensive side, many of the most important bottlenecks have
+not yet been addressed. This asymmetry is the central motivation of this work: if
+attackers are compounding their productivity with AI, defenders must do the same,
+or fall behind.
+
+\section{Problem statement}
+\label{sec:problem}
+
+One defensive bottleneck stands out for how routine, how repetitive, and how poorly
+automated it remains: the \emph{revalidation} (or retest) of penetration-test
+findings. A
+security audit ends with a report that lists each discovered vulnerability and the
+steps needed to reproduce it. Once the development team applies fixes, someone must
+confirm that those fixes actually work --- that each reported finding is genuinely
+closed and not merely hidden by an incidental change. This re-testing is performed
+by hand, one finding at a time, on every remediation cycle, and it demands careful
+judgement to avoid declaring a still-exploitable weakness ``fixed''. It is exactly
+the kind of high-volume, judgement-laden, evidence-driven task at which a
+well-supervised AI assistant could excel, yet it has been largely untouched by the
+wave of automation described above. The manual nature of revalidation is examined in
+detail in Section~\ref{subsec:revalidation}.
+
+\section{Goal and objectives}
+\label{sec:objectives}
+
+The goal of this project is to advance the defensive side of this arms race by
+giving security professionals --- the cybersecurity architects, auditors and
+developers responsible for closing the loop on an audit --- an AI-driven tool that
+accelerates the revalidation of vulnerabilities through \emph{assistance} rather
+than replacement. Concretely, the general objective is:
+
+\begin{quote}
+\emph{To automate the retesting of reported vulnerabilities using artificial
+intelligence, in order to reduce response time and increase efficiency in security
+audits, while keeping a human in control of every action that touches a target.}
+\end{quote}
+
+This general objective is refined into four specific objectives, which structure the
+work reported in the remaining chapters:
+
+\begin{enumerate}[labelindent=\parindent, leftmargin=*, label=\mbox{\bft{[O\arabic*]}}]
+\item \bft{Analyse and structure penetration-test reports}, identifying for each
+  finding the elements relevant to its revalidation: description, impact, attack
+  vector, affected endpoints and, above all, the ordered steps needed to reproduce
+  it.
+\item \bft{Interpret reproduction steps into executable actions}, designing an
+  AI-based component able to turn the natural-language description of a finding into
+  concrete, non-destructive verification commands.
+\item \bft{Develop an automated, human-supervised retesting system} that executes
+  those verification actions against authorised targets and produces an
+  evidence-backed verdict --- \emph{still-open}, \emph{fixed} or
+  \emph{inconclusive} --- for each finding.
+\item \bft{Evaluate the accuracy and usefulness of the system}, comparing its
+  verdicts against ground truth and against the effort of traditional manual
+  revalidation, in terms of reliability and time saved.
+\end{enumerate}
+
+\section{Proposed solution}
+\label{sec:solution}
+
+The system developed to meet these objectives, named \emph{revalid}, is a local,
+single-operator web application that ingests a penetration-test report, uses a
+language model to extract each finding together with its reproduction steps, and
+then runs an interactive, sandboxed agent that re-verifies the finding against an
+authorised lab target. Three principles distinguish it from the offensive tools
+surveyed above, and from the automation reviewed in
+Chapter~\ref{ch:sota}. It is \emph{report-driven}: it re-executes the reproduction
+steps of a specific, human-reported finding rather than hunting for new
+vulnerabilities. It is \emph{human-gated}: the agent proposes each command and a
+human operator approves it before it runs, so autonomy is used to accelerate the
+expert, never to remove them. And it is \emph{verdict-oriented}: its output is a
+conservative, evidence-linked determination that a compliance decision can rely on,
+biased toward \emph{inconclusive} whenever the evidence is ambiguous. The precise
+gap this design fills is argued in Section~\ref{sec:gap}. Figure~\ref{fig:concept}
+shows the pipeline at a glance.
+
+\begin{figure}[htb]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  >={Stealth[length=2.6mm]},
+  st/.style={draw=gris50, thick, rounded corners, align=center, text width=2.5cm, minimum height=1.5cm, fill=gris95, font=\scriptsize, inner sep=3pt},
+  hl/.style={st, draw=rojo, very thick, fill=rojo!8},
+]
+\node[st] (rep) at (0,0)       {\bft{Report}\\PDF / JSON};
+\node[st] (ext) at (3.2,0)     {\bft{Extract}\\findings + reproduction steps (LLM)};
+\node[st] (goal) at (6.4,0)    {\bft{Goal}\\retest objective};
+\node[hl] (retest) at (9.6,0)  {\bft{Gated retest}\\agent proposes, operator approves each command (sandbox)};
+\node[st] (verdict) at (12.8,0){\bft{Verdict}\\still-open / fixed / inconclusive, with evidence};
+\foreach \a/\b in {rep/ext, ext/goal, goal/retest, retest/verdict} {\draw[->, gris50, thick] (\a) -- (\b);}
+\end{tikzpicture}%
+}
+\caption[What \emph{revalid} does]{The \emph{revalid} pipeline. A report is parsed into
+findings and their reproduction steps, a retest goal is derived, and a sandboxed agent
+re-verifies the finding one gated command at a time --- the operator approves each
+command before it runs --- ending in an evidence-backed verdict. The gated retest
+(highlighted) is where human control is exercised.}
+\label{fig:concept}
+\end{figure}
+
+\section{Development methodology}
+\label{sec:methodology}
+
+The project was developed as an individual software-engineering effort following a
+lightweight, Kanban-based iterative process, with every functional requirement
+tracked as an issue on a project board and integrated through a
+continuous-integration gate before merging. Design decisions of any significance
+were recorded as architecture decision records, and the software is covered by an
+automated test suite across unit, integration and system levels. In keeping with
+the pace of the technology it studies, the project itself was built with the
+assistance of AI coding tools under human review; the nature and extent of that
+assistance is declared, as the regulations require, in Chapter~\ref{ch:methodology}.
+
+\section{Structure of this document}
+\label{sec:structure}
+
+The remainder of this dissertation is organised as follows.
+Chapter~\ref{ch:sota} reviews the state of the art, surveying penetration testing
+and the vulnerability-management lifecycle, the successive waves of automation
+applied to security testing, the language-model agents that now drive offensive
+security, and the extraction of structured information from reports; it closes by
+identifying the research gap that \emph{revalid} fills. Chapter~\ref{ch:methodology}
+then sets out the methodology followed to build the system: the design-led,
+AI-assisted development model, the software process adopted, the technologies used,
+and the declaration of AI-tool use required by the regulation. The subsequent
+chapters present the analysis and design of the system, the details of its
+implementation,
+the experimental evaluation of its verdict reliability against a real
+penetration-test report, and, finally, the conclusions drawn from the work together
+with the directions it opens for the future.

@@ -10,6 +10,7 @@ authentication in TFG scope.
 
 import asyncio
 import contextlib
+import hashlib
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, DeferredToolRequests
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
@@ -40,6 +41,7 @@ from revalid.db import (
     FindingVersionRecord,
     ReportRecord,
     RetestSessionRecord,
+    SessionEventRecord,
     VerdictRecord,
     create_db_engine,
     session_factory,
@@ -56,7 +58,14 @@ from revalid.domain import (
     VerdictStatus,
 )
 from revalid.export import RunExport, build_export, export_schema
-from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
+from revalid.extract import (
+    ExtractedFinding,
+    ReportMetadata,
+    build_extraction_agent,
+    build_metadata_agent,
+    extract_metadata,
+    extract_report,
+)
 from revalid.findings import (
     add_note,
     add_version,
@@ -396,6 +405,9 @@ class ReportOut(BaseModel):
     model: str
     error: str | None
     finding_count: int
+    archived: bool
+    content_hash: str | None
+    metadata: ReportMetadata | None
     created_at: datetime
 
     @classmethod
@@ -408,8 +420,28 @@ class ReportOut(BaseModel):
             model=record.model,
             error=record.error,
             finding_count=record.finding_count,
+            archived=record.archived,
+            content_hash=record.content_hash,
+            metadata=(
+                ReportMetadata.model_validate(record.doc_metadata) if record.doc_metadata else None
+            ),
             created_at=record.created_at,
         )
+
+
+class ReportPatchIn(BaseModel):
+    """Body for archiving / unarchiving a report (FR-11, #128)."""
+
+    archived: bool
+
+
+class BackendStatusOut(BaseModel):
+    """Live LLM-backend reachability + active model, for the sidebar status pill."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    connected: bool
+    model: str
 
 
 class SettingsOut(BaseModel):
@@ -472,6 +504,11 @@ def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFin
     return build_extraction_agent(build_model(settings))
 
 
+def get_metadata_agent(settings: SettingsDep) -> Agent[None, ReportMetadata]:
+    """Yield the FR-03 document-metadata agent built from the persisted setting (#133)."""
+    return build_metadata_agent(build_model(settings))
+
+
 def get_retest_agent(settings: SettingsDep) -> RetestAgent:
     """Yield the FR-17 agentic retest agent built from the persisted setting (ADR-0021)."""
     return build_retest_agent(build_model(settings))
@@ -497,6 +534,7 @@ def get_sandbox_factory() -> SandboxFactory:
 # which closes over each app's own session factory.
 GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
+MetadataAgentDep = Annotated[Agent[None, ReportMetadata], Depends(get_metadata_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
 QaAgentDep = Annotated[Agent[None, str], Depends(get_qa_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
@@ -507,6 +545,7 @@ def run_extraction(
     report_id: int,
     data: bytes,
     agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
 ) -> None:
     """Extract findings from an uploaded PDF and persist them (FR-01/FR-03/FR-11).
 
@@ -522,13 +561,15 @@ def run_extraction(
         report_id: The ``extracting`` report row to fill in.
         data: The uploaded PDF bytes.
         agent: The extraction agent (a stand-in model in tests).
+        metadata_agent: The document-metadata agent (a stand-in model in tests).
     """
     with sessions() as session:
         report = session.get(ReportRecord, report_id)
         if report is None:  # pragma: no cover - the row was just committed
             return
         try:
-            result = extract_report(agent, read_pdf(data))
+            pdf = read_pdf(data)
+            result = extract_report(agent, pdf)
         except PdfError as exc:
             report.status, report.error = ReportStatus.FAILED.value, str(exc)
             session.commit()
@@ -538,6 +579,8 @@ def run_extraction(
             session.commit()
             return
         _persist_findings(session, result.findings, report_id=report_id)
+        # Best-effort document metadata (#133) — never fails the report.
+        report.doc_metadata = extract_metadata(metadata_agent, pdf).model_dump()
         report.status = ReportStatus.READY.value
         report.finding_count = len(result.findings)
         session.commit()
@@ -1023,21 +1066,31 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         background: BackgroundTasks,
         session: SessionDep,
         agent: ExtractionAgentDep,
+        metadata_agent: MetadataAgentDep,
+        force: bool = False,
     ) -> ReportOut:
-        """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11)."""
+        """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11).
+
+        The bytes are SHA-256 hashed; if an identical report already exists and
+        ``force`` is not set, responds ``409`` listing the duplicates so the
+        operator can cancel or knowingly re-ingest (#134).
+        """
         data = await file.read()
         if not data:
             raise HTTPException(status_code=422, detail="empty upload")
+        content_hash = hashlib.sha256(data).hexdigest()
+        _reject_if_duplicate(session, content_hash, force=force)
         report = ReportRecord(
             filename=file.filename or "report.pdf",
             status=ReportStatus.EXTRACTING.value,
             model=agent_model_name(agent),
             finding_count=0,
+            content_hash=content_hash,
         )
         session.add(report)
         session.commit()
         session.refresh(report)
-        background.add_task(run_extraction, sessions, report.id, data, agent)
+        background.add_task(run_extraction, sessions, report.id, data, agent, metadata_agent)
         return ReportOut.from_record(report)
 
     @router.post("/reports/manual", response_model=ReportOut, status_code=201)
@@ -1075,9 +1128,17 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return ReportOut.from_record(report)
 
     @router.get("/reports", response_model=list[ReportOut])
-    def list_reports(session: SessionDep) -> list[ReportOut]:
-        """List uploaded reports, newest first (FR-11 overview)."""
-        records = session.scalars(select(ReportRecord).order_by(ReportRecord.id.desc()))
+    def list_reports(session: SessionDep, archived: bool = False) -> list[ReportOut]:
+        """List reports newest first, active by default (FR-11 overview).
+
+        ``archived=false`` (default) is the overview; ``archived=true`` is the
+        archived view. Archiving soft-hides a report without deleting it (#128).
+        """
+        records = session.scalars(
+            select(ReportRecord)
+            .where(ReportRecord.archived == archived)
+            .order_by(ReportRecord.id.desc())
+        )
         return [ReportOut.from_record(r) for r in records]
 
     @router.get("/reports/{report_id}", response_model=ReportOut)
@@ -1086,6 +1147,57 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         report = session.get(ReportRecord, report_id)
         if report is None:
             raise HTTPException(status_code=404, detail="report not found")
+        return ReportOut.from_record(report)
+
+
+def _register_report_admin_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-11 report archive/delete routes (#128).
+
+    Split from :func:`_register_report_routes` so each stays under the complexity
+    gate; archiving soft-hides (reversible), deleting removes the report and all
+    its derived rows.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.patch("/reports/{report_id}", response_model=ReportOut)
+    def patch_report(report_id: int, body: ReportPatchIn, session: SessionDep) -> ReportOut:
+        """Archive or unarchive a report — a reversible soft-hide (FR-11, #128)."""
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        report.archived = body.archived
+        session.commit()
+        session.refresh(report)
+        return ReportOut.from_record(report)
+
+    @router.delete("/reports/{report_id}", status_code=204)
+    def delete_report(report_id: int, session: SessionDep) -> None:
+        """Hard-delete a report and everything derived from it (FR-11, #128).
+
+        Cascades by hand — SQLite enforces no FKs here — in dependency order:
+        a report's findings own their version history, notes, verdicts and retest
+        sessions, and each session owns its append-only transcript events. All of
+        it is removed so no orphaned rows survive.
+        """
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        _cascade_delete_report(session, report)
+
+    @router.put("/reports/{report_id}/metadata", response_model=ReportOut)
+    def put_report_metadata(report_id: int, body: ReportMetadata, session: SessionDep) -> ReportOut:
+        """Replace a report's document metadata with the operator's edits (FR-03, #133)."""
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        report.doc_metadata = body.model_dump()
+        session.commit()
+        session.refresh(report)
         return ReportOut.from_record(report)
 
 
@@ -1185,8 +1297,9 @@ def _register_session_routes(
     ) -> RetestSessionOut:
         """Open an agentic retest session and schedule its first agent step (FR-17).
 
-        An optional body sets the free-launch mode + budget config (FR-17 Slice
-        5); with no body the session is gated with the default step budget.
+        An optional body sets the free-launch mode, a seed goal and the target
+        scope (FR-17); with no body the session runs gated, requiring per-command
+        operator approval.
         """
         cfg = body or StartSessionRequest()
         version = _current_or_404(session, finding_id)
@@ -1519,6 +1632,21 @@ def _register_settings_routes(router: APIRouter, sessions: sessionmaker[Session]
         """Discover models / test reachability for a provider base URL (ADR-0021)."""
         return probe_provider(body.base_url, body.api_key)
 
+    @router.get("/settings/status", response_model=BackendStatusOut)
+    def backend_status(session: SessionDep) -> BackendStatusOut:
+        """Report whether the configured LLM backend is reachable + the active model.
+
+        Probes the stored provider config (so keyed backends work without the UI
+        re-sending the key) and feeds the sidebar's connection pill. A native
+        provider with no base URL can't be cheaply probed, so it reports its
+        model as connected rather than falsely red.
+        """
+        cfg = load_or_seed(session)
+        connected = (
+            True if not cfg.base_url else probe_provider(cfg.base_url, cfg.api_key).reachable
+        )
+        return BackendStatusOut(connected=connected, model=cfg.model)
+
 
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
     """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
@@ -1543,6 +1671,96 @@ def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
         return FileResponse(index)
 
 
+def _reject_if_duplicate(session: Session, content_hash: str, *, force: bool) -> None:
+    """Refuse a re-upload of already-ingested bytes unless the operator forces it (#134).
+
+    Raises ``409`` listing the matching reports (id/filename/created_at) so the UI
+    can offer cancel-or-continue; a truthy ``force`` skips the check for a knowing
+    re-ingest. Extracted as a helper so the upload route stays under the gate.
+    """
+    if force:
+        return
+    dupes = session.scalars(
+        select(ReportRecord)
+        .where(ReportRecord.content_hash == content_hash)
+        .order_by(ReportRecord.id.desc())
+    ).all()
+    if not dupes:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "message": "This report has already been uploaded.",
+            "duplicates": [
+                {"id": d.id, "filename": d.filename, "created_at": d.created_at.isoformat()}
+                for d in dupes
+            ],
+        },
+    )
+
+
+def _cascade_delete_report(session: Session, report: ReportRecord) -> None:
+    """Delete a report and every row derived from it, in dependency order (#128).
+
+    SQLite enforces no foreign keys here, so the cascade is explicit: a report's
+    findings own their version history, notes, verdicts and retest sessions, and
+    each session owns its append-only transcript events — all removed so no
+    orphaned rows survive. The caller owns the surrounding request.
+    """
+    finding_ids = list(
+        session.scalars(select(FindingRecord.id).where(FindingRecord.report_id == report.id))
+    )
+    if finding_ids:
+        session_ids = list(
+            session.scalars(
+                select(RetestSessionRecord.id).where(
+                    RetestSessionRecord.finding_id.in_(finding_ids)
+                )
+            )
+        )
+        if session_ids:
+            session.execute(
+                delete(SessionEventRecord).where(SessionEventRecord.session_id.in_(session_ids))
+            )
+        session.execute(delete(VerdictRecord).where(VerdictRecord.finding_id.in_(finding_ids)))
+        session.execute(
+            delete(RetestSessionRecord).where(RetestSessionRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(
+            delete(FindingNoteRecord).where(FindingNoteRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(
+            delete(FindingVersionRecord).where(FindingVersionRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(delete(FindingRecord).where(FindingRecord.id.in_(finding_ids)))
+    session.delete(report)
+    session.commit()
+
+
+def _fail_orphaned_extractions(sessions: sessionmaker[Session]) -> None:
+    """Settle reports left mid-extraction by a prior crash or restart (FR-01).
+
+    Extraction runs as an in-memory background task, so a process restart
+    orphans any report still in ``extracting``: nothing would ever move it to a
+    terminal state, and the UI's status poll would spin forever. Sweeping these
+    rows to ``failed`` at startup guarantees a report never stays stuck in
+    ``extracting`` (issue #131) — the operator can then re-upload it.
+
+    Args:
+        sessions: The app's session factory.
+    """
+    with sessions() as session:
+        orphaned = session.scalars(
+            select(ReportRecord).where(ReportRecord.status == ReportStatus.EXTRACTING.value)
+        ).all()
+        if not orphaned:
+            return
+        for report in orphaned:
+            report.status = ReportStatus.FAILED.value
+            report.error = "extraction interrupted by a restart — please re-upload the report"
+        session.commit()
+
+
 def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> FastAPI:
     """Build the application with its own database engine.
 
@@ -1556,6 +1774,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     """
     db_engine = engine if engine is not None else create_db_engine(db_path)
     sessions = session_factory(db_engine)
+    _fail_orphaned_extractions(sessions)
     app = FastAPI(title="revalid", version=__version__)
     app.state.sessions = sessions
     registry = SessionRegistry()
@@ -1566,6 +1785,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_finding_routes(api, sessions)
     _register_finding_retest_routes(api, sessions)
     _register_report_routes(api, sessions)
+    _register_report_admin_routes(api, sessions)
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)

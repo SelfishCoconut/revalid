@@ -17,6 +17,9 @@ const readyReport: Report = {
   model: "manual",
   error: null,
   finding_count: 1,
+  archived: false,
+  content_hash: null,
+  metadata: null,
   created_at: "2026-07-15T10:00:00Z",
 };
 

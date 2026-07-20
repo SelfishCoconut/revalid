@@ -803,7 +803,7 @@ def submit_human_command(
         registry: The live-session registry (holds the sandbox + observation buffer).
         session_id: The retest session to run the command in.
         command: The exact shell command the operator submitted (without the `!`).
-        timeout: Per-command timeout, matching the agent's command budget.
+        timeout: Per-command timeout, the same limit applied to the agent's commands.
     """
     live = registry.get(session_id)
     if live is None:

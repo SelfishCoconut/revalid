@@ -10,6 +10,33 @@ export interface Report {
   model: string;
   error: string | null;
   finding_count: number;
+  /** Soft-hidden from the overview but kept and reversible (#128). */
+  archived: boolean;
+  /** SHA-256 of the uploaded bytes (null for manually-entered reports) (#134). */
+  content_hash: string | null;
+  /** Document-level metadata extracted from the report, operator-editable (#133). */
+  metadata: ReportMetadata | null;
+  created_at: string;
+}
+
+/** A person named in the report, with their role (#133). */
+export interface Person {
+  name: string;
+  role: string;
+}
+
+/** Document-level metadata extracted from a report, operator-editable (#133). */
+export interface ReportMetadata {
+  product: string;
+  report_date: string;
+  author: string;
+  people: Person[];
+}
+
+/** A prior report that matches an upload's hash, surfaced on the dedup warning (#134). */
+export interface DuplicateReport {
+  id: number;
+  filename: string;
   created_at: string;
 }
 
@@ -130,6 +157,12 @@ export interface Settings {
   base_url: string | null;
   api_key_set: boolean;
   api_key_hint: string | null;
+}
+
+/** Live LLM-backend reachability + active model, for the sidebar status pill. */
+export interface BackendStatus {
+  connected: boolean;
+  model: string;
 }
 
 export interface SettingsUpdate {
