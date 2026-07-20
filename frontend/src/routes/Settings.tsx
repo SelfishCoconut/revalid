@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ProbeResult, Settings as SettingsData } from "../api/types";
+import type { ProbeResult, ProviderKind, Settings as SettingsData } from "../api/types";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
 import { Spinner } from "../components/Spinner";
@@ -14,45 +14,102 @@ const fieldLabel =
   "block font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-faint";
 
 /**
- * True when a base URL looks like a local/self-hosted Ollama endpoint. Ollama
- * lists raw model ids (e.g. `qwen3.6:27b`, where the colon is its own tag
- * separator, not a provider prefix) — those need `ollama:` prepended to become
- * a valid Pydantic AI `provider:model` string. Other OpenAI-compatible hosts
- * already return ids in the shape the backend expects.
+ * A selectable LLM provider. Each carries the model-string prefix its ids need
+ * (Ollama/OpenAI list bare ids, so a `provider:` prefix makes a valid Pydantic
+ * AI `provider:model` string), the default base URL, whether it uses a base URL
+ * at all (Anthropic is a native provider — no base URL), and whether a key is
+ * required for discovery. Discovery dispatches on `id` server-side (Anthropic
+ * authenticates differently), so the three are handled uniformly here.
  */
-function looksLikeOllama(baseUrl: string): boolean {
-  return /ollama/i.test(baseUrl) || baseUrl.includes(":11434");
+interface ProviderConfig {
+  id: ProviderKind;
+  label: string;
+  prefix: string;
+  defaultBaseUrl: string;
+  usesBaseUrl: boolean;
+  keyRequired: boolean;
+  blurb: string;
+}
+
+const PROVIDERS: readonly ProviderConfig[] = [
+  {
+    id: "ollama",
+    label: "Ollama (local)",
+    prefix: "ollama:",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    usesBaseUrl: true,
+    keyRequired: false,
+    blurb: "Detects a running local Ollama server and lists its models — no API key needed.",
+  },
+  {
+    id: "anthropic",
+    label: "Claude (Anthropic)",
+    prefix: "anthropic:",
+    defaultBaseUrl: "",
+    usesBaseUrl: false,
+    keyRequired: true,
+    blurb: "Lists Claude models from the Anthropic API. Requires an API key.",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    prefix: "openai:",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    usesBaseUrl: true,
+    keyRequired: true,
+    blurb: "Lists OpenAI models. Requires an API key.",
+  },
+];
+
+/** Infer the provider from a saved `provider:model` string (defaults to Ollama). */
+function providerOf(model: string): ProviderKind {
+  if (model.startsWith("anthropic:")) return "anthropic";
+  if (model.startsWith("openai:")) return "openai";
+  return "ollama";
+}
+
+function configFor(id: ProviderKind): ProviderConfig {
+  return PROVIDERS.find((provider) => provider.id === id) ?? PROVIDERS[0];
 }
 
 /**
- * The editable form. Split out from {@link Settings} so its `model`/`baseUrl`
- * state can be lazily initialized from the loaded setting (`useState(() =>
- * initial.model)`) instead of synced in via a `useEffect` — the parent only
- * mounts this once `useSettings` has resolved, so the initial value is always
- * the real one and no effect-driven re-sync is needed.
+ * The editable form. Split out from {@link Settings} so its state can be lazily
+ * initialized from the loaded setting — the parent only mounts this once
+ * `useSettings` has resolved, so the initial values are always the real ones.
  */
 function SettingsForm({ initial }: { initial: SettingsData }) {
   const update = useUpdateSettings();
   const probe = useProbeProvider();
 
+  const initialProvider = providerOf(initial.model);
+  const [provider, setProvider] = useState<ProviderKind>(initialProvider);
   const [model, setModel] = useState(initial.model);
   const [custom, setCustom] = useState(false);
-  const [baseUrl, setBaseUrl] = useState(initial.base_url ?? "");
+  const [baseUrl, setBaseUrl] = useState(
+    initial.base_url ?? configFor(initialProvider).defaultBaseUrl,
+  );
   const [apiKey, setApiKey] = useState("");
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
 
-  const discoveredModels = useMemo(() => {
-    if (!probeResult?.reachable) return [];
-    const prefixed = looksLikeOllama(baseUrl);
-    return probeResult.models.map((id) => (prefixed ? `ollama:${id}` : id));
-  }, [probeResult, baseUrl]);
+  const cfg = configFor(provider);
 
-  // No hardcoded model list — the choices are exactly what the configured host
-  // exposes (discovered below), plus the current model so a saved/offline
-  // selection never silently disappears from the radio group.
+  // Discovered ids get the provider prefix so they land as valid model strings.
+  const discoveredModels = useMemo(
+    () => (probeResult?.reachable ? probeResult.models.map((id) => `${cfg.prefix}${id}`) : []),
+    [probeResult, cfg.prefix],
+  );
+
+  // No hardcoded model list — the choices are exactly what the selected provider
+  // exposes (discovered), plus the saved model when it belongs to this provider
+  // so a saved/offline selection never silently disappears from the group.
   const modelOptions = useMemo(
-    () => [...new Set([initial.model, ...discoveredModels])],
-    [discoveredModels, initial.model],
+    () => [
+      ...new Set([
+        ...(providerOf(initial.model) === provider ? [initial.model] : []),
+        ...discoveredModels,
+      ]),
+    ],
+    [discoveredModels, initial.model, provider],
   );
 
   function chooseModel(value: string) {
@@ -60,27 +117,40 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
     setModel(value);
   }
 
-  function handleRefresh() {
+  function runProbe() {
     probe.mutate(
-      { base_url: baseUrl || null, api_key: apiKey || null },
+      { provider, base_url: cfg.usesBaseUrl ? baseUrl || null : null, api_key: apiKey || null },
       { onSuccess: setProbeResult },
     );
   }
 
-  // Discover models from the configured host on first mount, so the group
-  // reflects what this backend actually offers without the operator having to
-  // click Refresh. The ref guard keeps it to a single probe.
+  function chooseProvider(next: ProviderKind) {
+    if (next === provider) return;
+    const nextCfg = configFor(next);
+    setProvider(next);
+    setBaseUrl(nextCfg.usesBaseUrl ? nextCfg.defaultBaseUrl : "");
+    setApiKey("");
+    setProbeResult(null);
+    setCustom(false);
+    // Keep the saved model only if it belongs to the newly chosen provider.
+    setModel(providerOf(initial.model) === next ? initial.model : "");
+  }
+
+  // Auto-discover on mount only for a keyless provider (Ollama): a keyed
+  // provider's stored key is write-only, so its discovery waits for the operator
+  // to (re-)enter the key and press Discover. The ref guard keeps it to one probe.
   const didAutoProbe = useRef(false);
   useEffect(() => {
-    if (didAutoProbe.current || !baseUrl) return;
+    if (didAutoProbe.current) return;
     didAutoProbe.current = true;
-    probe.mutate({ base_url: baseUrl, api_key: apiKey || null }, { onSuccess: setProbeResult });
-  }, [baseUrl, apiKey, probe]);
+    if (!cfg.keyRequired) runProbe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only, ref-guarded
+  }, []);
 
   function handleSave() {
     update.mutate({
       model,
-      base_url: baseUrl || null,
+      base_url: cfg.usesBaseUrl ? baseUrl || null : null,
       api_key: apiKey || null,
     });
   }
@@ -95,6 +165,35 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </p>
 
       <div className="mt-5 max-w-md space-y-4">
+        <fieldset className="m-0 border-0 p-0">
+          <legend className={fieldLabel}>Provider</legend>
+          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+            {PROVIDERS.map((option) => (
+              <label
+                key={option.id}
+                className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[12px] transition-colors ${
+                  provider === option.id
+                    ? "border-iris/60 bg-iris/10 text-fg"
+                    : "border-line bg-panel-2 text-dim hover:bg-panel"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="provider"
+                  value={option.id}
+                  checked={provider === option.id}
+                  onChange={() => {
+                    chooseProvider(option.id);
+                  }}
+                  className="sr-only"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[12px] text-faint">{cfg.blurb}</p>
+        </fieldset>
+
         <fieldset className="m-0 border-0 p-0">
           <legend className={fieldLabel}>Model</legend>
           <div className="mt-1.5 max-h-56 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-panel-2 p-2">
@@ -129,6 +228,11 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
               Custom…
             </label>
           </div>
+          {modelOptions.length === 0 && !custom && (
+            <p className="mt-1.5 text-[12px] text-faint">
+              No models yet — {cfg.keyRequired ? "enter the API key and " : ""}press Discover.
+            </p>
+          )}
           {custom && (
             <input
               aria-label="Custom model id"
@@ -136,23 +240,25 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
               onChange={(event) => {
                 setModel(event.target.value);
               }}
-              placeholder="provider:model — e.g. anthropic:claude-opus-4-8"
+              placeholder={`${cfg.prefix}model`}
               className={`${inputClass} mt-2 font-mono`}
             />
           )}
         </fieldset>
 
-        <label className={fieldLabel}>
-          Base URL
-          <input
-            value={baseUrl}
-            onChange={(event) => {
-              setBaseUrl(event.target.value);
-            }}
-            placeholder="http://localhost:11434/v1"
-            className={`${inputClass} font-mono`}
-          />
-        </label>
+        {cfg.usesBaseUrl && (
+          <label className={fieldLabel}>
+            Base URL
+            <input
+              value={baseUrl}
+              onChange={(event) => {
+                setBaseUrl(event.target.value);
+              }}
+              placeholder={cfg.defaultBaseUrl}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+        )}
 
         <label className={fieldLabel}>
           API key
@@ -165,7 +271,9 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
             placeholder={
               initial.api_key_set
                 ? `set ··${initial.api_key_hint ?? ""} — leave blank to keep`
-                : "optional — provider bearer token"
+                : cfg.keyRequired
+                  ? "required — provider API key"
+                  : "optional — provider bearer token"
             }
             autoComplete="off"
             className={`${inputClass} font-mono`}
@@ -174,8 +282,8 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" onClick={handleRefresh} disabled={probe.isPending}>
-          {probe.isPending ? "Refreshing…" : "Refresh models"}
+        <Button variant="ghost" onClick={runProbe} disabled={probe.isPending}>
+          {probe.isPending ? "Discovering…" : "Discover models"}
         </Button>
         <Button onClick={handleSave} disabled={update.isPending || !model.trim()}>
           {update.isPending ? "Saving…" : "Save"}
