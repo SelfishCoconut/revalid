@@ -5,6 +5,7 @@ import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
 import { Spinner } from "../components/Spinner";
 import { useProbeProvider, useSettings, useUpdateSettings } from "../hooks/useSettings";
+import { DATE_FORMATS, setDateFormat, useDateFormat } from "../lib/dateFormat";
 import { errorMessage } from "../lib/format";
 
 const inputClass =
@@ -212,6 +213,47 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   );
 }
 
+/** Client-side display preferences (stored per browser), starting with date format. */
+function DisplaySettings() {
+  const dateFormat = useDateFormat();
+
+  return (
+    <Panel className="p-5">
+      <Eyebrow>Display</Eyebrow>
+      <h2 className="mt-1.5 font-mono text-lg font-semibold text-fg">Date format</h2>
+      <p className="mt-1 max-w-xl text-[13px] text-dim">
+        How timestamps render across the app. Saved in this browser.
+      </p>
+      <fieldset className="m-0 mt-4 max-w-md border-0 p-0">
+        <legend className="sr-only">Date format</legend>
+        <div className="space-y-0.5 rounded-lg border border-line bg-panel-2 p-2">
+          {DATE_FORMATS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-panel"
+            >
+              <span className="flex items-center gap-2 text-fg">
+                <input
+                  type="radio"
+                  name="date-format"
+                  value={option.id}
+                  checked={dateFormat === option.id}
+                  onChange={() => {
+                    setDateFormat(option.id);
+                  }}
+                  className="accent-iris"
+                />
+                {option.label}
+              </span>
+              <span className="font-mono text-[12px] text-faint">{option.example}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </Panel>
+  );
+}
+
 /** `/settings` route: edit the active LLM backend (FR-13, ADR-0021). */
 export default function Settings() {
   const settings = useSettings();
@@ -237,6 +279,7 @@ export default function Settings() {
   return (
     <div className="rev-rise space-y-6">
       <SettingsForm initial={settings.data} />
+      <DisplaySettings />
     </div>
   );
 }

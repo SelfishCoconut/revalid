@@ -2,7 +2,8 @@ import { useState } from "react";
 
 import type { FindingStage } from "../api/types";
 import { useAddNote, useNotes } from "../hooks/useNotes";
-import { errorMessage, formatDateTime } from "../lib/format";
+import { formatDate, useDateFormat } from "../lib/dateFormat";
+import { errorMessage } from "../lib/format";
 import { Spinner } from "./Spinner";
 import { Button } from "./ui/Button";
 import { Panel, PanelHeader } from "./ui/Panel";
@@ -24,6 +25,7 @@ export function NotesThread({
 }) {
   const notes = useNotes(findingId);
   const addNote = useAddNote(findingId);
+  const dateFormat = useDateFormat();
   const [draft, setDraft] = useState("");
 
   const all = notes.data ?? [];
@@ -69,7 +71,7 @@ export function NotesThread({
                     {note.stage}
                   </span>
                   <span className="font-mono text-[11px] text-faint">
-                    {note.author} · {formatDateTime(note.created_at)}
+                    {note.author} · {formatDate(note.created_at, dateFormat)}
                   </span>
                 </div>
                 <p className="mt-1.5 text-[13px] whitespace-pre-wrap text-dim">{note.body}</p>

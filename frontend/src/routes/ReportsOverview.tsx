@@ -9,7 +9,8 @@ import { UploadReport } from "../components/UploadReport";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { useReports } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
-import { errorMessage, formatDateTime } from "../lib/format";
+import { formatDate, useDateFormat } from "../lib/dateFormat";
+import { errorMessage } from "../lib/format";
 import { verdictCounts } from "../lib/selectors";
 
 function Hero() {
@@ -41,6 +42,7 @@ function Hero() {
 
 export function ReportsOverview() {
   const [showArchived, setShowArchived] = useState(false);
+  const dateFormat = useDateFormat();
   const reports = useReports(showArchived);
   const ordered = [...(reports.data ?? [])].sort(
     (a, b) =>
@@ -131,7 +133,7 @@ export function ReportsOverview() {
                         {report.finding_count}
                       </td>
                       <td className="px-4 py-3 font-mono text-[13px] text-faint">
-                        {formatDateTime(report.created_at)}
+                        {formatDate(report.created_at, dateFormat)}
                       </td>
                       <td className="px-4 py-3">
                         <ReportActions
