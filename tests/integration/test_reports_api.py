@@ -12,10 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
 
-from revalid.app import create_app, get_extraction_agent
+from revalid.app import create_app, get_extraction_agent, get_metadata_agent
 from revalid.db import IN_MEMORY, ReportRecord, create_db_engine, session_factory
 from revalid.domain import ReportStatus
-from revalid.extract import ExtractedFinding
+from revalid.extract import ExtractedFinding, ReportMetadata
 
 pytestmark = pytest.mark.integration
 
@@ -24,9 +24,11 @@ FIXTURE = Path(__file__).parents[1] / "data" / "juice_shop_report_synthetic.pdf"
 
 def test_ingest_operable_over_api(
     extraction_agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
 ) -> None:
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_extraction_agent] = lambda: extraction_agent
+    app.dependency_overrides[get_metadata_agent] = lambda: metadata_agent
     client = TestClient(app)
 
     # 1. ingest: the upload's background extraction runs before the response returns.
@@ -72,10 +74,12 @@ def test_startup_fails_reports_orphaned_in_extracting() -> None:
 
 def test_duplicate_upload_is_rejected_until_forced(
     extraction_agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
 ) -> None:
     """Re-uploading identical bytes returns 409 with the matches; force re-ingests (#134)."""
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_extraction_agent] = lambda: extraction_agent
+    app.dependency_overrides[get_metadata_agent] = lambda: metadata_agent
     client = TestClient(app)
     pdf = FIXTURE.read_bytes()
 
@@ -93,6 +97,28 @@ def test_duplicate_upload_is_rejected_until_forced(
     )
     assert forced.status_code == 202
     assert forced.json()["id"] != first.json()["id"]
+
+
+def test_report_metadata_can_be_edited() -> None:
+    """Operator edits to a report's document metadata persist and round-trip (#133)."""
+    client = TestClient(create_app(engine=create_db_engine(IN_MEMORY)))
+    created = client.post(
+        "/api/reports/manual",
+        json={"label": "T", "findings": [{"title": "x", "severity": "high", "description": "d"}]},
+    )
+    report_id = created.json()["id"]
+    assert created.json()["metadata"] is None  # a manual report starts without metadata
+
+    meta = {
+        "product": "Juice Shop",
+        "report_date": "2026-07-19",
+        "author": "A. Navarro",
+        "people": [{"name": "A. Navarro", "role": "pentester"}],
+    }
+    resp = client.put(f"/api/reports/{report_id}/metadata", json=meta)
+    assert resp.status_code == 200
+    assert resp.json()["metadata"] == meta
+    assert client.get(f"/api/reports/{report_id}").json()["metadata"] == meta
 
 
 def test_archive_hides_report_and_delete_cascades() -> None:

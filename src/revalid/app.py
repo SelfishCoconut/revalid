@@ -58,7 +58,14 @@ from revalid.domain import (
     VerdictStatus,
 )
 from revalid.export import RunExport, build_export, export_schema
-from revalid.extract import ExtractedFinding, build_extraction_agent, extract_report
+from revalid.extract import (
+    ExtractedFinding,
+    ReportMetadata,
+    build_extraction_agent,
+    build_metadata_agent,
+    extract_metadata,
+    extract_report,
+)
 from revalid.findings import (
     add_note,
     add_version,
@@ -400,6 +407,7 @@ class ReportOut(BaseModel):
     finding_count: int
     archived: bool
     content_hash: str | None
+    metadata: ReportMetadata | None
     created_at: datetime
 
     @classmethod
@@ -414,6 +422,9 @@ class ReportOut(BaseModel):
             finding_count=record.finding_count,
             archived=record.archived,
             content_hash=record.content_hash,
+            metadata=(
+                ReportMetadata.model_validate(record.doc_metadata) if record.doc_metadata else None
+            ),
             created_at=record.created_at,
         )
 
@@ -493,6 +504,11 @@ def get_extraction_agent(settings: SettingsDep) -> Agent[None, list[ExtractedFin
     return build_extraction_agent(build_model(settings))
 
 
+def get_metadata_agent(settings: SettingsDep) -> Agent[None, ReportMetadata]:
+    """Yield the FR-03 document-metadata agent built from the persisted setting (#133)."""
+    return build_metadata_agent(build_model(settings))
+
+
 def get_retest_agent(settings: SettingsDep) -> RetestAgent:
     """Yield the FR-17 agentic retest agent built from the persisted setting (ADR-0021)."""
     return build_retest_agent(build_model(settings))
@@ -518,6 +534,7 @@ def get_sandbox_factory() -> SandboxFactory:
 # which closes over each app's own session factory.
 GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
+MetadataAgentDep = Annotated[Agent[None, ReportMetadata], Depends(get_metadata_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
 QaAgentDep = Annotated[Agent[None, str], Depends(get_qa_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
@@ -528,6 +545,7 @@ def run_extraction(
     report_id: int,
     data: bytes,
     agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
 ) -> None:
     """Extract findings from an uploaded PDF and persist them (FR-01/FR-03/FR-11).
 
@@ -543,13 +561,15 @@ def run_extraction(
         report_id: The ``extracting`` report row to fill in.
         data: The uploaded PDF bytes.
         agent: The extraction agent (a stand-in model in tests).
+        metadata_agent: The document-metadata agent (a stand-in model in tests).
     """
     with sessions() as session:
         report = session.get(ReportRecord, report_id)
         if report is None:  # pragma: no cover - the row was just committed
             return
         try:
-            result = extract_report(agent, read_pdf(data))
+            pdf = read_pdf(data)
+            result = extract_report(agent, pdf)
         except PdfError as exc:
             report.status, report.error = ReportStatus.FAILED.value, str(exc)
             session.commit()
@@ -559,6 +579,8 @@ def run_extraction(
             session.commit()
             return
         _persist_findings(session, result.findings, report_id=report_id)
+        # Best-effort document metadata (#133) — never fails the report.
+        report.doc_metadata = extract_metadata(metadata_agent, pdf).model_dump()
         report.status = ReportStatus.READY.value
         report.finding_count = len(result.findings)
         session.commit()
@@ -1044,6 +1066,7 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         background: BackgroundTasks,
         session: SessionDep,
         agent: ExtractionAgentDep,
+        metadata_agent: MetadataAgentDep,
         force: bool = False,
     ) -> ReportOut:
         """Accept a PDF report and schedule background extraction (FR-01/FR-03/FR-11).
@@ -1067,7 +1090,7 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         session.add(report)
         session.commit()
         session.refresh(report)
-        background.add_task(run_extraction, sessions, report.id, data, agent)
+        background.add_task(run_extraction, sessions, report.id, data, agent, metadata_agent)
         return ReportOut.from_record(report)
 
     @router.post("/reports/manual", response_model=ReportOut, status_code=201)
@@ -1165,6 +1188,17 @@ def _register_report_admin_routes(router: APIRouter, sessions: sessionmaker[Sess
         if report is None:
             raise HTTPException(status_code=404, detail="report not found")
         _cascade_delete_report(session, report)
+
+    @router.put("/reports/{report_id}/metadata", response_model=ReportOut)
+    def put_report_metadata(report_id: int, body: ReportMetadata, session: SessionDep) -> ReportOut:
+        """Replace a report's document metadata with the operator's edits (FR-03, #133)."""
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        report.doc_metadata = body.model_dump()
+        session.commit()
+        session.refresh(report)
+        return ReportOut.from_record(report)
 
 
 def _register_verdict_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:

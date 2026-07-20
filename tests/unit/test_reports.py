@@ -12,10 +12,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
 from sqlalchemy import select
 
 from revalid import app as app_module
-from revalid.app import create_app, get_extraction_agent, run_extraction
+from revalid.app import create_app, get_extraction_agent, get_metadata_agent, run_extraction
 from revalid.db import (
     IN_MEMORY,
     FindingRecord,
@@ -24,7 +25,7 @@ from revalid.db import (
     session_factory,
 )
 from revalid.domain import ReportStatus
-from revalid.extract import ExtractedFinding
+from revalid.extract import ExtractedFinding, ReportMetadata, build_metadata_agent
 
 FIXTURE = Path(__file__).parents[1] / "data" / "juice_shop_report_synthetic.pdf"
 
@@ -32,6 +33,7 @@ FIXTURE = Path(__file__).parents[1] / "data" / "juice_shop_report_synthetic.pdf"
 def _client(agent: Agent[None, list[ExtractedFinding]]) -> TestClient:
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_extraction_agent] = lambda: agent
+    app.dependency_overrides[get_metadata_agent] = lambda: build_metadata_agent(TestModel())
     return TestClient(app)
 
 
@@ -63,7 +65,12 @@ def test_reports_overview_lists_newest_first(
 ) -> None:
     client = _client(extraction_agent)
     _upload(client, FIXTURE.read_bytes(), name="a.pdf")
-    _upload(client, FIXTURE.read_bytes(), name="b.pdf")
+    # Same bytes again → forced past the #134 duplicate guard for the ordering check.
+    client.post(
+        "/api/reports",
+        params={"force": "true"},
+        files={"file": ("b.pdf", FIXTURE.read_bytes(), "application/pdf")},
+    )
 
     reports = client.get("/api/reports").json()
     assert [r["filename"] for r in reports] == ["b.pdf", "a.pdf"]
@@ -98,6 +105,7 @@ def test_unknown_report_is_404(
 
 def test_run_extraction_records_unexpected_error(
     extraction_agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unexpected error never leaves a report stuck in ``extracting``."""
@@ -117,7 +125,7 @@ def test_run_extraction_records_unexpected_error(
         raise RuntimeError("model exploded")
 
     monkeypatch.setattr(app_module, "extract_report", boom)
-    run_extraction(sessions, report_id, FIXTURE.read_bytes(), extraction_agent)
+    run_extraction(sessions, report_id, FIXTURE.read_bytes(), extraction_agent, metadata_agent)
 
     with sessions() as session:
         settled = session.get(ReportRecord, report_id)

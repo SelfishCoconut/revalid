@@ -50,6 +50,8 @@ class ReportRecord(Base):
     archived: Mapped[bool] = mapped_column(default=False)
     #: SHA-256 of the uploaded bytes, for duplicate-upload detection (FR-01, #134).
     content_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: Document-level metadata extracted from the report, operator-editable (#133).
+    doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -331,6 +333,7 @@ def _ensure_columns(engine: Engine) -> None:
         "reports": {
             "archived": "ALTER TABLE reports ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0",
             "content_hash": "ALTER TABLE reports ADD COLUMN content_hash VARCHAR(64)",
+            "doc_metadata": "ALTER TABLE reports ADD COLUMN doc_metadata JSON",
         },
     }
     with engine.begin() as conn:

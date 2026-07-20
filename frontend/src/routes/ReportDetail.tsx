@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 
 import { DeterminationMeter } from "../components/DeterminationMeter";
+import { ReportMetadataPanel } from "../components/ReportMetadataPanel";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
@@ -78,6 +79,8 @@ export function ReportDetail() {
           </p>
         )}
       </Panel>
+
+      {ready && <ReportMetadataPanel report={data} />}
 
       {ready && (findings.data ?? []).length > 0 && (
         <Panel className="p-5">

@@ -6,9 +6,10 @@ import {
   getReport,
   listReports,
   setReportArchived,
+  updateReportMetadata,
   uploadReport,
 } from "../api/client";
-import type { ManualReportInput, Report } from "../api/types";
+import type { ManualReportInput, Report, ReportMetadata } from "../api/types";
 import { queryKeys } from "./queryKeys";
 
 /** Reports for the overview — active by default, archived when asked (#128). */
@@ -36,6 +37,18 @@ export function useDeleteReport() {
   return useMutation<void, Error, number>({
     mutationFn: deleteReport,
     onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reports });
+    },
+  });
+}
+
+/** Save operator edits to a report's document metadata; refresh that report (#133). */
+export function useUpdateReportMetadata(id: number) {
+  const client = useQueryClient();
+  return useMutation<Report, Error, ReportMetadata>({
+    mutationFn: (metadata) => updateReportMetadata(id, metadata),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.report(id) });
       void client.invalidateQueries({ queryKey: queryKeys.reports });
     },
   });

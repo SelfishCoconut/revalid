@@ -15,6 +15,7 @@ import type {
   ProbeInput,
   ProbeResult,
   Report,
+  ReportMetadata,
   RetestSessionSummary,
   Settings,
   SettingsUpdate,
@@ -88,6 +89,11 @@ export function setReportArchived(id: number, archived: boolean): Promise<Report
 /** Permanently delete a report and everything derived from it (#128). */
 export function deleteReport(id: number): Promise<void> {
   return request<void>(`/reports/${String(id)}`, { method: "DELETE" });
+}
+
+/** Replace a report's document metadata with operator edits (#133). */
+export function updateReportMetadata(id: number, metadata: ReportMetadata): Promise<Report> {
+  return request<Report>(`/reports/${String(id)}/metadata`, jsonInit("PUT", metadata));
 }
 
 /** Thrown when an upload's bytes match an existing report's hash (#134). */
