@@ -69,12 +69,23 @@ function jsonInit(method: string, body: unknown): RequestInit {
 
 // --- Reports -------------------------------------------------------------
 
-export function listReports(): Promise<Report[]> {
-  return request<Report[]>("/reports");
+/** List reports — active by default, archived when `archived` is true (#128). */
+export function listReports(archived = false): Promise<Report[]> {
+  return request<Report[]>(`/reports${archived ? "?archived=true" : ""}`);
 }
 
 export function getReport(id: number): Promise<Report> {
   return request<Report>(`/reports/${String(id)}`);
+}
+
+/** Archive or unarchive a report — a reversible soft-hide (#128). */
+export function setReportArchived(id: number, archived: boolean): Promise<Report> {
+  return request<Report>(`/reports/${String(id)}`, jsonInit("PATCH", { archived }));
+}
+
+/** Permanently delete a report and everything derived from it (#128). */
+export function deleteReport(id: number): Promise<void> {
+  return request<void>(`/reports/${String(id)}`, { method: "DELETE" });
 }
 
 /** Upload a PDF report (multipart form field `file`); backend replies 202. */

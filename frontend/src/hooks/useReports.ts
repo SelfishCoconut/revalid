@@ -2,16 +2,43 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createManualReport,
+  deleteReport,
   getReport,
   listReports,
+  setReportArchived,
   uploadReport,
 } from "../api/client";
 import type { ManualReportInput, Report } from "../api/types";
 import { queryKeys } from "./queryKeys";
 
-/** All reports (the overview table sorts newest-first at render time). */
-export function useReports() {
-  return useQuery({ queryKey: queryKeys.reports, queryFn: listReports });
+/** Reports for the overview — active by default, archived when asked (#128). */
+export function useReports(archived = false) {
+  return useQuery({
+    queryKey: [...queryKeys.reports, "list", archived],
+    queryFn: () => listReports(archived),
+  });
+}
+
+/** Archive or unarchive a report; on success refresh every report list (#128). */
+export function useSetReportArchived() {
+  const client = useQueryClient();
+  return useMutation<Report, Error, { id: number; archived: boolean }>({
+    mutationFn: ({ id, archived }) => setReportArchived(id, archived),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reports });
+    },
+  });
+}
+
+/** Permanently delete a report (cascade); on success refresh every report list (#128). */
+export function useDeleteReport() {
+  const client = useQueryClient();
+  return useMutation<void, Error, number>({
+    mutationFn: deleteReport,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reports });
+    },
+  });
 }
 
 /**

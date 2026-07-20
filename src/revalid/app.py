@@ -28,7 +28,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, DeferredToolRequests
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
@@ -40,6 +40,7 @@ from revalid.db import (
     FindingVersionRecord,
     ReportRecord,
     RetestSessionRecord,
+    SessionEventRecord,
     VerdictRecord,
     create_db_engine,
     session_factory,
@@ -396,6 +397,7 @@ class ReportOut(BaseModel):
     model: str
     error: str | None
     finding_count: int
+    archived: bool
     created_at: datetime
 
     @classmethod
@@ -408,8 +410,15 @@ class ReportOut(BaseModel):
             model=record.model,
             error=record.error,
             finding_count=record.finding_count,
+            archived=record.archived,
             created_at=record.created_at,
         )
+
+
+class ReportPatchIn(BaseModel):
+    """Body for archiving / unarchiving a report (FR-11, #128)."""
+
+    archived: bool
 
 
 class SettingsOut(BaseModel):
@@ -1075,9 +1084,17 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return ReportOut.from_record(report)
 
     @router.get("/reports", response_model=list[ReportOut])
-    def list_reports(session: SessionDep) -> list[ReportOut]:
-        """List uploaded reports, newest first (FR-11 overview)."""
-        records = session.scalars(select(ReportRecord).order_by(ReportRecord.id.desc()))
+    def list_reports(session: SessionDep, archived: bool = False) -> list[ReportOut]:
+        """List reports newest first, active by default (FR-11 overview).
+
+        ``archived=false`` (default) is the overview; ``archived=true`` is the
+        archived view. Archiving soft-hides a report without deleting it (#128).
+        """
+        records = session.scalars(
+            select(ReportRecord)
+            .where(ReportRecord.archived == archived)
+            .order_by(ReportRecord.id.desc())
+        )
         return [ReportOut.from_record(r) for r in records]
 
     @router.get("/reports/{report_id}", response_model=ReportOut)
@@ -1087,6 +1104,46 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         if report is None:
             raise HTTPException(status_code=404, detail="report not found")
         return ReportOut.from_record(report)
+
+
+def _register_report_admin_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+    """Register the FR-11 report archive/delete routes (#128).
+
+    Split from :func:`_register_report_routes` so each stays under the complexity
+    gate; archiving soft-hides (reversible), deleting removes the report and all
+    its derived rows.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.patch("/reports/{report_id}", response_model=ReportOut)
+    def patch_report(report_id: int, body: ReportPatchIn, session: SessionDep) -> ReportOut:
+        """Archive or unarchive a report — a reversible soft-hide (FR-11, #128)."""
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        report.archived = body.archived
+        session.commit()
+        session.refresh(report)
+        return ReportOut.from_record(report)
+
+    @router.delete("/reports/{report_id}", status_code=204)
+    def delete_report(report_id: int, session: SessionDep) -> None:
+        """Hard-delete a report and everything derived from it (FR-11, #128).
+
+        Cascades by hand — SQLite enforces no FKs here — in dependency order:
+        a report's findings own their version history, notes, verdicts and retest
+        sessions, and each session owns its append-only transcript events. All of
+        it is removed so no orphaned rows survive.
+        """
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        _cascade_delete_report(session, report)
 
 
 def _register_verdict_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
@@ -1544,6 +1601,44 @@ def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
         return FileResponse(index)
 
 
+def _cascade_delete_report(session: Session, report: ReportRecord) -> None:
+    """Delete a report and every row derived from it, in dependency order (#128).
+
+    SQLite enforces no foreign keys here, so the cascade is explicit: a report's
+    findings own their version history, notes, verdicts and retest sessions, and
+    each session owns its append-only transcript events — all removed so no
+    orphaned rows survive. The caller owns the surrounding request.
+    """
+    finding_ids = list(
+        session.scalars(select(FindingRecord.id).where(FindingRecord.report_id == report.id))
+    )
+    if finding_ids:
+        session_ids = list(
+            session.scalars(
+                select(RetestSessionRecord.id).where(
+                    RetestSessionRecord.finding_id.in_(finding_ids)
+                )
+            )
+        )
+        if session_ids:
+            session.execute(
+                delete(SessionEventRecord).where(SessionEventRecord.session_id.in_(session_ids))
+            )
+        session.execute(delete(VerdictRecord).where(VerdictRecord.finding_id.in_(finding_ids)))
+        session.execute(
+            delete(RetestSessionRecord).where(RetestSessionRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(
+            delete(FindingNoteRecord).where(FindingNoteRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(
+            delete(FindingVersionRecord).where(FindingVersionRecord.finding_id.in_(finding_ids))
+        )
+        session.execute(delete(FindingRecord).where(FindingRecord.id.in_(finding_ids)))
+    session.delete(report)
+    session.commit()
+
+
 def _fail_orphaned_extractions(sessions: sessionmaker[Session]) -> None:
     """Settle reports left mid-extraction by a prior crash or restart (FR-01).
 
@@ -1592,6 +1687,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_finding_routes(api, sessions)
     _register_finding_retest_routes(api, sessions)
     _register_report_routes(api, sessions)
+    _register_report_admin_routes(api, sessions)
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)

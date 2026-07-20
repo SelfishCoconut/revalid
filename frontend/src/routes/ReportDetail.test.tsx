@@ -16,6 +16,7 @@ const extractingReport: Report = {
   model: "claude",
   error: null,
   finding_count: 0,
+  archived: false,
   created_at: "2026-07-14T10:00:00Z",
 };
 

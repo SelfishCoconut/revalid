@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import type { Report } from "../api/types";
 import { DeterminationMeter } from "../components/DeterminationMeter";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { UploadReport } from "../components/UploadReport";
+import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
-import { useReports } from "../hooks/useReports";
+import { useDeleteReport, useReports, useSetReportArchived } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage, formatDateTime } from "../lib/format";
 import { verdictCounts } from "../lib/selectors";
@@ -37,8 +40,48 @@ function Hero() {
   );
 }
 
+function ReportActions({ report }: { report: Report }) {
+  const setArchived = useSetReportArchived();
+  const remove = useDeleteReport();
+  const busy = setArchived.isPending || remove.isPending;
+
+  function confirmDelete() {
+    const ok = window.confirm(
+      `Delete "${report.filename}" and all its findings, verdicts and retest history?\n` +
+        `This cannot be undone.`,
+    );
+    if (ok) {
+      remove.mutate(report.id);
+    }
+  }
+
+  return (
+    <div className="flex justify-end gap-1.5">
+      <Button
+        variant="ghost"
+        disabled={busy}
+        className="px-2.5 py-1 text-[12px]"
+        onClick={() => {
+          setArchived.mutate({ id: report.id, archived: !report.archived });
+        }}
+      >
+        {report.archived ? "Unarchive" : "Archive"}
+      </Button>
+      <Button
+        variant="danger"
+        disabled={busy}
+        className="px-2.5 py-1 text-[12px]"
+        onClick={confirmDelete}
+      >
+        Delete
+      </Button>
+    </div>
+  );
+}
+
 export function ReportsOverview() {
-  const reports = useReports();
+  const [showArchived, setShowArchived] = useState(false);
+  const reports = useReports(showArchived);
   const ordered = [...(reports.data ?? [])].sort(
     (a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
@@ -64,9 +107,24 @@ export function ReportsOverview() {
           <PanelHeader
             eyebrow="Reports"
             aside={
-              <span className="font-mono text-[11px] text-faint">
-                {ordered.length} total
-              </span>
+              <div className="flex items-center gap-0.5 rounded-lg border border-line bg-panel-2/40 p-0.5 font-mono text-[11px]">
+                {([false, true] as const).map((archived) => (
+                  <button
+                    key={String(archived)}
+                    type="button"
+                    onClick={() => {
+                      setShowArchived(archived);
+                    }}
+                    className={`rounded-md px-2.5 py-1 transition-colors ${
+                      showArchived === archived
+                        ? "bg-panel text-fg"
+                        : "text-faint hover:text-dim"
+                    }`}
+                  >
+                    {archived ? "Archived" : "Active"}
+                  </button>
+                ))}
+              </div>
             }
           />
           {reports.isPending ? (
@@ -79,17 +137,20 @@ export function ReportsOverview() {
             </p>
           ) : ordered.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-faint">
-              No reports yet. Drop a pentest PDF to begin.
+              {showArchived
+                ? "No archived reports."
+                : "No reports yet. Drop a pentest PDF to begin."}
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[34rem] text-left">
+              <table className="w-full min-w-[38rem] text-left">
                 <thead>
                   <tr className="border-b border-line font-mono text-[10px] uppercase tracking-[0.16em] text-faint">
                     <th className="px-4 py-2.5 font-medium">Filename</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
                     <th className="px-4 py-2.5 font-medium">Findings</th>
                     <th className="px-4 py-2.5 font-medium">Created</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line/60">
@@ -111,6 +172,9 @@ export function ReportsOverview() {
                       </td>
                       <td className="px-4 py-3 font-mono text-[13px] text-faint">
                         {formatDateTime(report.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <ReportActions report={report} />
                       </td>
                     </tr>
                   ))}

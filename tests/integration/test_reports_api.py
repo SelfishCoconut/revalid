@@ -68,3 +68,27 @@ def test_startup_fails_reports_orphaned_in_extracting() -> None:
     reports = client.get("/api/reports").json()
     assert reports[0]["status"] == "failed"
     assert "interrupted" in reports[0]["error"]
+
+
+def test_archive_hides_report_and_delete_cascades() -> None:
+    """Archiving soft-hides a report; deleting removes it and its findings (#128)."""
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    client = TestClient(app)
+    created = client.post(
+        "/api/reports/manual",
+        json={"label": "T", "findings": [{"title": "x", "severity": "high", "description": "d"}]},
+    )
+    report_id = created.json()["id"]
+    assert created.json()["archived"] is False
+
+    # archive: leaves the active list, appears in the archived list (reversible).
+    assert client.patch(f"/api/reports/{report_id}", json={"archived": True}).status_code == 200
+    assert client.get("/api/reports").json() == []
+    archived = client.get("/api/reports", params={"archived": True}).json()
+    assert [r["id"] for r in archived] == [report_id]
+
+    # delete an archived report: gone from both lists, findings cascaded away.
+    assert client.delete(f"/api/reports/{report_id}").status_code == 204
+    assert client.get("/api/reports", params={"archived": True}).json() == []
+    assert client.get("/api/findings", params={"report_id": report_id}).json() == []
+    assert client.get(f"/api/reports/{report_id}").status_code == 404

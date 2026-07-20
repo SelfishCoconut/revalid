@@ -10,6 +10,8 @@ export interface Report {
   model: string;
   error: string | null;
   finding_count: number;
+  /** Soft-hidden from the overview but kept and reversible (#128). */
+  archived: boolean;
   created_at: string;
 }
 
