@@ -30,6 +30,13 @@ _VALID: dict[str, Any] = {
     "reproduction_steps": ["Open /#/login", "Submit ' OR 1=1--"],
 }
 
+_CVSS: dict[str, Any] = {
+    "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "base_score": 9.8,
+    "inferred": False,
+}
+_MITRE: dict[str, Any] = {"techniques": ["T1190"], "inferred": False}
+
 
 def _report(text: str) -> PdfReport:
     """One-candidate report wrapping raw text (no headings → whole doc)."""
@@ -78,6 +85,48 @@ def test_multiple_findings_from_one_candidate() -> None:
     agent = build_extraction_agent(_model_returning(_VALID, second))
     result = extract_report(agent, _report("two findings, no headings"))
     assert [f.title for f in result.findings] == ["SQL Injection in Login", "Reflected XSS"]
+
+
+def test_report_stated_cvss_and_mitre_mapped_verbatim() -> None:
+    # FR-19: a CVSS code / ATT&CK techniques stated in the report map through
+    # unchanged, with inferred=False marking them as read, not derived.
+    stated = {**_VALID, "cvss": _CVSS, "mitre": _MITRE}
+    agent = build_extraction_agent(_model_returning(stated))
+    [finding] = extract_report(agent, _report("a finding with a stated CVSS")).findings
+    assert finding.cvss.vector == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    assert finding.cvss.base_score == 9.8
+    assert finding.cvss.inferred is False
+    assert finding.mitre.techniques == ("T1190",)
+    assert finding.mitre.inferred is False
+    # The taxonomy fields also land in the audit blob (NFR-02).
+    assert finding.raw["extracted"]["cvss"]["base_score"] == 9.8
+
+
+def test_derived_cvss_and_mitre_carry_inferred_provenance() -> None:
+    # FR-19: when the report states no CVSS/ATT&CK, the model derives them and
+    # sets inferred=True, so the operator can tell generated from stated.
+    derived = {
+        **_VALID,
+        "cvss": {**_CVSS, "inferred": True},
+        "mitre": {"techniques": ["T1190", "T1110"], "inferred": True},
+    }
+    agent = build_extraction_agent(_model_returning(derived))
+    [finding] = extract_report(agent, _report("a finding, no CVSS stated")).findings
+    assert finding.cvss.inferred is True
+    assert finding.mitre.techniques == ("T1190", "T1110")
+    assert finding.mitre.inferred is True
+
+
+def test_absent_cvss_and_mitre_default_to_empty_not_inferred() -> None:
+    # If the model omits them entirely, the schema defaults keep the finding
+    # valid with empty, non-inferred taxonomy fields (never a fabricated code).
+    agent = build_extraction_agent(_model_returning(_VALID))
+    [finding] = extract_report(agent, _report("plain finding")).findings
+    assert finding.cvss.vector == ""
+    assert finding.cvss.base_score is None
+    assert finding.cvss.inferred is False
+    assert finding.mitre.techniques == ()
+    assert finding.mitre.inferred is False
 
 
 def test_invalid_output_is_flagged_never_persisted() -> None:

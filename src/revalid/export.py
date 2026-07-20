@@ -34,7 +34,8 @@ from revalid.findings import list_notes, list_versions
 # evidence, so it covers agentic verdicts (FR-17 Slice 6a) as well as batch ones.
 # 1.3: VerdictExport.evidence carries flexible AgenticEvidence for agentic verdicts
 # (FR-17 Slice 6b-i) — the agent's explanation + a command's real output.
-SCHEMA_VERSION = "1.4"
+# 1.5: findings carry cvss + mitre taxonomy fields (FR-19, ADR-0037).
+SCHEMA_VERSION = "1.5"
 
 
 class Generator(BaseModel):

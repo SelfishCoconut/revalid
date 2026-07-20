@@ -41,8 +41,37 @@
       "title": "AgenticEvidence",
       "type": "object"
     },
+    "CvssCode": {
+      "description": "CVSS severity code attached to a finding at ingestion (FR-19).\n\n``vector`` is the CVSS base vector string (e.g.\n``CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H``); ``base_score`` is the\nderived 0.0--10.0 base score. ``inferred`` records provenance: ``False``\nwhen the code was read from the report verbatim, ``True`` when the model\nderived it because the report stated none. An empty ``vector`` with\n``inferred=False`` means the report had no CVSS code and none was derived.",
+      "properties": {
+        "base_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Score"
+        },
+        "inferred": {
+          "default": false,
+          "title": "Inferred",
+          "type": "boolean"
+        },
+        "vector": {
+          "default": "",
+          "title": "Vector",
+          "type": "string"
+        }
+      },
+      "title": "CvssCode",
+      "type": "object"
+    },
     "Finding": {
-      "description": "A single pentest finding in the internal model (FR-02/FR-03).\n\nAttributes:\n    title: Short human-readable name of the finding.\n    severity: Normalized severity level.\n    description: Free-text description of the vulnerability.\n    impact: What an attacker gains / the business consequence (FR-03).\n    attack_vector: How the vulnerability is reached and exploited (FR-03).\n    affected_endpoints: URLs or endpoint identifiers the finding applies to.\n    reproduction_steps: Ordered steps to reproduce the issue.\n    raw: Complete source payload as ingested, preserving fields the\n        internal model does not map (FR-02 audit criterion). For\n        LLM-extracted findings it also carries extraction lineage \u2014 model\n        name and source text \u2014 for the audit trail (FR-10 / NFR-02).",
+      "description": "A single pentest finding in the internal model (FR-02/FR-03).\n\nAttributes:\n    title: Short human-readable name of the finding.\n    severity: Normalized severity level.\n    description: Free-text description of the vulnerability.\n    impact: What an attacker gains / the business consequence (FR-03).\n    attack_vector: How the vulnerability is reached and exploited (FR-03).\n    affected_endpoints: URLs or endpoint identifiers the finding applies to.\n    reproduction_steps: Ordered steps to reproduce the issue.\n    cvss: CVSS severity code, read from the report or derived at ingestion\n        (FR-19). Provenance is on the ``inferred`` flag.\n    mitre: MITRE ATT&CK technique mapping, read or derived at ingestion\n        (FR-19). Provenance is on the ``inferred`` flag.\n    raw: Complete source payload as ingested, preserving fields the\n        internal model does not map (FR-02 audit criterion). For\n        LLM-extracted findings it also carries extraction lineage \u2014 model\n        name and source text \u2014 for the audit trail (FR-10 / NFR-02).",
       "properties": {
         "affected_endpoints": {
           "default": [],
@@ -57,6 +86,9 @@
           "title": "Attack Vector",
           "type": "string"
         },
+        "cvss": {
+          "$ref": "#/$defs/CvssCode"
+        },
         "description": {
           "default": "",
           "title": "Description",
@@ -66,6 +98,9 @@
           "default": "",
           "title": "Impact",
           "type": "string"
+        },
+        "mitre": {
+          "$ref": "#/$defs/MitreMapping"
         },
         "raw": {
           "additionalProperties": true,
@@ -210,6 +245,26 @@
         "version"
       ],
       "title": "Generator",
+      "type": "object"
+    },
+    "MitreMapping": {
+      "description": "MITRE ATT&CK technique mapping for a finding (FR-19).\n\n``techniques`` are ATT&CK technique IDs (e.g. ``T1190``,\n``T1110``) the finding maps onto; ``inferred`` is ``True`` when the model\nderived the mapping rather than reading it from the report. Empty\n``techniques`` with ``inferred=False`` means none stated and none derived.",
+      "properties": {
+        "inferred": {
+          "default": false,
+          "title": "Inferred",
+          "type": "boolean"
+        },
+        "techniques": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Techniques",
+          "type": "array"
+        }
+      },
+      "title": "MitreMapping",
       "type": "object"
     },
     "NoteExport": {

@@ -19,7 +19,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import KnownModelName, Model
 
-from revalid.domain import Finding, Severity
+from revalid.domain import CvssCode, Finding, MitreMapping, Severity
 from revalid.llm import agent_model_name, resolve_model
 from revalid.pdf import FindingCandidate, PdfReport, segment_findings
 
@@ -39,9 +39,21 @@ For each finding set:
 - attack_vector: how the vulnerability is reached and exploited.
 - affected_endpoints: the URLs or endpoint paths it applies to.
 - reproduction_steps: the ordered steps to reproduce it, one step per item.
+- cvss: the CVSS base code. If the report states a CVSS vector or score, copy it
+  exactly and set cvss.inferred to false. If the report states none, derive a
+  best-estimate CVSS v3.1 base vector (and its 0-10 base score) from the
+  finding's nature and set cvss.inferred to true. Leave the vector empty only if
+  the finding cannot be assessed at all.
+- mitre: the MITRE ATT&CK technique IDs the finding maps to (e.g. T1190, T1110).
+  If the report states them, copy them and set mitre.inferred to false;
+  otherwise infer the most applicable technique IDs and set mitre.inferred to
+  true.
 
-If the text does not state a field, use an empty string (or an empty list for
-the list fields) rather than guessing.\
+For the descriptive fields (description, impact, attack_vector,
+affected_endpoints, reproduction_steps), if the text does not state a value use
+an empty string (or an empty list) rather than guessing. The cvss and mitre
+fields are the deliberate exception: derive them from the finding when the report
+is silent, and mark them inferred as above.\
 """
 
 
@@ -62,6 +74,8 @@ class ExtractedFinding(BaseModel):
     attack_vector: str
     affected_endpoints: tuple[str, ...]
     reproduction_steps: tuple[str, ...]
+    cvss: CvssCode = Field(default_factory=CvssCode)
+    mitre: MitreMapping = Field(default_factory=MitreMapping)
 
 
 class Person(BaseModel):
@@ -233,6 +247,8 @@ def _to_finding(
         attack_vector=extracted.attack_vector,
         affected_endpoints=extracted.affected_endpoints,
         reproduction_steps=extracted.reproduction_steps,
+        cvss=extracted.cvss,
+        mitre=extracted.mitre,
         raw={
             "source": "pdf_extraction",
             "model": model_name,
