@@ -43,6 +43,7 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   const probe = useProbeProvider();
 
   const [model, setModel] = useState(initial.model);
+  const [custom, setCustom] = useState(false);
   const [baseUrl, setBaseUrl] = useState(initial.base_url ?? "");
   const [apiKey, setApiKey] = useState("");
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
@@ -53,12 +54,20 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
     return probeResult.models.map((id) => (prefixed ? `ollama:${id}` : id));
   }, [probeResult, baseUrl]);
 
+  // The current model is always a first-class radio (even before a refresh, and
+  // even if the host is offline), so a saved custom/offline model never
+  // silently disappears from the choices.
   const modelOptions = useMemo(
-    () => [...new Set([...KNOWN_MODELS, ...discoveredModels])],
-    [discoveredModels],
+    () => [...new Set([initial.model, ...KNOWN_MODELS, ...discoveredModels])],
+    [discoveredModels, initial.model],
   );
 
-  function handleProbe() {
+  function chooseModel(value: string) {
+    setCustom(false);
+    setModel(value);
+  }
+
+  function handleRefresh() {
     probe.mutate(
       { base_url: baseUrl || null, api_key: apiKey || null },
       { onSuccess: setProbeResult },
@@ -83,23 +92,52 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </p>
 
       <div className="mt-5 max-w-md space-y-4">
-        <label className={fieldLabel}>
-          Model
-          <input
-            list="settings-model-options"
-            value={model}
-            onChange={(event) => {
-              setModel(event.target.value);
-            }}
-            placeholder="ollama:qwen3.6:27b"
-            className={`${inputClass} font-mono`}
-          />
-          <datalist id="settings-model-options">
+        <fieldset className="m-0 border-0 p-0">
+          <legend className={fieldLabel}>Model</legend>
+          <div className="mt-1.5 max-h-56 space-y-0.5 overflow-y-auto rounded-lg border border-line bg-panel-2 p-2">
             {modelOptions.map((option) => (
-              <option key={option} value={option} />
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 font-mono text-[13px] text-fg hover:bg-panel"
+              >
+                <input
+                  type="radio"
+                  name="model"
+                  value={option}
+                  checked={!custom && model === option}
+                  onChange={() => {
+                    chooseModel(option);
+                  }}
+                  className="accent-iris"
+                />
+                {option}
+              </label>
             ))}
-          </datalist>
-        </label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[13px] text-dim hover:bg-panel">
+              <input
+                type="radio"
+                name="model"
+                checked={custom}
+                onChange={() => {
+                  setCustom(true);
+                }}
+                className="accent-iris"
+              />
+              Custom…
+            </label>
+          </div>
+          {custom && (
+            <input
+              aria-label="Custom model id"
+              value={model}
+              onChange={(event) => {
+                setModel(event.target.value);
+              }}
+              placeholder="provider:model — e.g. anthropic:claude-opus-4-8"
+              className={`${inputClass} mt-2 font-mono`}
+            />
+          )}
+        </fieldset>
 
         <label className={fieldLabel}>
           Base URL
@@ -133,8 +171,8 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" onClick={handleProbe} disabled={probe.isPending}>
-          {probe.isPending ? "Testing…" : "Test connection"}
+        <Button variant="ghost" onClick={handleRefresh} disabled={probe.isPending}>
+          {probe.isPending ? "Refreshing…" : "Refresh models"}
         </Button>
         <Button onClick={handleSave} disabled={update.isPending || !model.trim()}>
           {update.isPending ? "Saving…" : "Save"}
