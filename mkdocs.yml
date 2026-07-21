@@ -33,9 +33,53 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:mermaid2.fence_mermaid_custom
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search
-  - mermaid2
+  # `useMaxWidth: false` makes every diagram render at its natural size instead
+  # of being scaled down to the text column — the CSS in stylesheets/extra.css
+  # then scrolls the overflow. Without this, wide C4 and sequence diagrams
+  # shrink until their labels are unreadable.
+  - mermaid2:
+      arguments:
+        securityLevel: loose
+        # Required for <br/> to break lines inside labels: without HTML labels
+        # mermaid renders plain SVG text and silently swallows the tag, which
+        # is why multi-line labels used to run together ("developerperson").
+        htmlLabels: true
+        flowchart:
+          useMaxWidth: false
+          htmlLabels: true
+          nodeSpacing: 55
+          rankSpacing: 60
+          padding: 12
+        sequence:
+          useMaxWidth: false
+          diagramMarginX: 12
+          diagramMarginY: 12
+          actorFontSize: 15
+          actorFontWeight: 500
+          messageFontSize: 14
+          noteFontSize: 14
+          boxTextMargin: 8
+          width: 165
+        state:
+          useMaxWidth: false
+          nodeSpacing: 55
+          rankSpacing: 60
+        er:
+          useMaxWidth: false
+          fontSize: 14
+          entityPadding: 14
+          minEntityWidth: 130
+        c4:
+          useMaxWidth: false
+          diagramMarginX: 12
+          c4ShapeMargin: 40
+          width: 250
+          height: 260
   - mkdocstrings:
       handlers:
         python:
@@ -49,6 +93,8 @@ nav:
   - Architecture:
       - How it works (workflow): architecture/workflow.md
       - C4 model: architecture/c4.md
+      - Data model: architecture/data-model.md
+      - Subsystem flows: architecture/subsystem-flows.md
   - Requirements (SRS): requirements/srs.md
   - API reference: reference/api.md
   - UML (generated): reference/uml.md
