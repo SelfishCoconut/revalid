@@ -47,6 +47,7 @@ plugins:
 nav:
   - Home: index.md
   - Architecture:
+      - How it works (workflow): architecture/workflow.md
       - C4 model: architecture/c4.md
   - Requirements (SRS): requirements/srs.md
   - API reference: reference/api.md

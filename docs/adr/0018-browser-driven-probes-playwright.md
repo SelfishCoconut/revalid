@@ -1,7 +1,7 @@
 # 0018. Browser-driven probes via Playwright, as a swapped executor under the same guard
 
 Date: 2026-07-15
-Status: proposed
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

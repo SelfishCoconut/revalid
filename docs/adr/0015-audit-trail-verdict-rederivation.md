@@ -1,7 +1,7 @@
 # 0015. Audit trail: verdicts re-derivable from stored evidence via a shared pure assessment
 
 Date: 2026-07-14
-Status: accepted
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

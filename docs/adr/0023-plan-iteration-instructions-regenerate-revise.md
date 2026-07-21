@@ -1,7 +1,7 @@
 # 0023. Plan iteration: operator instructions + regenerate / revise (go back a step)
 
 Date: 2026-07-16
-Status: proposed
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

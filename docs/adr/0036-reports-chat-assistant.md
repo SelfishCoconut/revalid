@@ -2,8 +2,7 @@
 
 Date: 2026-07-20
 
-Status: proposed
-
+Status: accepted
 Introduces FR-18. Reuses the FR-13 backend selection (ADR-0010/0021) and the
 Pydantic AI agent + gated/ungated tool pattern established by FR-17 (ADR-0025).
 

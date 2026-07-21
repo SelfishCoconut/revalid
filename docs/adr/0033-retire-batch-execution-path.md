@@ -1,8 +1,7 @@
 # 0033. Retire the batch execution path (FR-17 Slice 6b-iii)
 
 Date: 2026-07-19
-Status: proposed
-
+Status: accepted
 ## Context
 
 The agentic retest console (ADR-0025 → ADR-0032) now covers the whole retest

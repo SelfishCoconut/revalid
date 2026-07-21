@@ -1,7 +1,7 @@
 # 0011. Retest-plan generation: LLM-proposed typed actions, deterministically gated
 
 Date: 2026-07-13
-Status: accepted
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

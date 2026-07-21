@@ -1,7 +1,7 @@
 # 0019. Extensible retest-technique registry: kind-keyed assessors + command rendering, with FR-04 kind tagging (scope stays human-validated)
 
 Date: 2026-07-15
-Status: proposed
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

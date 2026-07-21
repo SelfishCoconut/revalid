@@ -1,8 +1,7 @@
 # 0029. Agentic retest free-launch mode + budgets (FR-17 Slice 5)
 
 Date: 2026-07-17
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-17 Slice 5 (epic [#87](https://github.com/SelfishCoconut/revalid/issues/87),

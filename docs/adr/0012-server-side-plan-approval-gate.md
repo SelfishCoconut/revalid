@@ -1,7 +1,7 @@
 # 0012. Server-side plan approval gate: versioned plan rows, single execution chokepoint
 
 Date: 2026-07-14
-Status: accepted
+Status: superseded by [ADR-0033](0033-retire-batch-execution-path.md) (batch execution path retired in full)
 
 ## Context
 

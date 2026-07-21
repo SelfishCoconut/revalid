@@ -1,8 +1,7 @@
 # 0031. Flexible command-output evidence for agentic verdicts (FR-17 Slice 6b-i)
 
 Date: 2026-07-18
-Status: proposed
-
+Status: accepted
 ## Context
 
 Slice 6a (ADR-0030) wired the agentic verdict into FR-09/10/12 but made it
