@@ -31,55 +31,17 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid_custom
+          # Material for MkDocs renders .mermaid blocks natively (theme-aware,
+          # light/dark). The mkdocs-mermaid2 plugin's custom fence collided with
+          # it: nothing emitted a mermaid.initialize() call, so every diagram on
+          # the site rendered as a "Syntax error" bomb. This is the supported path.
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 extra_css:
   - stylesheets/extra.css
 
 plugins:
   - search
-  # `useMaxWidth: false` makes every diagram render at its natural size instead
-  # of being scaled down to the text column — the CSS in stylesheets/extra.css
-  # then scrolls the overflow. Without this, wide C4 and sequence diagrams
-  # shrink until their labels are unreadable.
-  - mermaid2:
-      arguments:
-        securityLevel: loose
-        # Required for <br/> to break lines inside labels: without HTML labels
-        # mermaid renders plain SVG text and silently swallows the tag, which
-        # is why multi-line labels used to run together ("developerperson").
-        htmlLabels: true
-        flowchart:
-          useMaxWidth: false
-          htmlLabels: true
-          nodeSpacing: 55
-          rankSpacing: 60
-          padding: 12
-        sequence:
-          useMaxWidth: false
-          diagramMarginX: 12
-          diagramMarginY: 12
-          actorFontSize: 15
-          actorFontWeight: 500
-          messageFontSize: 14
-          noteFontSize: 14
-          boxTextMargin: 8
-          width: 165
-        state:
-          useMaxWidth: false
-          nodeSpacing: 55
-          rankSpacing: 60
-        er:
-          useMaxWidth: false
-          fontSize: 14
-          entityPadding: 14
-          minEntityWidth: 130
-        c4:
-          useMaxWidth: false
-          diagramMarginX: 12
-          c4ShapeMargin: 40
-          width: 250
-          height: 260
   - mkdocstrings:
       handlers:
         python:

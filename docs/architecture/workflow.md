@@ -40,13 +40,13 @@ Three transports carry data to the browser, by need:
 
 ```mermaid
 flowchart LR
-    R[Report&lt;br/&gt;extracting → ready / failed] --> F[Finding&lt;br/&gt;identity row]
-    F --> V[Finding versions&lt;br/&gt;append-only, v1 = extraction]
-    F --> N[Notes&lt;br/&gt;stage-tagged]
-    F --> S[Retest session&lt;br/&gt;one per attempt]
-    S --> E[session_events&lt;br/&gt;append-only transcript]
-    S --> VD[Verdict&lt;br/&gt;+ agentic evidence]
-    VD --> X[Export / audit&lt;br/&gt;read-only derivations]
+    R[Report<br/>extracting → ready / failed] --> F[Finding<br/>identity row]
+    F --> V[Finding versions<br/>append-only, v1 = extraction]
+    F --> N[Notes<br/>stage-tagged]
+    F --> S[Retest session<br/>one per attempt]
+    S --> E[session_events<br/>append-only transcript]
+    S --> VD[Verdict<br/>+ agentic evidence]
+    VD --> X[Export / audit<br/>read-only derivations]
 ```
 
 Two properties of this model matter more than the rest:
@@ -68,9 +68,9 @@ attached), so everything downstream is identical:
 
 ```mermaid
 flowchart TD
-    A[PDF upload&lt;br/&gt;POST /api/reports] -->|202, background task| B[read_pdf → extract_report&lt;br/&gt;LLM, FR-01/FR-03]
-    C[DefectDojo JSON&lt;br/&gt;POST /api/findings/import] --> D[schema mapping, no LLM&lt;br/&gt;FR-02]
-    E[Manual entry&lt;br/&gt;POST /api/reports/manual] --> D
+    A[PDF upload<br/>POST /api/reports] -->|202, background task| B[read_pdf → extract_report<br/>LLM, FR-01/FR-03]
+    C[DefectDojo JSON<br/>POST /api/findings/import] --> D[schema mapping, no LLM<br/>FR-02]
+    E[Manual entry<br/>POST /api/reports/manual] --> D
     B --> F[persist findings + CVSS/MITRE enrichment FR-19]
     D --> F
     F --> G[report status → ready]

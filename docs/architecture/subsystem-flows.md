@@ -17,22 +17,22 @@ asynchronous.
 ```mermaid
 flowchart TB
     subgraph doors["the three doors"]
-        P["PDF upload&lt;br/&gt;POST /api/reports&lt;br/&gt;FR-01"]
-        J["DefectDojo JSON&lt;br/&gt;POST /api/findings/import&lt;br/&gt;FR-02"]
-        M["Manual entry&lt;br/&gt;POST /api/reports/manual&lt;br/&gt;ADR-0020"]
+        P["PDF upload<br/>POST /api/reports<br/>FR-01"]
+        J["DefectDojo JSON<br/>POST /api/findings/import<br/>FR-02"]
+        M["Manual entry<br/>POST /api/reports/manual<br/>ADR-0020"]
     end
 
-    P -->|"202 + background task"| PX["pdf.read_pdf&lt;br/&gt;pdfplumber → text + candidates"]
-    PX --> EX["extract.extract_report&lt;br/&gt;LLM, schema-validated gate"]
-    J --> MAP["ingest — schema mapping&lt;br/&gt;no LLM at all"]
+    P -->|"202 + background task"| PX["pdf.read_pdf<br/>pdfplumber → text + candidates"]
+    PX --> EX["extract.extract_report<br/>LLM, schema-validated gate"]
+    J --> MAP["ingest — schema mapping<br/>no LLM at all"]
     M --> MAP
 
-    EX --> ENR["CVSS + MITRE ATT&CK enrichment&lt;br/&gt;copied when stated, inferred + flagged when not&lt;br/&gt;FR-19, ADR-0037"]
+    EX --> ENR["CVSS + MITRE ATT&CK enrichment<br/>copied when stated, inferred + flagged when not<br/>FR-19, ADR-0037"]
     MAP --> ENR
-    ENR --> PERSIST["persist finding identity + version 1&lt;br/&gt;origin = extraction"]
+    ENR --> PERSIST["persist finding identity + version 1<br/>origin = extraction"]
     PERSIST --> READY(["report → ready"])
 
-    PX -.->|"PdfError / any exception"| FAIL(["report → failed&lt;br/&gt;error recorded"])
+    PX -.->|"PdfError / any exception"| FAIL(["report → failed<br/>error recorded"])
     EX -.-> FAIL
 
     style READY fill:#ebfbee,stroke:#2f9e44
@@ -60,7 +60,7 @@ sequenceDiagram
     actor U as Auditor (browser)
     participant SPA as Chat.tsx
     participant API as FastAPI /api
-    participant AG as reports_chat agent&lt;br/&gt;(Pydantic AI)
+    participant AG as reports_chat agent<br/>(Pydantic AI)
     participant DB as SQLite
 
     U->>SPA: "how many findings relate to SQLi?"
@@ -80,7 +80,7 @@ sequenceDiagram
     API-->>SPA: whole updated thread
     SPA-->>U: answer
 
-    Note over AG,DB: Every tool is read-only. No sandbox, no retest,&lt;br/&gt;no mutation is reachable from this agent.
+    Note over AG,DB: Every tool is read-only. No sandbox, no retest,<br/>no mutation is reachable from this agent.
 ```
 
 Only prose turns are stored; the agent re-queries through its tools on every
@@ -102,22 +102,22 @@ paths, different backend.
 
 ```mermaid
 flowchart TB
-    ENV["environment&lt;br/&gt;REVALID_LLM_MODEL · OLLAMA_BASE_URL"] -->|"seeds ONCE, on a fresh DB"| ROW
-    DEF["DEFAULT_MODEL&lt;br/&gt;ollama:qwen3.5:9b — local-first"] -->|"if env unset"| ROW
-    ROW[("settings row&lt;br/&gt;authoritative, runtime-editable")]
-    UI["Settings page&lt;br/&gt;PUT /api/settings"] -->|"overrides; env never wins again"| ROW
+    ENV["environment<br/>REVALID_LLM_MODEL · OLLAMA_BASE_URL"] -->|"seeds ONCE, on a fresh DB"| ROW
+    DEF["DEFAULT_MODEL<br/>ollama:qwen3.5:9b — local-first"] -->|"if env unset"| ROW
+    ROW[("settings row<br/>authoritative, runtime-editable")]
+    UI["Settings page<br/>PUT /api/settings"] -->|"overrides — env never wins again"| ROW
 
     ROW --> BM["llm.build_model(cfg)"]
     BM --> D1{"base_url set?"}
-    D1 -->|yes| OAI["OpenAIChatModel via OpenAIProvider&lt;br/&gt;any OpenAI-compatible host, incl. Ollama"]
+    D1 -->|yes| OAI["OpenAIChatModel via OpenAIProvider<br/>any OpenAI-compatible host, incl. Ollama"]
     D1 -->|no| D2{"anthropic + stored key?"}
     D2 -->|yes| ANT["AnthropicModel via AnthropicProvider"]
-    D2 -->|no| STR["bare 'provider:model' string&lt;br/&gt;Pydantic AI resolves from env"]
+    D2 -->|no| STR["bare 'provider:model' string<br/>Pydantic AI resolves from env"]
 
     OAI --> USERS
     ANT --> USERS
     STR --> USERS
-    USERS["every LLM-using component:&lt;br/&gt;extract · plan (goal) · retest_agent · reports_chat"]
+    USERS["every LLM-using component:<br/>extract · plan (goal) · retest_agent · reports_chat"]
 
     style ROW fill:#fff9db,stroke:#f08c00
     style USERS fill:#e7f5ff,stroke:#1971c2
@@ -135,18 +135,18 @@ network, no API key and no daemon.
 
 ```mermaid
 flowchart LR
-    ROOT["/"] --> OV["ReportsOverview&lt;br/&gt;corpus + risk profile"]
-    NEW["/new"] --> NR["NewReport&lt;br/&gt;upload / manual entry"]
-    RD["/reports/:id"] --> RDV["ReportDetail&lt;br/&gt;findings of one report"]
-    CH["/chat · /chat/:id"] --> CHV["Chat&lt;br/&gt;FR-18 corpus Q&A"]
-    SET["/settings"] --> SETV["Settings&lt;br/&gt;FR-13 backend + display"]
-    RS["/retest-sessions/:id"] --> RSV["RetestSessionRoute&lt;br/&gt;FR-17 console"]
+    ROOT["/"] --> OV["ReportsOverview<br/>corpus + risk profile"]
+    NEW["/new"] --> NR["NewReport<br/>upload / manual entry"]
+    RD["/reports/:id"] --> RDV["ReportDetail<br/>findings of one report"]
+    CH["/chat · /chat/:id"] --> CHV["Chat<br/>FR-18 corpus Q&A"]
+    SET["/settings"] --> SETV["Settings<br/>FR-13 backend + display"]
+    RS["/retest-sessions/:id"] --> RSV["RetestSessionRoute<br/>FR-17 console"]
 
-    F["/findings/:id"] --> FL["FindingLayout&lt;br/&gt;stage wizard shell"]
-    FL --> S1["/extract&lt;br/&gt;what was found"]
-    FL --> S2["/goal&lt;br/&gt;what to verify"]
-    FL --> S3["/retest&lt;br/&gt;the agentic session"]
-    FL --> S4["/verdict&lt;br/&gt;the determination"]
+    F["/findings/:id"] --> FL["FindingLayout<br/>stage wizard shell"]
+    FL --> S1["/extract<br/>what was found"]
+    FL --> S2["/goal<br/>what to verify"]
+    FL --> S3["/retest<br/>the agentic session"]
+    FL --> S4["/verdict<br/>the determination"]
 
     style FL fill:#fff9db,stroke:#f08c00
     style RSV fill:#e7f5ff,stroke:#1971c2
@@ -161,19 +161,19 @@ Both are read-only and touch no network.
 
 ```mermaid
 flowchart LR
-    T[("session_events&lt;br/&gt;append-only transcript")]
+    T[("session_events<br/>append-only transcript")]
     V[("verdicts")]
 
-    T --> AU["FR-10 audit&lt;br/&gt;GET /api/audit&lt;br/&gt;re-project authoritative event,&lt;br/&gt;diff against the stored row"]
+    T --> AU["FR-10 audit<br/>GET /api/audit<br/>re-project authoritative event,<br/>diff against the stored row"]
     V --> AU
-    AU --> R1["AuditReport&lt;br/&gt;{total, reproduced, discrepancies}"]
+    AU --> R1["AuditReport<br/>{total, reproduced, discrepancies}"]
 
-    V --> EXP["FR-12 export&lt;br/&gt;GET /api/export&lt;br/&gt;SCHEMA_VERSION 1.5"]
+    V --> EXP["FR-12 export<br/>GET /api/export<br/>SCHEMA_VERSION 1.5"]
     EXP --> R2["RunExport document"]
-    EXP --> SCH["GET /api/export/schema&lt;br/&gt;generated from the model —&lt;br/&gt;cannot drift from the document"]
+    EXP --> SCH["GET /api/export/schema<br/>generated from the model —<br/>cannot drift from the document"]
 
-    R2 --> EV["FR-15 evaluation&lt;br/&gt;make eval&lt;br/&gt;score against ground truth"]
-    EV --> R3["correct / inconclusive / wrong&lt;br/&gt;NFR-01 gate"]
+    R2 --> EV["FR-15 evaluation<br/>make eval<br/>score against ground truth"]
+    EV --> R3["correct / inconclusive / wrong<br/>NFR-01 gate"]
 
     style AU fill:#e7f5ff,stroke:#1971c2
     style EXP fill:#ebfbee,stroke:#2f9e44
