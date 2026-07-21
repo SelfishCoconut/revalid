@@ -190,7 +190,7 @@ sequenceDiagram
     API-->>U: 202 { report }
     API->>BG: schedule extraction
     BG->>BG: read_pdf → extract_report (FR-01/FR-03)
-    BG->>DB: insert findings (report_id); report → ready
+    BG->>DB: insert findings (report_id), report → ready
     loop poll until ready/failed
         U->>API: GET /api/reports/{id}
         API-->>U: { status, findings }

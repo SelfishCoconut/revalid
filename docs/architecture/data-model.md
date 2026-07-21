@@ -140,16 +140,16 @@ machine proposed. Every operator correction appends an `edit`.
 
 ```mermaid
 flowchart LR
-    A["v1 — extraction&lt;br/&gt;what the machine proposed"]
-    B["v2 — edit&lt;br/&gt;reason: wrong endpoint"]
-    C["v3 — edit&lt;br/&gt;reason: severity overstated"]
+    A["v1 — extraction<br/>what the machine proposed"]
+    B["v2 — edit<br/>reason: wrong endpoint"]
+    C["v3 — edit<br/>reason: severity overstated"]
     D(["current = highest version"])
     A --> B --> C --> D
 
-    F(["finding identity&lt;br/&gt;(findings row)"])
+    F(["finding identity<br/>(findings row)"])
     F --- A
     N1["note @ extract"] --> F
-    N2["note @ plan&lt;br/&gt;= the goal stage"] --> F
+    N2["note @ plan<br/>= the goal stage"] --> F
     N3["note @ retest"] --> F
     N4["note @ verdict"] --> F
 
@@ -232,12 +232,12 @@ flowchart TB
         S6["error"]
     end
 
-    A3 --> T[("session_events&lt;br/&gt;append-only, seq-ordered")]
+    A3 --> T[("session_events<br/>append-only, seq-ordered")]
     H5 --> T
     S2 --> T
-    T --> V["verdict row&lt;br/&gt;a derivation, not the source"]
-    T --> AU["FR-10 audit&lt;br/&gt;re-projects and diffs"]
-    T --> EX["FR-12 export&lt;br/&gt;schema 1.5"]
+    T --> V["verdict row<br/>a derivation, not the source"]
+    T --> AU["FR-10 audit<br/>re-projects and diffs"]
+    T --> EX["FR-12 export<br/>schema 1.5"]
 
     style T fill:#fff4e6,stroke:#e8590c
     style V fill:#ebfbee,stroke:#2f9e44
