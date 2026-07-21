@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system sanity uml docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests
@@ -146,10 +146,13 @@ sanity:
 	uv run vulture src --min-confidence 80 || true
 	uv run pylint --disable=all --enable=duplicate-code src || true
 
-# UML/package diagrams are regenerated from code on every build — never stale
-docs:
-	mkdir -p docs/reference/generated
-	uv run pyreverse -o mmd -d docs/reference/generated -p revalid src/revalid || true
+# UML diagrams are regenerated from code on every build — never stale. The layer
+# grouping, the pyreverse flags and the pruning all live in the script, so `make docs`
+# and the Pages workflow cannot drift apart. See scripts/gen_uml.py for the why (#158).
+uml:
+	uv run python scripts/gen_uml.py
+
+docs: uml
 	uv run mkdocs build --strict
 
 docs-serve:
