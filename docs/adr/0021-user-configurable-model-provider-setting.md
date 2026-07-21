@@ -1,8 +1,7 @@
 # 0021. User-configurable model/provider setting: DB-persisted, runtime-switchable, env-seeded
 
 Date: 2026-07-15
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-13 / ADR-0010 made the LLM backend model-agnostic through a single environment

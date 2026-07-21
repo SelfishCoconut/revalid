@@ -1,8 +1,7 @@
 # 0026. Operator manual commands (`!`) via discrete exec — not a shared PTY
 
 Date: 2026-07-16
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-17 Slice 2 (epic [#87](https://github.com/SelfishCoconut/revalid/issues/87),

@@ -181,7 +181,7 @@ non-lab targets, destructive exploitation.
 - **Acceptance criteria — Slice 8 (pause-and-ask)** (met — issue #117, ADR-0034 proposed, 2026-07-19):
   - [x] **AC23**: the session never *gives up*. Reaching the `max_steps` budget, or the agent concluding `inconclusive` (reinterpreted as "exhausted my options"), **pauses** the session in the non-terminal `needs_guidance` state with the sandbox kept alive and no verdict written; there is **no wall-clock budget**. The operator **keeps going** (`POST …/continue {extra_steps?}` — raises the budget and resumes, re-opening a held command's gate or re-running the agent with queued guidance) or **concludes** (`POST …/conclude {status, rationale}` — the only path that records `inconclusive`, `actor="operator"`); chat and terminal commands stay usable while paused, and the SPA shows a pause banner instead of a give-up one.
 - **Remaining**: **none for the core**; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
-- **Traces to**: epic #87, issue #88, ADR-0025 (proposed), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
+- **Traces to**: epic #87, issue #88, ADR-0025 (accepted), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ### FR-18 — Reports chat assistant (corpus Q&A)
 - **Priority**: Should · **Source**: change request 2026-07-20 (ADR-0036, issue #136)
@@ -191,7 +191,8 @@ non-lab targets, destructive exploitation.
   - [x] **AC2**: counts are grounded in read-only tools — `get_corpus_overview` (reports by status, findings by severity, latest verdict per finding), `search_findings` (exact `total` by keyword/severity/report even when the row list is capped), `list_all_reports`, `finding_detail` — so "how many …" answers are exact, not estimated. *(`src/revalid/reports_chat.py`.)*
   - [x] **AC3**: conversation threads are persisted (`chat_sessions`/`chat_messages`) and survive reload; the operator starts new threads and revisits or deletes prior ones (`GET`/`POST`/`DELETE /api/chats…`). *(FR-18 chosen persisted over ephemeral.)*
   - [x] **AC4**: read-only + backend-agnostic — no tool mutates data or starts a retest, and the agent is built from the FR-13 setting (`build_model`); backend tools + endpoints are unit/integration-tested with a Pydantic AI stand-in, the SPA view has vitest coverage, all CI gates green.
-- **Traces to**: issue #136, ADR-0036 (proposed), milestone M6.
+  - [x] **AC5** *(enhancement, ADR-0038, 2026-07-21)*: the reply **streams token-by-token** as it is generated. `POST /api/chats/{id}/messages/stream` returns Server-Sent Events (one `event: token` frame per delta, terminal `event: done`); the SPA grows the assistant bubble live and hands off to the persisted thread on completion. The endpoint is async (`stream_answer` over `agent.run_stream`); the blocking `…/messages` endpoint is kept as a fallback. *(`reports_chat.stream_answer`, `_register_chat_message_route`, `frontend/src/api/client.ts` `streamChatMessage`.)*
+- **Traces to**: issue #136, ADR-0036 (accepted) + ADR-0038 (proposed — streaming, not yet on `main`; issue #140), milestone M6.
 
 ### FR-19 — CVSS + MITRE ATT&CK enrichment of findings
 - **Priority**: Should · **Source**: change request 2026-07-20 (ADR-0037, issue #144)
@@ -201,7 +202,7 @@ non-lab targets, destructive exploitation.
   - [x] **AC2**: the fields persist as first-class columns and survive the FR-16 version round trip — not only inside the `raw` audit blob. *(`FindingVersionRecord.cvss`/`.mitre`, `from_domain`/`to_domain`.)*
   - [x] **AC3**: extraction + round-trip are unit-tested with a Pydantic AI stand-in (stated / inferred / absent), mypy `--strict`, ruff and coverage all green.
   - [ ] **AC4**: the `/api` finding payload and the SPA finding view surface the CVSS code and ATT&CK techniques with their `inferred` provenance, and the evaluation ground truth is tagged with them. *(Follow-up slice.)*
-- **Traces to**: issue #144, ADR-0037 (proposed), milestone M2.
+- **Traces to**: issue #144, ADR-0037 (accepted), milestone M2.
 
 ## 3. Non-functional requirements
 

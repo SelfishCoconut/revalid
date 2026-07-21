@@ -1,8 +1,7 @@
 # 0017. Evaluation harness: score an FR-12 export against title-keyed ground truth with conservative NFR-01 buckets
 
 Date: 2026-07-15
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-15 (Must) requires a harness that runs the evaluation set (the author's Juice

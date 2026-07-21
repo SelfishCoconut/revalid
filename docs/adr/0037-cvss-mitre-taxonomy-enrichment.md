@@ -2,8 +2,7 @@
 
 Date: 2026-07-20
 
-Status: proposed
-
+Status: accepted
 ## Context
 
 The state-of-the-art review (thesis §2.1.3) argues that a revalidation system

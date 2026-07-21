@@ -1,8 +1,7 @@
 # 0025. Agentic retest console (Slice 0)
 
 Date: 2026-07-16
-Status: proposed
-
+Status: accepted
 ## Context
 
 The retest engine has, since M1, followed one model: an LLM proposes a

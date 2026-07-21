@@ -1,8 +1,7 @@
 # 0020. Manual report entry: human ingestion bypassing the LLM
 
 Date: 2026-07-15
-Status: proposed
-
+Status: accepted
 ## Context
 
 The automatic ingestion path (FR-01 PDF segmentation → FR-03 LLM extraction) does

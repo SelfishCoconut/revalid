@@ -63,3 +63,27 @@ This amends only the merge step of ADR-0001; the rest of ADR-0001 stands.
 - **Authorship (§6): unchanged.** Ownership, attribution, and declaration
   obligations are untouched; only the *timing* of review moves from pre-merge
   block to post-merge async.
+
+## Update — 2026-07-21: the full per-change suite is now required
+
+Writing up the CI gate for the thesis (methodology §3.5) surfaced a mismatch:
+three per-change jobs ran on every PR but were **advisory** — `Frontend (lint,
+types, build, tests)`, `Bandit (SAST)` and `Gitleaks (history scan)`. With
+auto-merge, advisory means a red front-end build or a leaked secret could land
+on `main` unblocked.
+
+**Decision (Álvaro, 2026-07-21):** promote all three to required checks, so the
+required set is now the *complete* set of per-change jobs:
+
+```
+Lint & types · Unit tests + coverage · Integration tests
+Frontend (lint, types, build, tests) · pip-audit · Bandit (SAST)
+CodeQL · Gitleaks (history scan)
+```
+
+Rationale: the gate is load-bearing precisely because no human reviews before
+merge (see Consequences above), and the front end is now a first-class part of
+the product (FR-11), not a side artefact. Accepted cost: scanner false
+positives now block — as CodeQL's `incomplete-url-substring-sanitization` did on
+PR #89. The standing policy is unchanged and applies to all four scanners: fix
+the code or record an explicit, justified dismissal; never lower the threshold.

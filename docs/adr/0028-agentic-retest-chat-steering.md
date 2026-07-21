@@ -1,8 +1,7 @@
 # 0028. Agentic retest chat steering & Q&A (FR-17 Slice 4)
 
 Date: 2026-07-16
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-17 Slice 4 (epic [#87](https://github.com/SelfishCoconut/revalid/issues/87),

@@ -1,8 +1,7 @@
 # 0030. Agentic verdict integration + human adjudication (FR-17 Slice 6a)
 
 Date: 2026-07-18
-Status: proposed
-
+Status: accepted
 ## Context
 
 FR-17 Slice 6a (epic [#87](https://github.com/SelfishCoconut/revalid/issues/87),

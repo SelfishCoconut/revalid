@@ -1,8 +1,7 @@
 # 0032. The guiding plan becomes a user-owned goal (FR-17 Slice 6b-ii)
 
 Date: 2026-07-19
-Status: proposed
-
+Status: accepted
 ## Context
 
 The agentic console has a *guiding plan* (Slice 3, ADR-0027), but its ownership is
