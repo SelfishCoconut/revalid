@@ -8,10 +8,12 @@
 ## 1. Purpose & scope
 
 `revalid` automates the revalidation (retesting) of findings reported in penetration-test
-reports. It ingests a report, extracts each finding and its reproduction steps, derives an
-executable retest plan, executes it **only against authorized lab targets** after human
-approval, and produces an evidence-backed verdict per finding: **still-open / fixed /
-inconclusive**.
+reports. It ingests a report, extracts each finding and its reproduction steps, derives a
+retest **goal**, and drives an interactive, sandboxed agentic retest session **only against
+authorized lab targets** — the operator approves every command before it runs — producing an
+evidence-backed verdict per finding: **still-open / fixed / inconclusive**. (The original
+batch model — generate a typed HTTP plan, approve it, execute it — was replaced by the
+agentic console in FR-17 and deleted in ADR-0033.)
 
 **In scope (this TFG):** web-application vulnerabilities (XSS, SQLi, auth/access control,
 misconfiguration) against local lab targets (OWASP Juice Shop, DVWA); PDF and structured
@@ -19,7 +21,7 @@ misconfiguration) against local lab targets (OWASP Juice Shop, DVWA); PDF and st
 (FastAPI + React SPA, localhost only).
 
 **Out of scope (Won't, future work):** network/service and API-schema finding classes,
-browser-DOM-dependent probes beyond FR-14, multi-user operation, authentication,
+a dedicated browser-DOM probe executor (FR-14 — dropped, ADR-0033), multi-user operation, authentication,
 non-lab targets, destructive exploitation.
 
 ## 2. Functional requirements
@@ -87,14 +89,14 @@ non-lab targets, destructive exploitation.
 
 ### FR-09 — Evidence-backed verdicts
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The system shall assign per finding: **still-open / fixed / inconclusive**, each linked to the evidence that justifies it (payload used, matched indicator, request/response excerpts).
+- **Description**: The system shall assign per finding: **still-open / fixed / inconclusive**, each linked to the evidence that justifies it. *(Since ADR-0031/ADR-0033 that evidence is the tool-agnostic `AgenticEvidence` — the agent's explanation plus the real last command, its output excerpt, exit code and timing — not the retired HTTP request/response `Evidence`.)*
 - **Acceptance criteria**:
   - [ ] No verdict exists without linked evidence records.
   - [ ] Inconclusive verdicts always carry a machine-readable reason code.
 
 ### FR-10 — Full audit trail
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: Every system action (ingestion, extraction, plan generation, approval, each probe, verdict) shall be persisted with timestamp and actor (user / model / executor) such that any verdict can be re-derived from the trail alone.
+- **Description**: Every system action (ingestion, extraction, goal generation, every proposed/approved/rejected command and its output, each state change, verdict and adjudication) shall be persisted with timestamp and actor (operator / agent) such that any verdict can be re-derived from the trail alone. *(Since ADR-0033 the trail is the append-only `session_events` transcript plus `VerdictRecord.created_at`/`actor`; the batch plan/approval/probe records are gone.)*
 - **Acceptance criteria**:
   - [x] For any completed run, a re-derivation routine reproduces every verdict from stored data only (no re-execution). *(ADR-0033: `audit.rederive_run` re-derives each agentic verdict from its session transcript — the `verdict` event for the agent's record, the latest `verdict_adjudicated` for an operator record — and flags a stored row that has drifted; `GET /api/audit` + `make demo-audit`. `VerdictRecord` carries `created_at`/`actor` for the timestamp+actor trail. Supersedes ADR-0015's batch evidence-rederivation.)*
 
@@ -106,13 +108,13 @@ non-lab targets, destructive exploitation.
 
 ### FR-12 — Machine-readable results export
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The system shall export a complete run (findings, plans, verdicts, evidence references, metrics) as a versioned JSON document; the evaluation harness consumes this format.
+- **Description**: The system shall export a complete run (reports, findings, verdicts, evidence, metrics) as a versioned JSON document; the evaluation harness consumes this format. *(The batch `plans` section was dropped with the batch path — ADR-0033.)*
 - **Acceptance criteria**:
-  - [x] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it. — `src/revalid/export.py` (ADR-0016): `RunExport` (reports/findings/verdicts+`AgenticEvidence`/metrics), versioned by `SCHEMA_VERSION` (1.4 since ADR-0033 dropped the batch `plans`); schema generated from the model to `docs/reference/schemas/run-export.schema.json` (`make export-schema`, drift-tested); `GET /api/export` + `/api/export/schema`; `make demo-export` validates a run against the published schema.
+  - [x] Export validates against a published JSON schema; the evaluation harness (FR-15) runs on it. — `src/revalid/export.py` (ADR-0016): `RunExport` (reports/findings/verdicts+`AgenticEvidence`/metrics), versioned by `SCHEMA_VERSION` (**1.5** — 1.4 when ADR-0033 dropped the batch `plans`, 1.5 when ADR-0037 added `cvss`/`mitre`); schema generated from the model to `docs/reference/schemas/run-export.schema.json` (`make export-schema`, drift-tested); `GET /api/export` + `/api/export/schema`; `make demo-export` validates a run against the published schema.
 
 ### FR-13 — Pluggable LLM backends (Claude primary, local fallback)
 - **Priority**: Should · **Source**: interview 2026-06-11
-- **Description**: The LLM layer (Pydantic AI) shall be model-agnostic: Claude API as primary; a local model (Ollama) configurable as fallback and as comparison condition in the evaluation.
+- **Description**: The LLM layer (Pydantic AI) shall be model-agnostic: Claude API as primary; a local model (Ollama) configurable as fallback and as comparison condition in the evaluation. *(As shipped since ADR-0021 the roles are inverted by default — `llm.DEFAULT_MODEL` is `ollama:qwen3.5:9b` and Claude is selected from the settings view; the model-agnostic requirement itself is unchanged.)*
 - **Acceptance criteria**:
   - [ ] Switching backends is configuration-only (no code change); both run the extraction test suite.
   - [x] The active backend is a **user-editable, DB-persisted setting** changeable at runtime (env vars seed a fresh DB; the stored row is then authoritative). Model discovery + a connection test surface in the SPA `/settings` view. (ADR-0021)
@@ -213,11 +215,11 @@ non-lab targets, destructive exploitation.
 ### NFR-02 — Full reproducibility
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Target**: every verdict re-derivable from the persisted audit trail alone (FR-10 acceptance is the test). Model name/version, prompts, and parameters recorded per LLM call.
-- **Status**: verdict re-derivation **met** via ADR-0015 (`audit.rederive_run`). LLM model name is persisted (report/plan `raw`); per-LLM-call prompt/parameter capture is a tracked follow-up (does not affect verdict re-derivability).
+- **Status**: verdict re-derivation **met** via `audit.rederive_run` — now the agentic re-derivation of ADR-0033 (`_rederive_agentic`, from the session transcript); ADR-0015's batch evidence-rederivation is superseded. LLM model name is persisted (report/finding `raw`); per-LLM-call prompt/parameter capture is a tracked follow-up (does not affect verdict re-derivability). For agentic sessions the reproducibility claim is a replayable append-only transcript, not deterministic recomputation (ADR-0025).
 
 ### NFR-03 — Safety
 - **Priority**: Must · **Source**: interview 2026-06-11 + regulation
-- **Target**: non-destructive probes only; allowlist enforced at executor level (FR-06); web app binds to 127.0.0.1 exclusively; no auth in scope (single user, localhost — documented as future work).
+- **Target**: non-destructive verification only; target authorization enforced by the retest sandbox's Docker `--internal` network membership (FR-06 as re-mechanised by ADR-0025/ADR-0033 — the HTTP `allowlist.py` guard is deleted); web app binds to 127.0.0.1 exclusively; no auth in scope (single user, localhost — documented as future work).
 
 ### NFR-04 — Data protection (Reglamento TFG 2026 §6)
 - **Priority**: Must · **Source**: regulation

@@ -1,0 +1,58 @@
+/* revalid docs — readability tuning.
+   Authored: safe to edit. Nothing here is generated. */
+
+/* The architecture pages are diagram- and table-heavy; Material's default
+   61rem column squeezes C4 and sequence diagrams into illegibility. */
+.md-grid {
+  max-width: 78rem;
+}
+
+/* Mermaid: render each diagram at its NATURAL size and let the block scroll
+   sideways, instead of scaling the whole SVG down to the text column (which is
+   what made labels unreadable). `useMaxWidth: false` in mkdocs.yml stops
+   mermaid emitting the inline max-width; this removes any leftover clamp. */
+.mermaid {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 1.4rem 0;
+  padding: 1rem 0.6rem 0.8rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.3rem;
+  background: var(--md-default-bg-color);
+  text-align: center;
+}
+
+.mermaid svg {
+  max-width: none !important;
+  height: auto;
+}
+
+/* A wide diagram scrolls; make that discoverable rather than a surprise. */
+.mermaid::-webkit-scrollbar {
+  height: 0.5rem;
+}
+
+.mermaid::-webkit-scrollbar-thumb {
+  background: var(--md-default-fg-color--lighter);
+  border-radius: 0.25rem;
+}
+
+/* Diagram captions: a short italic line under a diagram, written as a
+   blockquote immediately after it. */
+.mermaid + blockquote {
+  margin-top: -0.6rem;
+  border-left: none;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Wide reference tables (the ADR index, endpoint tables) should scroll too
+   rather than crushing their columns. */
+.md-typeset__table {
+  min-width: 100%;
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
