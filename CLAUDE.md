@@ -15,7 +15,7 @@ AI-Driven System for the Revalidation of Pentest Findings. Bachelor's thesis (TF
 
 - There is **no enforced §6 data policy** in this repo — data handling is Álvaro's own responsibility (ADR-0006). The regulatory §6 obligation still applies externally; he upholds it directly. Test data in `tests/data/` is synthetic / lab-target derived.
 - The `protect-private-data` secret-file guard hook was **removed** (2026-07-14, see the ADR-0006 update) under the single-user threat model (ADR-0008): secret hygiene is Álvaro's direct responsibility, not an enforced hook. `data/private/` stays gitignored.
-- Retests only ever hit **allowlisted** lab systems — enforced in code by the FR-06 allowlist, not by policy (see `retest-lab` skill).
+- Retests are confined by **Docker network isolation**, not by a target allowlist (`allowlist.py` was deleted in ADR-0033). Each session gets an `internal=True` bridge network — no gateway, no route off it — with the lab container attached as its only other member. Command *content* is never inspected because it cannot matter: there is nowhere else to reach. Consequences to keep in mind: the only reachable target is the container named `revalid-juice-shop` (hardcoded), public IPs are unreachable by construction, and the host's own `localhost` is unreachable too (inside the sandbox, `localhost` is the sandbox). See the `retest-lab` skill and ADR-0025.
 
 ## Coding standards
 

@@ -287,10 +287,14 @@ regulation (*Reglamento de Trabajos Fin de Grado*, ESII, Feb 2026, §6):
 > [!WARNING]
 > `revalid` retests **only explicitly authorised targets** — by default, local lab containers such as
 > OWASP Juice Shop. Authorisation is enforced in code, not in policy: the sandbox sits on an isolated
-> Docker `--internal` network with only the allowlisted target attached, so it is *physically unable*
-> to reach the host, the internet, or any other system. Every agent command additionally passes a
-> human approval gate. This is a revalidation tool for findings from an authorised audit — never an
-> attack tool.
+> Docker `--internal` network with only the authorised target attached, so it has *no route* to the
+> host, the internet, or any other system. Every agent command additionally passes a human approval
+> gate. This is a revalidation tool for findings from an authorised audit — never an attack tool.
+>
+> Two limits of that boundary, stated plainly (see the ADR-0025 update of 2026-07-22): the lock
+> confines *the agent*, not code the agent successfully executes **on the target**; and on hosts whose
+> resolver is a loopback stub (systemd-resolved), Docker still proxies DNS out of the sandbox. Public
+> IPs are not a supported target — the reachable set is the lab container, by construction.
 
 ## 📜 License
 

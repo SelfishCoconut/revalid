@@ -59,8 +59,10 @@ curl -s http://127.0.0.1:8000/api/reports        # -> []
 
 Uploading a PDF, extracting findings, and running a real retest needs:
 
-- **Lab targets up**: `make lab-up` (see the `retest-lab` skill). Retests only
-  ever hit allowlisted lab systems (FR-06).
+- **Lab targets up**: `make lab-up`, plus `make sandbox-image` for the agent's
+  toolbox (see the `retest-lab` skill). Retests reach only what is attached to
+  the session's internal Docker network — in practice the lab container alone
+  (FR-06 is network membership, not a target allowlist).
 - **An LLM backend** for extraction/planning: either `ANTHROPIC_API_KEY` set,
   or `REVALID_LLM_MODEL=ollama:<model>` with a local Ollama server running.
   Without one, the extract/plan demos fall back to an offline stand-in model.
