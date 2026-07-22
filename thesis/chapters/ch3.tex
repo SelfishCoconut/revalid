@@ -430,7 +430,7 @@ code.
 \hline
 \rowcolor{tema!10}
 \bft{Workflow} & \bft{Trigger} & \bft{Checks performed} & \bft{Blocks merge} \\ \hline
-CI & every pull request, push to \texttt{main} & \emph{Lint \& types}: ruff lint and format check, mypy \texttt{-{}-strict}, xenon complexity ceiling. \emph{Unit tests + coverage}: pytest with coverage $\geq$~80\%. \emph{Integration tests}: pytest, marker \texttt{integration}. \emph{Front end}: ESLint, TypeScript type check, production build, Vitest with coverage. \emph{Offline demos}: every \texttt{make demo-*} target run headlessly. \emph{Docs build}: UML regenerated, \texttt{mkdocs build -{}-strict} & 4 of 6 jobs \\ \hline
+CI & every pull request, push to \texttt{main} & \emph{Lint \& types}: ruff lint and format check, mypy \texttt{-{}-strict}, xenon complexity ceiling. \emph{Unit tests + coverage}: pytest with coverage $\geq$~80\%. \emph{Integration tests}: pytest, marker \texttt{integration}. \emph{Front end}: ESLint, TypeScript type check, production build, Vitest with coverage. \emph{Offline demos}: every \texttt{make demo-*} target run headlessly. \emph{Docs build}: UML regenerated, \texttt{mkdocs build -{}-strict} & yes (6 jobs) \\ \hline
 Security & every pull request, push to \texttt{main}, weekly & \texttt{pip-audit} (known vulnerabilities in the locked dependency set, extras included), Bandit (SAST over \texttt{src} and \texttt{scripts}, medium severity and above), CodeQL (semantic data-flow analysis, Python and TypeScript sources), Gitleaks (secret scan over the full git history) & yes (4 jobs) \\ \hline
 System tests & nightly, on demand & Dockerised lab targets brought up, \texttt{pytest -m system} end-to-end, teardown always & no \\ \hline
 Sanity metrics & weekly, on demand & radon complexity, vulture dead code, pylint duplication; published as a report artefact & no \\ \hline
@@ -440,12 +440,11 @@ Kanban board & issue and pull-request events, CI completion & Moves the board ca
 \end{tabular}
 \end{center}
 \caption[The seven continuous-integration workflows]{The seven GitHub~Actions
-workflows and what each enforces. Ten jobs run on every change. ADR-0003 requires
-the \emph{complete} per-change suite to gate the merge; at the time of writing the
-two jobs added last --- the offline demonstrations and the documentation build ---
-report but do not yet block, because branch protection still lists the eight
-earlier contexts. That is a configuration gap left by the change that added them,
-recorded here rather than presented as a design choice. The slow and longitudinal checks run on a
+workflows and what each enforces. All ten jobs of the two per-change workflows ---
+CI and Security --- are declared required in branch protection and therefore block
+the merge, which is what ADR-0003 asks of the gate: the required set is the
+\emph{complete} set of per-change jobs, so no check can quietly become advisory.
+The slow and longitudinal checks run on a
 schedule instead, so that a flaky lab container or a weekly metrics run never stops
 an unrelated change; the last three workflows perform no verification (``n/a'') but
 keep the project's published artefacts and its board in step with the code.}
