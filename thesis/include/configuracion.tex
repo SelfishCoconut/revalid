@@ -106,13 +106,9 @@
 % Enlaces y colores
 % -------------------------------
 \usepackage{hyperref}
-%\hypersetup{
-%    colorlinks,
-%    citecolor=black,
-%    filecolor=black,
-%    linkcolor=black,
-%    urlcolor=black
-%}
+% Production-ready links: clickable but with no coloured boxes or borders around
+% citations, cross-references or URLs (hidelinks removes both the frame and the tint).
+\hypersetup{hidelinks}
 
 % -------------------------------
 % Gestión de elementos flotantes
@@ -259,12 +255,6 @@
 \newcommand{\pcite}{\bfr{\large[?]}\,} % Cita pendiente: [?] en rojo y negrita.
 \newcommand{\ps}{\bfr{\huge[--}\,} % Pricipio de un bloque en sucio
 \newcommand{\fs}{\bfr{\huge--]}\,} % Fin de un bloque en sucio.
-
-% Notas
-\usepackage[textsize=tiny,spanish,shadow,textwidth=2cm]{todonotes}
-
-% Para generar textos "random"
-\usepackage{lipsum}
 
 
 % -------------------------------

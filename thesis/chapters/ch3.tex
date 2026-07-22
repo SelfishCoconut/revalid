@@ -11,7 +11,8 @@ process (Section~\ref{sec:ai-model}); the sequence of earlier attempts and the
 lessons that led to the final approach (Section~\ref{sec:evolution}); the software
 process itself, a continuous-flow adaptation of Agile to a solo developer working
 with an AI assistant (Section~\ref{sec:process}); the technologies and tooling used
-(Section~\ref{sec:tech}); and, as the ESII regulation requires, an explicit
+(Section~\ref{sec:tech}); the automated quality gate through which every change must
+pass (Section~\ref{sec:ci}); and, as the ESII regulation requires, an explicit
 declaration of the use of artificial-intelligence tools
 (Section~\ref{sec:ai-declaration}).
 
@@ -28,16 +29,12 @@ judgement and architecture, not on typing code.
 
 The evidence for this model is the decision trail. Every significant choice was
 recorded as an Architecture Decision Record (ADR) in the lightweight MADR format
-\cite{madr, nygard_adr}; the repository contains \textbf{thirty-five} such records,
+\cite{madr, nygard_adr}; the repository contains \textbf{thirty-eight} such records,
 each stating a context, the options considered, and the decision with its
 consequences. Requirements were captured in a Software Requirements Specification
-following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. Because these
-artefacts are authored by the developer and precede the code, they demonstrate that
-the intellectual work --- what to build and why --- remained a human responsibility,
-with the assistant supplying the implementation. It also reflects a disciplined
-approach to AI-assisted development: reviewing every change before accepting it,
-decomposing work into small increments, letting the assistant run the tests under
-supervision, and governing it with a persistent rules file.
+following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. These artefacts ---
+the ADRs and the requirements specification --- were authored by the developer and
+precede the code they govern.
 
 \section{Evolution of the approach}
 \label{sec:evolution}
@@ -77,13 +74,13 @@ attempt played.
 \emph{Adeptus} (hand-crafted) & AI-powered pentesting platform & Ad-hoc prompting; no skills, hooks or ADRs & First attempt; showed that unstructured AI use does not scale. \\ \hline
 \emph{Adeptus} (workbench) & Multi-user pentest workbench + knowledge graph & Heavy: 13 skills, 7 role-agents, 7 hooks, slice-based flow & Peak tooling; revealed that ceremony had outgrown the task. \\ \hline
 \emph{Retester} & Report-driven vulnerability \emph{revalidation} & Focused; Pydantic AI, swappable Claude/Ollama & The pivot from pentesting to retesting. \\ \hline
-\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & Right-sized: 9 skills, 3 agents, 3 hooks, 35 ADRs, Kanban + CI & The disciplined, evaluable TFG. \\ \hline
+\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 38 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
 \end{tabular}
 \end{center}
 \caption[Evolution of the project across earlier attempts]{Evolution from the
 \emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool. The
-decisive lessons were to narrow the scope from pentesting to revalidation, and to
-right-size the AI-workflow ceremony to the value of a single-developer thesis.}
+decisive lessons were to narrow the scope from pentesting to revalidation, and to match
+the AI-workflow ceremony to that narrower scope.}
 \label{tab:evolution}
 \end{table}
 
@@ -100,11 +97,12 @@ project.
 
 A second lesson concerned tooling. The workbench iteration of \emph{Adeptus} had
 accumulated thirteen custom assistant skills, seven role-playing agents and a
-seven-hook automation layer; this was more process than a solo thesis could justify.
-The present project deliberately \emph{reduced} that apparatus to nine
-task-specific skills, three quality-oriented agents and three hooks, and made the
-reduction an explicit, recorded decision (ADR-0004, ``ceremony scales with thesis
-value''), trading machinery for discipline.
+seven-hook automation layer, built for the broad, multi-user platform it was then
+pursuing. Once the scope narrowed to a single-operator retesting tool, much of that
+apparatus fell outside what the task required. The present project deliberately
+\emph{reduced} it to nine task-specific skills, three quality-oriented agents and three
+hooks, and made the reduction an explicit, recorded decision (ADR-0004), trading
+machinery for discipline.
 
 \section{Software process: Kanban for solo, AI-paced development}
 \label{sec:process}
@@ -152,9 +150,10 @@ to a requirement. Second, every commit follows the Conventional Commits conventi
 \cite{conventionalcommits}, and every AI-assisted commit carries a
 \texttt{Co-Authored-By: Claude} trailer, making AI involvement auditable from the
 git history alone. Third, integration is governed by a \emph{CI-gated auto-merge}
-(ADR-0003): a pull request merges only once the required checks are green, after
-which the author reviews it asynchronously and retains full revert authority.
-Figure~\ref{fig:pipeline} shows this pipeline.
+(ADR-0003): a pull request merges only once the required checks are green ---
+the gate detailed in Section~\ref{sec:ci} --- after which the author reviews it
+asynchronously and retains full revert authority. Figure~\ref{fig:pipeline} shows
+this pipeline.
 
 \begin{figure}[htb]
 \centering
@@ -167,7 +166,7 @@ Figure~\ref{fig:pipeline} shows this pipeline.
 \node[stage] (issue) at (0,0)    {\bft{Issue}\\board card (FR-xx)};
 \node[stage] (branch) at (2.7,0) {\bft{Branch}\\feature branch};
 \node[stage] (pr) at (5.4,0)     {\bft{Pull request}\\Closes \#n};
-\node[gate] (ci) at (8.1,0)      {\bft{CI gate}\\mypy, ruff, tests, coverage, xenon};
+\node[gate] (ci) at (8.1,0)      {\bft{CI gate}\\lint, types, tests, coverage, security scans};
 \node[stage] (merge) at (10.8,0) {\bft{Auto-merge}\\squash};
 \node[stage] (val) at (13.5,0)   {\bft{Validate}\\author, async};
 \foreach \a/\b in {issue/branch, branch/pr, pr/ci, ci/merge, merge/val} {\draw[->, gris50, thick] (\a) -- (\b);}
@@ -182,9 +181,9 @@ squash auto-merge, and may schedule follow-up work.}
 
 Two further practices keep an AI-driven codebase healthy over time. The Definition
 of Done requires code, tests, docstrings and any affected diagrams to be updated
-together; and a longitudinal quality audit is run before every milestone release to
-catch the pathologies specific to AI-assisted development --- duplication, dead code,
-complexity creep and pattern drift --- which per-change review cannot see.
+together; and a longitudinal quality audit, fed by the scheduled metrics workflow of
+Section~\ref{sec:ci}, is run before every milestone release to catch the pathologies
+specific to AI-assisted development that per-change review cannot see.
 
 \section{Technologies and tooling}
 \label{sec:tech}
@@ -192,14 +191,10 @@ complexity creep and pattern drift --- which per-change review cannot see.
 \subsection{Application stack}
 \label{subsec:stack}
 
-The system is a local, single-process web application. Table~\ref{tab:stack}
-summarises its stack. The backend is written in Python~3.12, managed with the
-\texttt{uv} toolchain, and exposes a FastAPI service that also serves the
-single-page front end. The language-model layer is built on Pydantic~AI, which
-provides the model-agnostic abstraction that lets the same code run against the
-Claude API or a local Ollama model with only a configuration change. The retest
-agent executes its commands inside an egress-locked Docker sandbox, and the front end
-is a React single-page application built with Vite and Tailwind.
+The system is a local, single-process web application; Table~\ref{tab:stack} maps
+its stack at a glance. The paragraphs that follow explain each significant choice ---
+what the technology is and why it was adopted for this project --- grouped by the
+role it plays.
 
 \begin{table}[htb]
 \footnotesize
@@ -223,51 +218,312 @@ cloud and a local provider without code changes.}
 \label{tab:stack}
 \end{table}
 
+\paragraph{Language and project tooling.} The backend is written in Python~3.12, a
+high-level, dynamically typed language chosen because the libraries this system
+depends on --- the agent framework, and the PDF, HTTP and web libraries --- are
+Python-native, and because the language's mature type annotations make the strict
+static checking described below possible. Dependencies, virtual environments and the
+package build are all managed by \texttt{uv}, a fast Rust-based Python project
+manager, adopted because it resolves and installs the full dependency set far faster
+than the traditional \texttt{pip}/\texttt{venv} tools, records every version in a
+single lockfile so that continuous integration is reproducible, and replaces several
+separate utilities with one.
+
+\paragraph{Web service.} The HTTP layer is FastAPI, an asynchronous web framework
+that derives request validation and interactive API documentation directly from
+Python type hints. It was chosen for that type-first design --- which removes a whole
+class of hand-written validation --- and because a single FastAPI process both
+exposes the \texttt{/api} backend and serves the compiled front end, exactly what a
+single-operator local tool needs. It runs on Uvicorn, the standard ASGI server for
+the framework, with the \texttt{websockets} library added so a retest session can
+stream the agent's live output to the browser over a WebSocket; report uploads arrive
+as multipart form data, parsed by \texttt{python-multipart}.
+
+\paragraph{Data and validation.} Pydantic (v2) is a data-validation library that
+enforces typed schemas at runtime from a compiled core. It underpins the system's
+``validate before you persist'' rule: every finding the language model returns, and
+every request the API receives, is parsed into a Pydantic model, so malformed or
+hallucinated data is rejected at the boundary instead of silently corrupting a
+verdict; where a contract is expressed as a raw JSON Schema rather than a Python
+model, \texttt{jsonschema} checks against it. Durable state --- reports, findings,
+retest sessions and their verdicts --- is stored through SQLAlchemy~2.0, an
+object-relational mapper, onto SQLite, a zero-configuration database held in a single
+file. The pair was chosen so that the operator needs no separate database server,
+while the mapper keeps the door open to a heavier database later without rewriting
+the data-access code.
+
+\paragraph{Report ingestion.} Penetration-test reports arrive as PDFs written for
+human readers. The \texttt{pdfplumber} library extracts their text while preserving
+layout and table structure; it was preferred over lighter extractors because the
+multi-column, table-heavy layout of real reports otherwise scrambles the very
+reproduction steps the system must read.
+
+\paragraph{The language-model layer.} The heart of the system is Pydantic~AI, a
+model-agnostic framework for building tool-using language-model agents with typed,
+validated outputs. Two of its properties map directly onto the design. Its provider
+abstraction lets the identical extraction and retest code run against the hosted
+Claude API or a locally served model with only a configuration change --- which both
+keeps sensitive reports on-premises when required and provides the local-versus-cloud
+comparison the evaluation uses. Its structured-output support forces a model's
+response to conform to a Pydantic schema, which is exactly the schema-constrained,
+validated generation that Chapter~\ref{ch:sota} argued is needed to stop a
+hallucinated answer from becoming a verdict; its in-memory test models also let the
+agent be unit-tested without a network call. The primary reasoning engine is
+Anthropic's Claude family, used for its instruction-following and tool-use
+reliability across the multi-step retest loop; the local alternative is Ollama
+serving open-weight models of the \texttt{qwen} family through an OpenAI-compatible
+API, included both as a privacy-preserving deployment option and as a comparison
+condition.
+
+\paragraph{Sandboxed execution.} Every command the retest agent is approved to run
+executes inside an egress-locked Docker container, driven from the backend through
+the \texttt{docker} SDK. Containerisation is how the safety argument is
+\emph{enforced} rather than merely stated: the agent is confined to the authorised
+target and cannot reach the wider network. HTTP-level probes use \texttt{httpx}, a
+modern asynchronous HTTP client; findings that can only be reproduced in a real
+browser --- a DOM-based cross-site-scripting flaw, for instance --- are handled by
+Playwright, a browser-automation library kept as an optional extra so that HTTP-only
+retests carry no browser dependency.
+
+\paragraph{Front end.} The interface is a single-page application built with
+React~19, a component-based UI library, and written in TypeScript, so the type
+discipline of the backend continues into the browser. Vite is the build tool and
+development server, chosen for its near-instant hot reload and the optimised
+production bundle that FastAPI then serves; Tailwind~CSS~4 is the utility-first
+styling system used to build the application's bespoke interface without maintaining
+a parallel stylesheet. TanStack React~Query manages server state on the client ---
+fetching, caching and synchronising the backend's data --- so the interface stays
+consistent with the API without hand-written loading and error handling, and React
+Router handles navigation between views. The live command-and-output stream of a
+gated retest is rendered by xterm.js, a terminal-emulator component that gives the
+operator a faithful view of what the agent runs; the interface typefaces (IBM~Plex)
+are self-hosted to avoid a third-party font dependency.
+
 \subsection{Quality assurance}
 \label{subsec:qa}
 
-Quality is enforced mechanically rather than by convention. The continuous-integration
-gate requires the strict type checker (mypy) and the linter/formatter (ruff) to pass,
-test coverage to stay at or above 80\% of the source, and the cyclomatic-complexity
-checker (xenon) to reject any function above its threshold --- a function that trips
-the gate is refactored, never suppressed. Tests follow the classic pyramid: fast
-unit tests with no input/output (language-model calls stubbed with Pydantic~AI's
-test models), integration tests that wire real components together, and a small
-number of dockerised system tests against the lab targets.
+Quality is enforced mechanically rather than by convention, and behind each gate is
+a specific tool.
+
+\paragraph{Static analysis and style.} \texttt{ruff} is a very fast Rust-based linter
+and formatter that consolidates the roles of many older tools; here it enforces
+formatting, import order, code modernisation, common-bug patterns, the \texttt{bandit}
+security rules (pertinent for a security tool), a complexity ceiling and Google-style
+docstrings --- the last because those docstrings feed the generated API documentation
+--- in a single pass. \texttt{mypy} is the static type checker, run in
+\texttt{-{}-strict} mode so that every function is fully typed and type errors are
+caught before runtime. \texttt{xenon}, over the \texttt{radon} metrics library, fails
+the build whenever a function exceeds the agreed cyclomatic-complexity ceiling ---
+what makes the ``refactor, don't suppress'' rule mechanical rather than aspirational.
+Three secondary tools --- \texttt{vulture} for dead code, \texttt{pylint} for deeper
+analysis and \texttt{pydeps} for import-dependency graphs --- feed the pre-milestone
+\emph{codebase-sanity} audit against the duplication and drift that AI-assisted
+development tends to accumulate, and \texttt{pre-commit} runs the quickest checks as a
+git hook so problems are caught before they are committed.
+
+\paragraph{Testing.} The backend suite runs on \texttt{pytest} with \texttt{pytest-cov}
+measuring coverage, which the CI gate holds at or above 80\% of \texttt{src/}. Tests
+follow the classic pyramid: fast unit tests with no input/output (language-model
+calls stubbed with Pydantic~AI's test models), integration tests that wire real
+components together, and a small number of dockerised system tests against the lab
+targets. On the front end, Vitest --- the Vite-native test runner, with the
+\texttt{v8} coverage provider --- drives component tests written against a
+\texttt{jsdom} in-memory DOM with Testing~Library, which queries components the way a
+user would, while ESLint enforces JavaScript/TypeScript quality and React-hooks
+correctness.
 
 \subsection{The AI development environment}
 \label{subsec:ai-env}
 
-Beyond the application stack, the project relies on a bespoke development environment
-built around Claude Code, the AI assistant. Repeated tasks are encoded as nine
-project-specific \emph{skills} (for example, creating an ADR, adding a requirement,
-opening a board-ready issue, or building the thesis), and quality checks as three
-\emph{agents} (a whole-repository sanity auditor, a documentation curator, and a
-thesis reviewer). Three \emph{hooks} automate governance directly in the editing
-loop: one reminds the developer to open a board issue before coding, one formats
-code on every edit, and one logs each assistant session to the public audit trail.
-The assistant is further extended with a set of enabled plugins (among them GitHub,
-Semgrep security scanning, Pydantic~AI support and up-to-date library documentation),
-and the whole workflow is automated through seven GitHub Actions workflows: the
-Kanban board automation, the CI gate, the documentation build, the pre-milestone
-sanity audit, the security scan, the nightly system tests against the lab, and the
-thesis build.
+Beyond the application stack, the project was built inside a bespoke development
+environment centred on Claude~Code, Anthropic's agentic command-line assistant.
+Repeated tasks are encoded as nine project-specific \emph{skills} (for example,
+creating an ADR, adding a requirement, opening a board-ready issue, or building the
+thesis), and quality checks as three \emph{agents} (a whole-repository sanity
+auditor, a documentation curator and a thesis reviewer); three \emph{hooks} automate
+governance directly in the editing loop --- one reminds the developer to open a board
+issue before coding, one formats code on every edit, and one logs each assistant
+session to the public audit trail. The assistant is extended with enabled plugins,
+among them GitHub integration, up-to-date library documentation, Pydantic~AI support
+and Semgrep --- a static application-security-testing scanner that flags vulnerable
+code patterns as they are written, appropriate diligence for a tool that is itself
+about security. What the assistant produces in that environment is then checked by
+the automated gate described in Section~\ref{sec:ci}.
 
 \subsection{Documentation as code}
 \label{subsec:docs}
 
 The project treats documentation as code: nothing that can be generated is
-maintained by hand. The API reference is generated from the source docstrings with
-mkdocstrings, and the UML class and package diagrams are generated from the code with
-pyreverse, so neither can drift from the implementation. The architecture (a C4
-model) and the sequence diagrams are authored in Mermaid inside the Markdown sources
-and, by rule, updated in the same change as the code they describe. The whole set is
-assembled into a static site with MkDocs --- built under a strict mode that fails on
-any broken reference --- and published to GitHub Pages by a dedicated workflow, so
-the public documentation always reflects the merged code. Documentation is a
-first-class part of the Definition of Done: a change is complete only when its
-docstrings, generated pages and affected diagrams are updated together, and the
-\emph{doc-curator} agent audits for documentation drift as part of review.
+maintained by hand. MkDocs (with the Material theme) is the static-site generator
+that assembles the documentation from Markdown, run in a strict mode that fails the
+build on any broken cross-reference. Into it, \texttt{mkdocstrings} pulls the API
+reference straight from the source docstrings and \texttt{pyreverse} generates the
+UML class and package diagrams from the code itself, so neither can drift from the
+implementation. The architecture (a C4 model) and the sequence diagrams are authored
+as Mermaid --- a text-based diagramming language --- embedded in the Markdown and
+rendered by a Mermaid plugin; by rule they are updated in the same change as the code
+they describe. A small supporting role falls to \texttt{reportlab}, a PDF-generation
+library the test-fixture generator uses to synthesise sample report PDFs for the
+suite. Documentation is a first-class
+part of the Definition of Done: a change is complete only when its docstrings,
+generated pages and affected diagrams are updated together, and the
+\emph{doc-curator} agent audits for drift as part of review.
+
+\section{Continuous integration: the automated quality gate}
+\label{sec:ci}
+
+The tools of Section~\ref{subsec:qa} are only as good as the discipline with which
+they are run, and a developer working alone --- with an assistant that writes most of
+the code --- cannot rely on running them by hand. This project therefore follows the
+classical continuous-integration practice \cite{fowler_ci, humble_farley}: every
+change is verified automatically, on a build machine, against a reproducible
+environment, and the verification is what authorises the merge. The motivation is
+sharper here than in a conventional project. There is no second developer to review a
+diff, and machine-written code fails in a characteristic way --- it is syntactically
+clean, idiomatic and plausible on reading, while being wrong about a type, an edge
+case or a dependency. A gate that executes the code is a far better detector of that
+failure mode than a careful read, and it is the mechanism by which the author's
+review authority stays practical instead of nominal.
+
+The automation runs on GitHub~Actions, the repository's built-in continuous-integration
+service, through the seven workflows summarised in Table~\ref{tab:workflows}. They fall
+into three groups by the role each plays: the per-change gates that authorise a merge,
+the scheduled audits that catch what no single change can reveal, and the workflows
+that keep the project's published artefacts, and its record of work, in step with the
+code.
+
+\begin{table}[!htb]
+\footnotesize
+\renewcommand{\arraystretch}{1.3}
+\begin{center}
+\begin{tabular}{|L{2.2cm}|L{2.6cm}|L{6.6cm}|L{1.3cm}|}
+\hline
+\rowcolor{tema!10}
+\bft{Workflow} & \bft{Trigger} & \bft{Checks performed} & \bft{Blocks merge} \\ \hline
+CI & every pull request, push to \texttt{main} & \emph{Lint \& types}: ruff lint and format check, mypy \texttt{-{}-strict}, xenon complexity ceiling. \emph{Unit tests + coverage}: pytest with coverage $\geq$~80\%. \emph{Integration tests}: pytest, marker \texttt{integration}. \emph{Front end}: ESLint, TypeScript type check, production build, Vitest with coverage & yes (4 jobs) \\ \hline
+Security & every pull request, push to \texttt{main}, weekly & \texttt{pip-audit} (known vulnerabilities in the locked dependency set), Bandit (SAST over \texttt{src}, medium severity and above), CodeQL (semantic data-flow analysis, Python sources), Gitleaks (secret scan over the full git history) & yes (4 jobs) \\ \hline
+System tests & nightly, on demand & Dockerised lab targets brought up, \texttt{pytest -m system} end-to-end, teardown always & no \\ \hline
+Sanity metrics & weekly, on demand & radon complexity, vulture dead code, pylint duplication; published as a report artefact & no \\ \hline
+Docs & push to \texttt{main}, on demand & UML regenerated with pyreverse, \texttt{mkdocs build -{}-strict}, deploy to GitHub~Pages & n/a \\ \hline
+Thesis PDF & any push touching \texttt{thesis/}, on demand & XeLaTeX build of the memoir, PDF artefact & n/a \\ \hline
+Kanban board & issue and pull-request events, CI completion & Moves the board card: Backlog $\rightarrow$ In~Progress $\rightarrow$ Verify $\rightarrow$ Done & n/a \\ \hline
+\end{tabular}
+\end{center}
+\caption[The seven continuous-integration workflows]{The seven GitHub~Actions
+workflows and what each enforces. All eight jobs of the two per-change workflows ---
+CI and Security --- are required checks and therefore block the merge. The slow and
+longitudinal checks run on a schedule instead, so that a flaky lab container or a
+weekly metrics run never stops an unrelated change; the last three workflows perform
+no verification (``n/a'') but keep the project's published artefacts and its board in
+step with the code.}
+\label{tab:workflows}
+\end{table}
+
+\paragraph{The per-change gate.} The CI workflow runs four independent jobs: static
+quality (style, strict types, the complexity ceiling), unit tests with the coverage
+floor, integration tests, and the complete front-end pipeline of lint, type check,
+production build and component tests. Because the jobs are separate, a failure is
+attributed to a specific concern rather than to ``the build''; because they run in
+parallel, the whole gate completes in about the time of its slowest job. Two further
+details make the result trustworthy. The environment is reproducible --- dependencies
+are installed from the lockfile with \texttt{uv sync -{}-locked} and \texttt{npm ci},
+so the build machine resolves exactly the versions the developer used, and a green run
+means the same thing tomorrow as today. The gate is also enforced at the point of
+integration rather than by convention: which checks are \emph{required} is a recorded
+decision (ADR-0003) configured in the repository's branch protection, and auto-merge
+releases a pull request only when all of them report success --- which is what turns
+``the tests should pass'' into ``unverified code cannot reach \texttt{main}''. A run
+superseded by a new push is cancelled automatically, keeping feedback fast enough to
+stay inside the developer's working loop.
+
+The gate is not a formality, and it is cheap. At the time of writing it had executed
+202~CI runs and 208~security runs over the 84~pull requests merged into
+\texttt{main}, with a median wall-clock time of 34~seconds and a worst case under six
+minutes. Eleven CI runs and ten security runs ended red. Thirteen of those were on a
+pull request --- a change stopped before it reached the main branch --- and the rest
+on a push to \texttt{main} or on the weekly schedule, catching what had already landed
+or what a newly published advisory had just made unsafe.
+
+\paragraph{Security scanning in depth.} A tool that runs commands against live
+systems, handles API credentials and parses untrusted files must hold itself to the
+standard it is built to check, so security scanning is a merge gate rather than an
+occasional exercise, and it is deliberately layered: each of its four jobs sees a
+class of defect the others are blind to. \texttt{pip-audit} resolves the project's
+locked dependency set and matches it against published advisories, covering the
+supply chain --- the code the project did not write but does ship --- while
+Dependabot proposes the corresponding upgrade weekly. Bandit performs pattern-based
+static application-security testing over \texttt{src}, reporting findings of medium
+severity and above: insecure temporary files, disabled certificate verification, weak
+cryptographic primitives. The severity floor is deliberate, since a tool that must
+legitimately spawn processes would otherwise drown in low-severity notices about the
+very behaviour it exists to perform. CodeQL \cite{codeql} goes further by querying a
+semantic model of the program, tracing whether data from an untrusted source reaches a
+sensitive sink --- reasoning that pattern matching cannot perform; it is configured
+for the Python sources only, the TypeScript front end being covered by its type
+checker and linter rather than by data-flow analysis, a gap acknowledged rather than
+closed. Gitleaks scans the \emph{entire history} rather than the current tree, because
+deleting a leaked key in a later commit does not remove it: the secret remains
+retrievable from any clone, and the correct response is to find it and revoke it.
+
+This workflow also runs on a weekly schedule, and not only on change. Dependency risk
+is not change-triggered: a dependency that was clean when merged becomes vulnerable
+the day an advisory is published, with nobody having touched the code. A purely
+event-driven gate would therefore certify a project as secure precisely while it is
+quietly ageing into vulnerability.
+
+\paragraph{Slow and longitudinal checks, off the critical path.} Not every valuable
+check belongs in the merge gate. The system tests bring up the dockerised lab
+targets, wait for them to become healthy, run the end-to-end suite against them and
+tear them down unconditionally; they are slow and depend on external images, and
+making them blocking would mean that an unrelated container hiccup stops all work ---
+the reliable way to end up disabling a test suite. Run nightly instead, they still
+surface a regression within a day, at no cost to flow. The weekly sanity-metrics
+workflow serves a different purpose again: it collects complexity, dead-code and
+duplication measurements into a report artefact that feeds the pre-milestone audit.
+These are \emph{longitudinal} signals --- the slow accumulation of duplicated helpers
+and drifting patterns that AI-assisted development is prone to --- and by
+construction no review of a single diff can see them.
+
+\paragraph{Publication and traceability.} The remaining three workflows keep the
+project's artefacts, and its record of work, from falling behind the code. The
+documentation workflow
+regenerates the UML diagrams from the source and rebuilds the site in strict mode,
+which fails on any broken cross-reference, before publishing to GitHub~Pages on every
+merge; the thesis workflow builds this memoir with XeLaTeX whenever
+\texttt{thesis/} changes, so the document is known to compile continuously rather than
+on the eve of deposit; and the board workflow moves the Kanban card in response to
+repository events --- an issue opened lands in Backlog, a pull request that declares
+\texttt{Closes~\#n} moves its issue to In~Progress, a green CI run moves it to Verify,
+and closing the issue moves it to Done. That last workflow is what makes the flow
+discipline of Section~\ref{sec:process} sustainable for one person: the board reflects
+reality because it is derived from repository events, not from manual bookkeeping that
+a busy developer would skip. The one transition left manual is \emph{Validate}, which
+the author performs only after personally running the pull request's validation steps.
+
+\paragraph{What the gate proves, and what it does not.} It is worth being precise
+about the limits of this apparatus, because automation invites overclaiming. A green
+build establishes mechanical properties: the code is typed and formatted, no function
+exceeds the agreed complexity ceiling, the unit suite passes with at least 80\% line
+coverage and the integration suite passes, no locked dependency carries a published
+advisory, no secret appears anywhere in the history, and the front end compiles and
+satisfies its component tests. It establishes none of the properties that matter most
+to a security tool --- that a verdict about a vulnerability is correct, that a retest
+actually exercised the reported flaw, that the agent's reasoning is sound. Those are
+empirical questions about the system's outputs, answered by evaluation against ground
+truth rather than by the build. The gate's contribution is narrower but still
+essential: when such an evaluation is run, it is run on code whose mechanical
+soundness is not in doubt.
+
+The scanners also impose a real cost that should be stated honestly, because a gate
+of this kind is usually described only by its benefits. They produce false positives,
+and they do so with the authority of a blocking check. In this project, CodeQL's
+\texttt{incomplete-url-substring-sanitization} rule fired on a \emph{test} assertion
+that identified a command by substring, and blocked pull request~\#89 until the
+assertion was rewritten as an exact command-contract check --- a better test, as it
+happens, but the improvement was incidental to the alert. The policy adopted is to
+treat every finding as blocking and to resolve it either by changing the code or by
+recording an explicit, justified dismissal, never by lowering the threshold, which
+would quietly hollow out the gate while leaving it green.
 
 \section{Use of Artificial Intelligence Tools}
 \label{sec:ai-declaration}
@@ -278,34 +534,31 @@ the project's public audit trail: the curated usage log under
 \texttt{docs/ai-usage/} --- maintained in real time through the early milestones and
 completed retrospectively for the later ones from the automatically recorded session
 files and the git history --- together with the \texttt{Co-Authored-By: Claude}
-trailers in that history. Seventy-four of the eighty-two commits carry the trailer;
-the remaining eight are author-only commits, and, because the project integrates by
+trailers in that history. The large majority of the project's commits carry the
+trailer; the remainder are author-only commits, and, because the project integrates by
 squash-merge, each merge commit inherits the trailers of the assistant-authored work
 it absorbs.
 
 \paragraph{Tools used.} The single AI tool used for development was Claude Code,
-Anthropic's agentic command-line assistant, driven primarily by the Fable~5 model
-family during the early milestones and the Opus~4.x family thereafter, including for
-assistance with this dissertation. Local open-weight models (Ollama, \texttt{qwen}
+Anthropic's agentic command-line assistant, driven by Anthropic's Claude family of
+models; the specific model versions used in the earliest milestones are not recorded
+in the project's audit trail, while the later milestones and the assistance with this
+dissertation used the Opus~4 family. Local open-weight models (Ollama, \texttt{qwen}
 family) were used only \emph{as a component and comparison condition of the system
 under study}, never to author the thesis or the code.
 
-\paragraph{Type of use.} The assistance spanned six categories, in every case under
+\paragraph{Type of use.} The assistance spanned five categories, in every case under
 the author's direction and subject to the author's review:
 \begin{itemize}
 \item \emph{Research and analysis} --- reading the regulations and the proposal and
   surveying related work.
-\item \emph{Design assistance} --- drafting the development plan and the
-  thirty-five ADRs for the author's decision; the decisions themselves were the
-  author's.
 \item \emph{Code generation} --- implementing the backend (\texttt{src/revalid}) and
   the React front end (\texttt{frontend/src}) from the author's specifications.
 \item \emph{Test writing} --- unit, integration and system tests across the pyramid.
 \item \emph{Documentation generation} --- API documentation, the C4 architecture
   and sequence diagrams, and the project roadmap.
-\item \emph{Thesis writing assistance} --- drafting and editing chapters (notably
-  the State of the Art, the Introduction and this Methodology), including verifying
-  that every cited reference resolves to a real source.
+\item \emph{Thesis writing assistance} --- drafting and editing chapters, including
+  verifying that every cited reference resolves to a real source.
 \end{itemize}
 
 \paragraph{Affected areas.} In the repository, assistance touched the backend and
@@ -315,7 +568,7 @@ dissertation, the chapters listed above were drafted with assistance; all were
 reviewed, corrected and approved by the author.
 
 \paragraph{Authorship statement.} All design, architecture and scope decisions were
-made by the author, as evidenced by the thirty-five ADRs and the requirements
+made by the author, as evidenced by the thirty-eight ADRs and the requirements
 specification that precede the code. Every AI output --- code, tests, documentation
 and thesis prose --- was reviewed and validated by the author before acceptance,
 through pull-request validation and the continuous-integration gate. The author is
