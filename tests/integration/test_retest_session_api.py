@@ -17,12 +17,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo
 from tests._retest_helpers import (
     script_conclude_inconclusive,
     script_inconclusive_then_conclude_on_message,
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
+    streaming,
 )
 
 from revalid.app import (
@@ -51,7 +52,7 @@ def _override_goal_agent(app: FastAPI) -> None:
             parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"steps": _GOAL_STEPS})]
         )
 
-    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(FunctionModel(gen))
+    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(streaming(gen))
 
 
 _IMPORT: dict[str, Any] = {
@@ -70,7 +71,7 @@ _IMPORT: dict[str, Any] = {
 def _client() -> TestClient:
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
@@ -279,14 +280,14 @@ def test_message_gets_immediate_agent_reply() -> None:
     """
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
 
     def qa_reply(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         return ModelResponse(parts=[TextPart(content="We are retesting the login SQL injection.")])
 
-    app.dependency_overrides[get_qa_agent] = lambda: build_qa_agent(FunctionModel(qa_reply))
+    app.dependency_overrides[get_qa_agent] = lambda: build_qa_agent(streaming(qa_reply))
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     with TestClient(app) as client:
@@ -309,13 +310,13 @@ def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
 
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
 
     def boom(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         raise UnexpectedModelBehavior("no goal")
 
-    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(FunctionModel(boom))
+    app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(streaming(boom))
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     with TestClient(app) as client:
@@ -459,7 +460,7 @@ def test_retest_session_ends_in_error_when_sandbox_factory_raises() -> None:
     """
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
 
@@ -482,7 +483,7 @@ def _echo_client() -> TestClient:
     """A client whose sandbox echoes each command, so multiple execs never exhaust it."""
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
     box = FakeSandbox(
@@ -545,7 +546,7 @@ def test_retest_session_message_delivered_on_next_decision() -> None:
     """A queued message reaches the agent on the next approval (over HTTP)."""
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude_noting_message)
+        streaming(script_run_then_conclude_noting_message)
     )
     _override_goal_agent(app)
     box = FakeSandbox(
@@ -690,7 +691,7 @@ def test_get_session_returns_gated_default() -> None:
 def _paused_client(script: Any) -> TestClient:
     """A client whose agent hands back `inconclusive` — the session pauses (ADR-0034)."""
     app = create_app(engine=create_db_engine(IN_MEMORY))
-    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(FunctionModel(script))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(streaming(script))
     _override_goal_agent(app)
     box = FakeSandbox(lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1))
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box

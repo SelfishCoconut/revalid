@@ -26,11 +26,12 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo
 from tests._retest_helpers import (
     has_command_result,
     script_respond_then_conclude,
     script_run_then_conclude,
+    streaming,
 )
 
 from revalid.domain import VerdictStatus
@@ -103,7 +104,7 @@ def test_run_command_passes_agent_chosen_timeout_to_sandbox() -> None:
     """The model's ``timeout_seconds`` reaches ``sandbox.exec`` (issue #150)."""
     box = FakeSandbox([CommandResult(stdout="80/tcp open", stderr="", exit_code=0, elapsed_ms=900)])
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
-    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(120)))
+    agent = build_retest_agent(streaming(_script_run_with_timeout(120)))
     first = agent.run_sync("Retest the open-port finding.", deps=deps)
     _approve_and_resume(agent, deps, first)
     assert box.timeouts == [120]
@@ -113,7 +114,7 @@ def test_run_command_clamps_an_excessive_timeout() -> None:
     """A model asking for an unbounded wait is clamped to the ceiling before it runs."""
     box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)])
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
-    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(10_000)))
+    agent = build_retest_agent(streaming(_script_run_with_timeout(10_000)))
     first = agent.run_sync("Retest.", deps=deps)
     _approve_and_resume(agent, deps, first)
     assert box.timeouts == [MAX_COMMAND_TIMEOUT]
@@ -123,7 +124,7 @@ def test_run_command_flags_a_timed_out_command_to_the_model() -> None:
     """A command killed for overrunning (exit 124) is annotated in the tool return."""
     box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=124, elapsed_ms=30_000)])
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
-    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(30)))
+    agent = build_retest_agent(streaming(_script_run_with_timeout(30)))
     first = agent.run_sync("Retest.", deps=deps)
     second = _approve_and_resume(agent, deps, first)
     returns = [
@@ -137,7 +138,7 @@ def test_run_command_flags_a_timed_out_command_to_the_model() -> None:
 
 def test_agent_exposes_no_set_plan_tool() -> None:
     """6b-ii: the agent no longer proposes plans — set_plan is gone; run_command stays."""
-    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+    agent = build_retest_agent(streaming(script_run_then_conclude))
     tools = agent._function_toolset.tools
     assert "set_plan" not in tools
     assert "run_command" in tools
@@ -148,7 +149,7 @@ def test_deferred_gate_cycle_runs_command_then_concludes() -> None:
     box = FakeSandbox([CommandResult(stdout="{token: ...}", stderr="", exit_code=0, elapsed_ms=12)])
     outputs: list[tuple[str, CommandResult]] = []
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda cmd, res: outputs.append((cmd, res)))
-    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+    agent = build_retest_agent(streaming(script_run_then_conclude))
 
     # Turn 1: proposes a command -> run pauses with a deferred approval request.
     first = agent.run_sync("Retest the SQLi finding.", deps=deps)
@@ -174,7 +175,7 @@ def test_reject_returns_reason_to_the_model() -> None:
     """Denying the deferred call never touches the sandbox."""
     box = FakeSandbox([])  # nothing should execute on a rejection
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
-    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+    agent = build_retest_agent(streaming(script_run_then_conclude))
     first = agent.run_sync("Retest.", deps=deps)
     assert isinstance(first.output, DeferredToolRequests)
     [call] = first.output.approvals
@@ -190,7 +191,7 @@ def test_respond_tool_emits_agent_message_and_run_continues() -> None:
     box = FakeSandbox([])  # respond never touches the sandbox
     prose: list[str] = []
     deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None, emit_message=prose.append)
-    agent = build_retest_agent(FunctionModel(script_respond_then_conclude))
+    agent = build_retest_agent(streaming(script_respond_then_conclude))
 
     result = agent.run_sync("Retest the SQLi finding.", deps=deps)
 

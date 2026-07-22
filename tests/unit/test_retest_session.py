@@ -14,7 +14,7 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from tests._retest_helpers import (
@@ -25,6 +25,7 @@ from tests._retest_helpers import (
     script_respond_then_conclude,
     script_run_then_conclude,
     script_run_then_conclude_noting_message,
+    streaming,
 )
 
 from revalid import retest_session as rs
@@ -307,7 +308,7 @@ def test_full_cycle_proposes_runs_and_concludes() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         start_and_step(session, registry, s.id, agent, box, "Retest the SQLi finding.")
         session.refresh(s)
@@ -347,7 +348,7 @@ def test_apply_decision_wrong_command_id_is_a_noop() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([])  # nothing scripted: must never be called
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         apply_decision(session, registry, s.id, approved=True, command_id="not-the-pending-id")
@@ -366,7 +367,7 @@ def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([])  # nothing scripted: must never be called
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         cid = _pending_cid(registry, s.id)
@@ -388,7 +389,7 @@ def test_free_launch_auto_runs_command_to_verdict() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m", free_launch=True)
         box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         # start_and_step's own _drive_auto loop runs before this returns.
         start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
@@ -418,7 +419,7 @@ def test_session_never_pauses_on_a_step_count() -> None:
         box = FakeSandbox(
             lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
         )
-        agent = build_retest_agent(FunctionModel(script_always_propose))  # never concludes
+        agent = build_retest_agent(streaming(script_always_propose))  # never concludes
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         # Approve well past any former finite default (8) — it keeps gating each
         # command, never pausing for guidance.
@@ -440,7 +441,7 @@ def test_agent_inconclusive_conclusion_pauses_for_guidance() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_conclude_inconclusive))
+        agent = build_retest_agent(streaming(script_conclude_inconclusive))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         session.refresh(s)
         rows = session.scalars(select(VerdictRecord)).all()
@@ -461,7 +462,7 @@ def test_continue_with_guidance_resumes_the_agent_to_a_verdict() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_inconclusive_then_conclude_on_message))
+        agent = build_retest_agent(streaming(script_inconclusive_then_conclude_on_message))
         start_and_step(session, registry, s.id, agent, box, "Retest.")  # pauses (inconclusive)
         session.refresh(s)
         assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
@@ -480,7 +481,7 @@ def test_conclude_session_records_operator_verdict_and_tears_down() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_conclude_inconclusive))
+        agent = build_retest_agent(streaming(script_conclude_inconclusive))
         start_and_step(session, registry, s.id, agent, box, "Retest.")  # pauses (needs_guidance)
         rs.conclude_session(
             session, registry, s.id, VerdictStatus.INCONCLUSIVE, "I checked; can't tell"
@@ -503,7 +504,7 @@ def test_conclude_session_from_awaiting_command_writes_verdict() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, box, "Retest.")  # → awaiting_command
         session.refresh(s)
         assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # a command is pending
@@ -527,7 +528,7 @@ def test_fail_does_not_clobber_a_concluded_session() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         rs.conclude_session(session, registry, s.id, VerdictStatus.FIXED, "operator call")
         # An in-flight step that raised *after* the conclude routes here; it must no-op.
@@ -547,7 +548,7 @@ def test_stop_pauses_keeping_sandbox_then_resume_reopens_pending_command() -> No
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         cid = _pending_cid(registry, s.id)
 
@@ -572,7 +573,7 @@ def test_stop_halts_the_free_launch_auto_run_loop() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([CommandResult(stdout="x", stderr="", exit_code=0, elapsed_ms=1)])
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, box, "Retest.")  # gated → pending command
         live = registry.get(s.id)
         assert live is not None
@@ -605,7 +606,7 @@ def test_enable_free_launch_auto_approves_pending_command() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         # Start gated: the first command proposal waits for a decision.
         start_and_step(session, registry, s.id, agent, box, "Retest.")
@@ -632,7 +633,7 @@ def test_disable_free_launch_records_event_on_live_session() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
 
         # Gated start parks at the proposed command (still live).
         start_and_step(session, registry, s.id, agent, box, "Retest.")
@@ -686,7 +687,7 @@ def test_end_session_tears_down_and_marks_ended() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([])
-        agent = build_retest_agent(FunctionModel(script_always_propose))
+        agent = build_retest_agent(streaming(script_always_propose))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
 
         end_session(session, registry, s.id)
@@ -717,7 +718,7 @@ def test_start_and_step_agent_error_sets_error_status_and_tears_down() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([])
-        agent = build_retest_agent(FunctionModel(_always_boom))
+        agent = build_retest_agent(streaming(_always_boom))
 
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         session.refresh(s)
@@ -736,7 +737,7 @@ def test_apply_decision_agent_error_on_resume_sets_error_status_and_tears_down()
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)])
-        agent = build_retest_agent(FunctionModel(_propose_then_boom))
+        agent = build_retest_agent(streaming(_propose_then_boom))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
 
         cid = _pending_cid(registry, s.id)
@@ -798,7 +799,7 @@ def test_submit_human_command_records_event_and_buffers_observation() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_human_command(session, registry, s.id, "whoami")
@@ -820,7 +821,7 @@ def test_agent_observes_human_command_on_next_turn() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(_conclude_noting_operator))
+        agent = build_retest_agent(streaming(_conclude_noting_operator))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_human_command(session, registry, s.id, "whoami")  # while awaiting approval
@@ -839,7 +840,7 @@ def test_reject_folds_operator_activity_into_the_denial() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(_conclude_noting_operator))
+        agent = build_retest_agent(streaming(_conclude_noting_operator))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_human_command(session, registry, s.id, "whoami")
@@ -864,7 +865,7 @@ def test_submit_human_command_on_dead_session_is_a_noop() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        agent = build_retest_agent(streaming(script_run_then_conclude))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_message(session, registry, s.id, "focus on the login endpoint")
@@ -893,7 +894,7 @@ def test_agent_reads_queued_message_on_approve() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        agent = build_retest_agent(streaming(script_run_then_conclude_noting_message))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_message(session, registry, s.id, "focus on the login endpoint")
@@ -911,7 +912,7 @@ def test_agent_reads_queued_message_on_reject() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        agent = build_retest_agent(streaming(script_run_then_conclude_noting_message))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         rs.submit_message(session, registry, s.id, "focus on the login endpoint")
@@ -929,7 +930,7 @@ def test_no_message_means_no_extra_user_turn() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        agent = build_retest_agent(streaming(script_run_then_conclude_noting_message))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         cid = _pending_cid(registry, s.id)
@@ -951,7 +952,7 @@ def test_respond_emits_agent_message_through_the_orchestrator() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        agent = build_retest_agent(FunctionModel(script_respond_then_conclude))
+        agent = build_retest_agent(streaming(script_respond_then_conclude))
         start_and_step(session, registry, s.id, agent, _echo_box(), "Retest.")
 
         session.refresh(s)
@@ -972,7 +973,7 @@ def test_set_goal_records_plan_updated_and_queues_for_agent() -> None:
         box = FakeSandbox(
             lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
         )
-        agent = build_retest_agent(FunctionModel(script_always_propose))
+        agent = build_retest_agent(streaming(script_always_propose))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
 
         rs.set_goal(session, registry, s.id, ["Check the login endpoint", "Confirm the token"])
@@ -1021,7 +1022,7 @@ def test_queued_goal_is_injected_into_the_next_turn() -> None:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
-        agent = build_retest_agent(FunctionModel(script_run_then_conclude_noting_message))
+        agent = build_retest_agent(streaming(script_run_then_conclude_noting_message))
         start_and_step(session, registry, s.id, agent, box, "Retest.")
         cid = _pending_cid(registry, s.id)
         rs.set_goal(session, registry, s.id, ["focus on the admin endpoint"])

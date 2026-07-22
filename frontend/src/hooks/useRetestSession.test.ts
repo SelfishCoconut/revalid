@@ -183,4 +183,33 @@ describe("useRetestSession", () => {
     await waitFor(() => expect(result.current.events).toHaveLength(1));
     expect(result.current.events[0]?.payload).toEqual({ command: "ls" });
   });
+
+  it("accumulates live reasoning deltas and clears them when the turn lands", async () => {
+    // Issue #140: `agent_delta` frames carry no `seq`, are never persisted, and
+    // must be superseded by the real transcript event they were leading up to.
+    const socket = new FakeSocket();
+    const makeSocket = () => socket as unknown as WebSocket;
+    const { result } = renderHook(() => useRetestSession(1, makeSocket));
+
+    act(() => {
+      socket.emit({ kind: "agent_delta", payload: { text: "I should " } });
+    });
+    act(() => {
+      socket.emit({ kind: "agent_delta", payload: { text: "probe the login endpoint" } });
+    });
+
+    await waitFor(() => {
+      expect(result.current.thinking).toBe("I should probe the login endpoint");
+    });
+    // Deltas are not transcript events.
+    expect(result.current.events).toHaveLength(0);
+
+    act(() => {
+      socket.emit({ seq: 1, kind: "command_proposed", payload: { command: "curl -s /login" } });
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(1));
+    // The landed turn replaces the reasoning that produced it.
+    expect(result.current.thinking).toBe("");
+  });
 });

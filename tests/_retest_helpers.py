@@ -8,15 +8,54 @@ by a :class:`~revalid.retest_agent.ConcludeOutput` verdict.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
+
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    TextPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.models.function import AgentInfo
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, DeltaToolCalls, FunctionModel
+
+
+def streaming(script: Callable[[list[ModelMessage], AgentInfo], ModelResponse]) -> FunctionModel:
+    """Wrap a scripted model so it answers *streamed* requests too (issue #140).
+
+    The orchestrator runs each turn through ``run_stream_events``, which asks the
+    model for a streamed request, and ``FunctionModel`` refuses one unless it is
+    given a ``stream_function``. This replays the very same scripted
+    ``ModelResponse`` as one delta batch, so every existing script keeps its
+    behaviour and its assertions.
+
+    One batch rather than character-by-character on purpose: these tests are
+    about what a turn *decides* — the proposal, the gate, the verdict — not about
+    token granularity. Live token behaviour is covered by ``test_deltas.py`` and
+    was verified against a real model, where one turn produced 746 thinking
+    deltas.
+    """
+
+    async def stream_fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | DeltaToolCalls]:
+        response = script(messages, info)
+        calls: DeltaToolCalls = {}
+        for index, part in enumerate(response.parts):
+            if isinstance(part, ToolCallPart):
+                calls[index] = DeltaToolCall(
+                    name=part.tool_name,
+                    json_args=part.args_as_json_str(),
+                    tool_call_id=part.tool_call_id,
+                )
+            elif isinstance(part, TextPart):
+                yield part.content
+        if calls:
+            yield calls
+
+    return FunctionModel(script, stream_function=stream_fn)
 
 
 def has_command_result(messages: list[ModelMessage]) -> bool:

@@ -16,6 +16,7 @@ to the operator (``needs_guidance``, ADR-0034) rather than running forever.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,16 +24,23 @@ from typing import Any
 from pydantic_ai import (
     Agent,
     AgentRunResult,
+    AgentRunResultEvent,
     DeferredToolRequests,
     DeferredToolResults,
     ToolApproved,
     ToolDenied,
 )
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import (
+    ModelMessage,
+    PartDeltaEvent,
+    TextPartDelta,
+    ThinkingPartDelta,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from revalid.db import RetestSessionRecord, SessionEventRecord, VerdictRecord
+from revalid.deltas import DELTAS, DeltaChannel
 from revalid.domain import (
     AgenticEvidence,
     Finding,
@@ -578,6 +586,86 @@ def _teardown(registry: SessionRegistry, session_id: int) -> None:
         registry.drop(session_id)
 
 
+def run_agent_step(
+    agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests],
+    user_prompt: str | None,
+    *,
+    session_id: int,
+    deps: RetestSessionDeps,
+    message_history: list[ModelMessage] | None = None,
+    deferred_tool_results: DeferredToolResults | None = None,
+    channel: DeltaChannel = DELTAS,
+) -> AgentRunResult[ConcludeOutput | DeferredToolRequests]:
+    """Run one agent turn, streaming its live tokens to the console (issue #140).
+
+    Replaces ``agent.run_sync`` at every step site. The turn's *result* is
+    unchanged — same output union, same message history, same deferred-tool
+    handling — so the orchestrator's state machine is untouched; the only
+    addition is that tokens are published to ``channel`` as they arrive.
+
+    **What actually streams.** This agent's output is structured
+    (``ConcludeOutput``) or a gated tool request, and its commands and prose
+    reach the operator as *tool arguments*, which the model emits whole rather
+    than incrementally. What it does stream token-by-token is its **reasoning**:
+    measured against a live ``ollama:qwen3:14b``, one turn produced 746 thinking
+    deltas and zero text or tool-argument deltas. So the reasoning is what the
+    console shows while a turn is in flight — which is exactly the stretch the
+    operator previously spent watching a motionless spinner.
+
+    Text deltas are forwarded too, for models that narrate in plain parts rather
+    than a thinking part. Tool-argument deltas are deliberately **not**: they
+    arrive as partial JSON (``{"rationale": "I will che``), and rendering that
+    would show the operator half-escaped syntax rather than a sentence.
+
+    Runs the async stream on its own event loop via :func:`asyncio.run`. Step
+    sites are already background/worker threads with no loop running, and the
+    orchestrator around them is synchronous — converting the whole state machine
+    to async would be a far larger change for no behavioural gain here.
+
+    Args:
+        agent: The retest agent to run.
+        user_prompt: The turn's prompt (``None`` when resuming from a tool result).
+        session_id: The session whose console receives the tokens.
+        deps: The tool dependencies for this turn.
+        message_history: Prior turns, when continuing a run.
+        deferred_tool_results: Approvals/denials resuming a gated call.
+        channel: The live-token channel (injectable for tests).
+
+    Returns:
+        The completed run result, exactly as ``run_sync`` would have returned it.
+
+    Raises:
+        RuntimeError: If the stream ends without producing a run result, which
+            would otherwise surface as a confusing ``None`` far from here.
+    """
+
+    async def drive() -> AgentRunResult[ConcludeOutput | DeferredToolRequests]:
+        result: AgentRunResult[ConcludeOutput | DeferredToolRequests] | None = None
+        async with agent.run_stream_events(
+            user_prompt,
+            deps=deps,
+            message_history=message_history,
+            deferred_tool_results=deferred_tool_results,
+        ) as events:
+            async for event in events:
+                if isinstance(event, PartDeltaEvent) and isinstance(
+                    event.delta, ThinkingPartDelta | TextPartDelta
+                ):
+                    channel.publish(session_id, event.delta.content_delta or "")
+                elif isinstance(event, AgentRunResultEvent):
+                    result = event.result
+        if result is None:  # pragma: no cover - the library always ends with a result
+            raise RuntimeError("agent stream ended without a result")
+        return result
+
+    try:
+        return asyncio.run(drive())
+    finally:
+        # The turn is over: whatever it was thinking is superseded by the
+        # transcript events it just produced, so the console stops showing it.
+        channel.clear(session_id)
+
+
 def start_and_step(
     session: Session,
     registry: SessionRegistry,
@@ -607,7 +695,7 @@ def start_and_step(
     set_status(session, session_id, RetestSessionStatus.THINKING)
     deps = _make_deps(session, session_id, live)
     try:
-        result = agent.run_sync(finding_prompt, deps=deps)
+        result = run_agent_step(agent, finding_prompt, session_id=session_id, deps=deps)
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
         return
@@ -696,8 +784,10 @@ def _resume_with_decision(
     deps = _make_deps(session, session_id, live)
     user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages())
     try:
-        result = live.agent.run_sync(
+        result = run_agent_step(
+            live.agent,
             user_prompt,
+            session_id=session_id,
             deps=deps,
             message_history=live.messages,
             deferred_tool_results=results,
@@ -1049,7 +1139,9 @@ def _resume_run(
         "Continue the retest toward a determination."
     )
     try:
-        result = live.agent.run_sync(user_prompt, deps=deps, message_history=live.messages)
+        result = run_agent_step(
+            live.agent, user_prompt, session_id=session_id, deps=deps, message_history=live.messages
+        )
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
         return

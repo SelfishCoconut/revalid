@@ -152,22 +152,45 @@ function statusLabel(status: string): string {
  * Shown while an LLM call is in flight (local models can take a while), so a slow
  * turn reads as working rather than frozen.
  */
-function ThinkingBubble() {
+/**
+ * The turn-in-flight indicator. Shows the model's live reasoning when it streams
+ * any (issue #140), and falls back to the bouncing dots when it doesn't — some
+ * backends emit nothing until the whole turn lands, and an empty box would read
+ * as a stall.
+ *
+ * The reasoning is deliberately styled as secondary, muted text: it is the
+ * model's scratch work, not a claim, and it vanishes the moment the turn's real
+ * event arrives. Nothing here is part of the audit trail.
+ */
+function ThinkingBubble({ reasoning }: { reasoning: string }) {
   return (
     <div className="flex gap-3" aria-label="agent thinking">
       <span
         className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full bg-iris shadow-[0_0_8px_var(--color-iris)]"
         aria-hidden
       />
-      <div className="flex items-center gap-1.5 rounded-lg border border-line bg-panel-2/50 px-4 py-3">
-        {[0, 150, 300].map((delay) => (
-          <span
-            key={delay}
-            className="h-1.5 w-1.5 animate-bounce rounded-full bg-dim"
-            style={{ animationDelay: `${String(delay)}ms` }}
-          />
-        ))}
-      </div>
+      {reasoning ? (
+        <div className="min-w-0 rounded-lg border border-line bg-panel-2/50 px-4 py-3">
+          <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
+            Thinking
+          </p>
+          {/* Only the tail: the reasoning can run to hundreds of tokens and the
+              operator is watching progress, not reading an essay. */}
+          <p className="max-h-32 overflow-hidden whitespace-pre-wrap text-[13px] leading-relaxed text-dim">
+            {reasoning.slice(-600)}
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 rounded-lg border border-line bg-panel-2/50 px-4 py-3">
+          {[0, 150, 300].map((delay) => (
+            <span
+              key={delay}
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-dim"
+              style={{ animationDelay: `${String(delay)}ms` }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -237,7 +260,7 @@ export function RetestSession({
   embedded?: boolean;
 }) {
   const id = sessionId;
-  const { events, status, verdict } = useRetestSession(id);
+  const { events, status, verdict, thinking } = useRetestSession(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [terminalOpen, setTerminalOpen] = useState(true);
@@ -731,7 +754,9 @@ export function RetestSession({
               <p className="text-sm text-dim">Starting the sandboxed retest…</p>
             )}
             {chatItems}
-            {isThinking(status) && !awaitingApproval && !verdict && <ThinkingBubble />}
+            {isThinking(status) && !awaitingApproval && !verdict && (
+              <ThinkingBubble reasoning={thinking} />
+            )}
             {isStopped && (
               <div
                 aria-label="stopped"

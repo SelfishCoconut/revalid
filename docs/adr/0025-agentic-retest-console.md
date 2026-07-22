@@ -338,3 +338,39 @@ stays reachable. `REVALID_SANDBOX_IMAGE` overrides the image for an operator who
 wants their own, and changes nothing about containment.
 
 The decision above is otherwise unchanged.
+
+---
+
+## Update — 2026-07-22: the console streams the model's reasoning (issue #140)
+
+Each turn ran through `agent.run_sync`, so the console showed a motionless
+spinner for the whole LLM call — measured at ~14 s per turn on the default local
+backend. Turns now run through `run_stream_events`, and the tokens are published
+to a per-session in-memory channel the WebSocket drains alongside the transcript.
+
+**What streams is the reasoning, not the reply.** This agent's output is
+structured (`ConcludeOutput`) or a gated tool request, and its commands and prose
+reach the operator as *tool arguments*, which models emit whole rather than
+incrementally. Measured against a live `ollama:qwen3:14b`, one turn produced
+**746 thinking deltas and zero text or tool-argument deltas**. So the console
+shows the model's thinking while a turn is in flight. Tool-argument deltas are
+deliberately not forwarded: they arrive as partial JSON, and rendering
+`{"rationale": "I will che` would show syntax rather than a sentence.
+
+**The deltas are not evidence.** They are never persisted, carry no `seq`, and
+are dropped the moment the turn lands as a real transcript event. A half-finished
+thought is not something a verdict was derived from, and putting it in the
+append-only transcript would corrupt what FR-10 re-derives from. The transcript
+remains the sole durable record.
+
+**The state machine is unchanged.** `run_agent_step` returns exactly what
+`run_sync` returned — same output union, same message history, same deferred-tool
+handling — so approval gating, free-launch and adjudication are untouched. The
+async stream is driven with `asyncio.run` on the existing worker threads rather
+than converting the orchestrator to async, which would have been a far larger
+change for no behavioural gain.
+
+Measured end to end on a live model: first frame at +3.7 s, last at +12.5 s of a
+14.0 s turn, 36 WebSocket frames, 3.5 KB of reasoning, and the channel empty
+afterwards.
+The decision above is otherwise unchanged.
