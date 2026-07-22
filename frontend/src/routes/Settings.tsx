@@ -156,15 +156,17 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
   }
 
   return (
-    <Panel className="p-5">
+    <section aria-labelledby="model-settings-heading">
       <Eyebrow>Model &amp; provider</Eyebrow>
-      <h1 className="mt-1.5 font-mono text-xl font-semibold text-fg">Settings</h1>
-      <p className="mt-1 max-w-xl text-[13px] text-dim">
-        The active LLM backend (FR-13). A saved change applies on the next extraction or
-        plan — no restart needed.
+      <h2 id="model-settings-heading" className="mt-1.5 font-mono text-lg font-semibold text-fg">
+        LLM backend
+      </h2>
+      <p className="mt-1 text-[13px] text-dim">
+        The provider and model used for extraction and planning (FR-13). A saved change
+        applies on the next run — no restart needed.
       </p>
 
-      <div className="mt-5 max-w-md space-y-4">
+      <div className="mt-5 space-y-4">
         <fieldset className="m-0 border-0 p-0">
           <legend className={fieldLabel}>Provider</legend>
           <div className="mt-1.5 grid grid-cols-3 gap-1.5">
@@ -317,7 +319,7 @@ function SettingsForm({ initial }: { initial: SettingsData }) {
           </p>
         )}
       </div>
-    </Panel>
+    </section>
   );
 }
 
@@ -326,13 +328,15 @@ function DisplaySettings() {
   const dateFormat = useDateFormat();
 
   return (
-    <Panel className="p-5">
+    <section aria-labelledby="display-settings-heading">
       <Eyebrow>Display</Eyebrow>
-      <h2 className="mt-1.5 font-mono text-lg font-semibold text-fg">Date format</h2>
-      <p className="mt-1 max-w-xl text-[13px] text-dim">
+      <h2 id="display-settings-heading" className="mt-1.5 font-mono text-lg font-semibold text-fg">
+        Date format
+      </h2>
+      <p className="mt-1 text-[13px] text-dim">
         How timestamps render across the app. Saved in this browser.
       </p>
-      <fieldset className="m-0 mt-4 max-w-md border-0 p-0">
+      <fieldset className="m-0 mt-4 border-0 p-0">
         <legend className="sr-only">Date format</legend>
         <div className="space-y-0.5 rounded-lg border border-line bg-panel-2 p-2">
           {DATE_FORMATS.map((option) => (
@@ -358,7 +362,7 @@ function DisplaySettings() {
           ))}
         </div>
       </fieldset>
-    </Panel>
+    </section>
   );
 }
 
@@ -385,9 +389,18 @@ export default function Settings() {
   }
 
   return (
-    <div className="rev-rise space-y-6">
-      <SettingsForm initial={settings.data} />
-      <DisplaySettings />
+    <div className="rev-rise">
+      <Panel className="p-5 sm:p-6">
+        <Eyebrow>Configuration</Eyebrow>
+        <h1 className="mt-1.5 font-mono text-xl font-semibold text-fg">Settings</h1>
+        <p className="mt-1 max-w-2xl text-[13px] text-dim">
+          The active LLM backend and how the console renders for you.
+        </p>
+        <div className="mt-6 grid gap-x-10 gap-y-8 border-t border-line pt-6 lg:grid-cols-2">
+          <SettingsForm initial={settings.data} />
+          <DisplaySettings />
+        </div>
+      </Panel>
     </div>
   );
 }
