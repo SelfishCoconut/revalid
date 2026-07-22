@@ -19,8 +19,8 @@ an isolated lab target it retests against. The following are required:
   which pins and installs the exact dependency set.
 \item \textbf{Node.js}, used once to build the React single-page interface into the
   static bundle the service serves.
-\item \textbf{Docker}, used to bring up the intentionally vulnerable lab target the
-  retest agent exercises.
+\item \textbf{Docker}, used both to bring up the intentionally vulnerable lab target
+  and to run the isolated container in which the retest agent executes its commands.
 \item \textbf{A language-model backend.} Either a hosted model, selected with an API
   key, or a locally hosted \texttt{Ollama} server --- the shipped default is
   local-first, so no external service is required to run the tool.
@@ -61,13 +61,28 @@ time --- provider, model and, where relevant, the API key --- from the
 \section{Bringing up the lab target}
 \label{sec:annex-lab}
 
-Retests only ever reach allow-listed lab systems (FR-06); the agent's commands run
-inside an egress-locked sandbox that can reach the lab container and nothing else.
-The reference target, OWASP Juice Shop, is provisioned with:
+The agent's commands run inside a sandbox container placed on a Docker network in
+\texttt{internal} mode, to which only the lab target is attached. Reachability is
+therefore decided by network membership (FR-06): the lab container is the one host
+the sandbox has any route to, and no command --- whatever address it names --- can
+leave that network. The reference target, OWASP Juice Shop, is provisioned with:
 
 \begin{lstlisting}[language=bash]
 make lab-up     # start the OWASP Juice Shop lab target
 make lab-down   # stop it when finished
+\end{lstlisting}
+
+Two consequences follow from that design and are worth stating before the first run.
+Because the sandbox has no route off its own network, the target must be addressed
+by its container name (\texttt{http://revalid-juice-shop:3000}) and never as
+\texttt{localhost}, which inside the sandbox resolves to the sandbox itself; a retest
+scoped to a \texttt{localhost} address --- which is what a report's stated endpoints
+usually say --- will simply fail to connect. And because the sandbox cannot download
+anything, every tool the agent may use has to be present in its image already, so
+that image is built once, locally, before the first retest:
+
+\begin{lstlisting}[language=bash]
+make sandbox-image   # build the agent's penetration-testing toolbox image
 \end{lstlisting}
 
 \section{A complete revalidation run}
@@ -100,6 +115,11 @@ make demo-retest-session  # FR-17  gated agentic retest to a verdict
 make demo-export          # FR-12  versioned run export
 make demo-eval            # FR-15  evaluation harness over a run
 \end{lstlisting}
+
+Each runs without Docker, a lab target, a language-model backend or network access,
+so the whole set can be executed anywhere with \texttt{make test-demos} --- which is
+also what the continuous-integration gate runs on every change
+(Section~\ref{sec:ci}).
 
 \section{Resetting the state}
 \label{sec:annex-reset}
