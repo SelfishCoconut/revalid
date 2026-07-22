@@ -87,3 +87,39 @@ the product (FR-11), not a side artefact. Accepted cost: scanner false
 positives now block — as CodeQL's `incomplete-url-substring-sanitization` did on
 PR #89. The standing policy is unchanged and applies to all four scanners: fix
 the code or record an explicit, justified dismissal; never lower the threshold.
+
+## Update — 2026-07-22: two new per-change jobs join the required set
+
+A repository audit (issues #181/#182) found that `scripts/` — including the
+`scripts/demo/*` programs the PR template makes the mandatory "How to validate"
+evidence — sat outside every gate, and that the documentation build ran only
+*after* merge, so PR #178 landed green and broke GitHub Pages for two commits.
+PR #184 closed both holes by adding two CI jobs, `Offline demos` and
+`Docs build (UML + mkdocs --strict)`.
+
+That PR added the jobs but did not register them, so for a few hours they ran
+without blocking — advisory checks in an auto-merge workflow, which is the exact
+failure this ADR's previous update exists to prevent.
+
+**Decision (Álvaro, 2026-07-22):** promote both, restoring the invariant that the
+required set is the *complete* set of per-change jobs. Branch protection now
+requires ten contexts:
+
+```
+Lint & types · Unit tests + coverage · Integration tests
+Frontend (lint, types, build, tests) · Offline demos
+Docs build (UML + mkdocs --strict) · pip-audit · Bandit (SAST)
+CodeQL · Gitleaks (history scan)
+```
+
+Rationale unchanged from 2026-07-21, with one addition drawn from the audit: a
+gate covers only what it is aimed at, and a job that runs without blocking is
+aimed at nothing. The demo programs are the evidence every other claim of
+correctness rests on, so leaving them advisory would have meant the validation
+mechanism was the least-verified code in the repository.
+
+Operational note for anyone editing these workflows: the required contexts are
+matched by **exact job name**. Renaming a job — or introducing a `strategy.matrix`,
+which suffixes the name (`CodeQL` becomes `CodeQL (python)`) — silently detaches it
+from its required context, and the pull request then sits `BLOCKED` with every
+check green. This happened on PR #184 and was caught before merge.
