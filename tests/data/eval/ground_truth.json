@@ -1,0 +1,60 @@
+{
+  "target": "OWASP Juice Shop v17.1.1 (lab, unpatched)",
+  "source_report": "Nozipho Mthimunye — Juice Shop Pentest Report (\"Juiceshop THM Report.pdf\", kept local)",
+  "findings": [
+    {
+      "finding": "Brute Force on Admin Account",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The admin@juice-sh.op account ships with the weak seed password admin123 and the login has no lockout in the pinned image — the credential is present by construction, so the correct verdict against the unpatched lab is still_open."
+    },
+    {
+      "finding": "Password Reset Abuse (Jim's Account)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "jim@juice-sh.op's knowledge-based reset (security question 'brother's middle name' → Samuel) is baked into the seed data; the insecure reset flow is unchanged in v17.1.1, so still_open."
+    },
+    {
+      "finding": "Directory Traversal / Sensitive Files",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The /ftp static route is served with directory listing in the pinned image (acquisitions.md et al. exposed by design); no auth guards it, so still_open."
+    },
+    {
+      "finding": "Credential Disclosure via OSINT (Mr. N00dles)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The mc.safesearch@juice-sh.op account with the OSINT-derivable password 'Mr. N00dles' exists in the seed data; the weak credential is present unchanged, so still_open."
+    },
+    {
+      "finding": "Null Byte Poisoning (package.json.bak)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The %2500.md null-byte extension bypass that fetches /ftp/package.json.bak works against the pinned image (the poison-null-byte challenge is present), so still_open."
+    },
+    {
+      "finding": "Admin Portal Access via main-es2015.js",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The hidden /#/administration route is discoverable in the client bundle and reachable with admin credentials in the unpatched image; the client-side-only exposure is unchanged, so still_open."
+    },
+    {
+      "finding": "IDOR (Shopping Basket Access)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "GET /rest/basket/{id} still returns another user's basket in v17.1.1 (the 'view another basket' challenge); the missing object-level authorization is present, so still_open."
+    },
+    {
+      "finding": "Reflected XSS",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The search-bar / order-tracking DOM-XSS sinks that execute <iframe src=\"javascript:alert(`xss`)\"> are present in the pinned image; no output encoding was added, so still_open."
+    },
+    {
+      "finding": "Scoreboard Access",
+      "expected": "inconclusive",
+      "ambiguous": true,
+      "note": "NFR-01 hard-constraint case. The /#/score-board route is always present in Juice Shop, but the report's own author records it as a training feature, 'not a real-world vulnerability'. Whether an ever-present challenge tracker counts as an open security finding is not decidable from a retest, so the only defensible verdict is inconclusive; a confident still_open/fixed here breaches NFR-01."
+    }
+  ]
+}
