@@ -12,6 +12,29 @@ with a disposable database gets `make reset-db`, not Alembic.
 
 ## Entity relationships
 
+Two views of the same schema. The overview below fixes the relationships and
+their cardinalities; the detailed diagram after it adds every column. The
+overview is what the thesis reproduces — the full attribute listing is a
+reference artefact, unreadable at print size.
+
+<!-- thesis-fig: data-model -->
+```mermaid
+erDiagram
+    REPORTS ||--o{ FINDINGS : "yields"
+    FINDINGS ||--|{ FINDING_VERSIONS : "append-only lineage"
+    FINDINGS ||--o{ FINDING_NOTES : "stage-tagged notes"
+    FINDINGS ||--o{ RETEST_SESSIONS : "retest attempts"
+    FINDINGS ||--o{ VERDICTS : "determinations"
+    RETEST_SESSIONS ||--|{ SESSION_EVENTS : "append-only transcript"
+    RETEST_SESSIONS ||--o{ VERDICTS : "concluded by"
+    CHAT_SESSIONS ||--|{ CHAT_MESSAGES : "thread"
+    SETTINGS {
+        int id PK
+    }
+```
+
+### Full attribute listing
+
 ```mermaid
 erDiagram
     REPORTS ||--o{ FINDINGS : "yields"
@@ -138,6 +161,7 @@ Three properties of this schema carry most of the design weight:
 Findings are versioned, never overwritten. Version 1 is `extraction` — what the
 machine proposed. Every operator correction appends an `edit`.
 
+<!-- thesis-fig: version-lineage -->
 ```mermaid
 flowchart LR
     A["v1 — extraction<br/>what the machine proposed"]
@@ -168,6 +192,7 @@ overview rather than a specific stage.
 
 ## Retest session lifecycle (FR-17, ADR-0034)
 
+<!-- thesis-fig: session-lifecycle -->
 ```mermaid
 stateDiagram-v2
     direction LR
