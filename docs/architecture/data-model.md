@@ -195,7 +195,7 @@ overview rather than a specific stage.
 <!-- thesis-fig: session-lifecycle -->
 ```mermaid
 stateDiagram-v2
-    direction LR
+    direction TB
     [*] --> starting
 
     starting --> thinking: sandbox provisioned, first agent step

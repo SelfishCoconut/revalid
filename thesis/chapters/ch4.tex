@@ -13,15 +13,17 @@ deleted.
 Every diagram in this chapter is generated from the project's own architecture
 documentation rather than redrawn for the memoir. That is a deliberate
 application of the docs-as-code rule of Section~\ref{subsec:docs}: a figure
-copied by hand into \LaTeX{} is a second description of the system, and the
-second description is the one that silently goes stale.
+copied by hand into LaTeX is a second description of the system, and the second
+description is the one that silently goes stale.
 
 \section{From requirements to design}
 \label{sec:design-requirements}
 
 The requirements were elicited in an interview at the start of the project and
 recorded as a software-requirements specification, each with acceptance criteria
-that a later change had to keep satisfying. Table~\ref{tab:requirements}
+that a later change had to keep satisfying --- with four later requirements
+(FR-16 to FR-19) added as recorded change requests as the retest model evolved.
+Table~\ref{tab:requirements}
 summarises them. The table is worth reading for its gaps as much as its entries:
 of nineteen functional requirements, five no longer have an implementation, and
 that is a design outcome rather than an omission --- Section~\ref{sec:design-evolution}
@@ -36,7 +38,7 @@ argues why.
 \rowcolor{tema!10}
 \bft{Id} & \bft{Requirement} & \bft{Status in the delivered system} \\ \hline
 FR-01 & Ingest PDF penetration-test reports & Implemented \\ \hline
-FR-02 & Ingest structured reports (JSON) and manual entry & Implemented \\ \hline
+FR-02 & Ingest structured reports (JSON/XML) & Implemented for JSON and manual entry; the XML door was not built \\ \hline
 FR-03 & Extract structured findings with a language model & Implemented \\ \hline
 FR-04 & Generate executable retest plans & \emph{Repurposed} as the user-owned retest goal \\ \hline
 FR-05 & Human plan review and approval & \emph{Superseded} --- approval moved to every command \\ \hline
@@ -49,15 +51,15 @@ FR-11 & Results dashboard (web interface) & Implemented \\ \hline
 FR-12 & Machine-readable results export & Implemented \\ \hline
 FR-13 & Pluggable language-model backends & Implemented \\ \hline
 FR-14 & Browser-based probes & \emph{Dropped} --- subsumed by the sandbox \\ \hline
-FR-15 & Evaluation harness & Implemented \\ \hline
+FR-15 & Evaluation harness & Implemented (harness; the evaluation run is future work) \\ \hline
 FR-16 & Operator finding revision and annotation & Implemented \\ \hline
 FR-17 & Interactive agentic retest console & Implemented \\ \hline
 FR-18 & Reports chat assistant & Implemented \\ \hline
-FR-19 & CVSS and MITRE ATT\&CK enrichment & Implemented \\ \hline
-NFR-01 & Verdict reliability & Measured by the FR-15 harness \\ \hline
+FR-19 & CVSS and MITRE ATT\&CK enrichment & Implemented; ground-truth tagging pending \\ \hline
+NFR-01 & Verdict reliability & \emph{Not yet measured} --- the harness is built, the run is future work \\ \hline
 NFR-02 & Full reproducibility & Replayable session transcript \\ \hline
 NFR-03 & Safety (loopback only, no exposure) & Enforced by binding and topology \\ \hline
-NFR-04 & Data protection & Author's direct responsibility \\ \hline
+NFR-04 & Data protection & Satisfied by construction --- synthetic and lab data only \\ \hline
 NFR-05 & Maintainability & Enforced by the gate of Section~\ref{sec:ci} \\ \hline
 \end{tabular}
 \end{center}
@@ -119,7 +121,7 @@ process; durable state is a single SQLite file.
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[height=0.78\textheight]{figs/arch-containers.pdf}
+\includegraphics[height=0.62\textheight]{figs/arch-containers.pdf}
 \caption[Container view]{The container view. Everything inside the dashed
 boundary is one operating-system process bound to the loopback interface
 (NFR-03). The interface talks to the API over JSON and, during a retest, a
@@ -167,10 +169,14 @@ shape or a web-framework shape, and it is the reason the persistence layer could
 be reorganised twice --- once to version findings, once to collapse the verdict
 model --- without the domain types moving.
 
-\paragraph{One door to the database.} \texttt{db.py} is the only module that
-talks to SQLite. Every other module receives an open session and works through
-the mapped classes. The benefit is not purity but auditability: a question like
-``what writes a verdict row?'' has a bounded answer.
+\paragraph{One door to the schema.} \texttt{db.py} is the only module that
+defines a mapped class or opens a database engine; every other module receives an
+already-open session and works exclusively through those classes. No module
+writes SQL of its own and none constructs its own connection. The benefit is not
+purity but auditability: the persisted shape of the system has exactly one
+definition, so a question like ``what columns does a verdict have?'' has a single
+answer, and the two reorganisations described in
+Section~\ref{sec:design-evolution} each touched one file.
 
 \paragraph{One place a model is constructed.} \texttt{llm.py} is the only module
 that builds a language-model client. Every agent --- extraction, goal generation,
@@ -324,7 +330,7 @@ Figure~\ref{fig:arch-session-lifecycle} gives the states a session moves through
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[width=\textwidth]{figs/arch-session-lifecycle.pdf}
+\includegraphics[height=0.55\textheight]{figs/arch-session-lifecycle.pdf}
 \caption[Retest session lifecycle]{The session state machine. The loop between
 \emph{thinking}, \emph{awaiting\_command} and \emph{running\_command} is the
 gated cycle of Figure~\ref{fig:arch-gated-execution}. \emph{needs\_guidance} is
@@ -344,8 +350,19 @@ evidence trail that reads as diligent. The design therefore refuses to let
 its sandbox alive, and asks the operator to steer or to conclude manually. An
 earlier design bounded the agent's effort with a step budget and treated
 exhaustion of that budget as a give-up state; it was removed in favour of this
-one, because a budget measures effort and what matters is whether a conclusion
-was actually reached.
+one. ADR-0034 first retired the give-up state, leaving the budget to pause rather
+than terminate a session; ADR-0035 then removed the budget itself, on the grounds
+that a step meter reads to an operator like a broken progress bar and is redundant
+once the agent's own hand-back is a trigger. What remains is a single, meaningful
+cause: the agent says it has run out of ideas.
+
+A session is also not wholly durable, which is the cost promised in
+Section~\ref{sec:design-overview}. Its transcript, status and goal are persisted,
+but the live agent, its message history and its sandbox handle are held in an
+in-memory registry, so a backend restart abandons an in-flight session: the row
+survives in a non-terminal state and the sandbox has to be reclaimed separately.
+That is the price of the broker-free design, and it is bounded precisely because a
+session is something a human sits through rather than a job left to run unattended.
 
 \subsection{Steering, and the shape of operator control}
 
@@ -419,9 +436,10 @@ approving each command as it is proposed, with the previous command's output
 visible, is approving an action. Only the second is the kind of control the
 system claims to offer.
 
-\paragraph{What it cost, and what was kept.} Replacing it deleted roughly a
-thousand lines of working, tested code together with four requirements' worth of
-implementation, and it was done in deliberate slices with the old path kept
+\paragraph{What it cost, and what was kept.} Replacing it removed about
+5{,}500 lines of working, tested code from the backend in one slice and a further
+2{,}100 in the interface reshape that followed, together with five requirements'
+worth of implementation. It was done in deliberate slices, with the old path kept
 operational until the new one was complete. Two things were kept rather than
 rebuilt. The evidence-backed verdict of FR-09 survived, with its shape
 generalised so that proof could come from an arbitrary command's real output
@@ -436,8 +454,9 @@ presented as one. It was the correct first architecture: deterministic, easy to
 reason about, and the only sensible way to establish that a language model could
 be constrained enough to be trusted with a security decision at all. What it
 could not do was represent the interaction a revalidation actually is. The
-decision to delete it was made after the second design was demonstrably better on
-the same targets, and it was recorded --- with its rationale, its alternatives
-and its consequences --- in the architecture decision record that supersedes the
-four it replaces. That record, rather than the code that survived, is the most
-accurate artefact of the design work this chapter describes.
+decision to delete it was taken only once the agentic path covered the whole
+retest lifecycle end to end on the same lab targets, and it was recorded --- with
+its rationale, its alternatives and its consequences --- in ADR-0033, which
+supersedes the eight architecture decision records the batch path rested on. That
+record is the most accurate surviving artefact of the *reasoning* this chapter
+describes, which the remaining code cannot show.
