@@ -5,10 +5,14 @@ the agent is driven by Pydantic AI's ``FunctionModel``/``TestModel`` so the
 persistence + message-history wiring is proven offline.
 """
 
+import threading
+import time
 from collections.abc import Iterator
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -34,6 +38,7 @@ from revalid.findings import create_finding
 from revalid.reports_chat import (
     ReportsChatDeps,
     _history,
+    _read,
     _title_from,
     answer_question,
     build_reports_agent,
@@ -320,6 +325,80 @@ def test_agent_tools_execute_read_only(session: Session) -> None:
     assert reply.content  # TestModel echoes the tool outputs as JSON
     # Read-only: the corpus is unchanged after the agent ran its tools.
     assert corpus_overview(session).findings_total == 3
+
+
+class _CountingLock:
+    """A real lock that records how many times it was taken (issue #156)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.acquisitions = 0
+        self.max_concurrent = 0
+        self._held = 0
+
+    def __enter__(self) -> bool:
+        self._lock.acquire()
+        self.acquisitions += 1
+        self._held += 1
+        self.max_concurrent = max(self.max_concurrent, self._held)
+        return True
+
+    def __exit__(self, *exc: object) -> None:
+        self._held -= 1
+        self._lock.release()
+
+
+def test_read_serialises_concurrent_queries(session: Session) -> None:
+    """Overlapping tool bodies never share the session (the #156 race).
+
+    Without the lock this is exactly the pattern that corrupts the connection:
+    Pydantic AI runs sync tools in worker threads and starts several at once
+    when a turn emits several tool calls.
+    """
+    _seed(session)
+    deps = ReportsChatDeps(session=session)
+    live = 0
+    overlaps: list[int] = []
+    guard = threading.Lock()
+
+    def query(db: Session) -> int:
+        nonlocal live
+        with guard:
+            live += 1
+            overlaps.append(live)
+        time.sleep(0.005)  # widen the window a real query would occupy
+        result = corpus_overview(db).findings_total
+        with guard:
+            live -= 1
+        return result
+
+    ctx = cast(RunContext[ReportsChatDeps], SimpleNamespace(deps=deps))
+    threads = [threading.Thread(target=lambda: _read(ctx, query)) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert max(overlaps) == 1, "two tool bodies used the session at once"
+
+
+def test_every_agent_tool_takes_the_session_lock(session: Session) -> None:
+    """All four tools go through `_read`, so none can touch the session unguarded.
+
+    TestModel calls every registered tool once, so a tool that queried
+    `ctx.deps.session` directly would show up as a missing acquisition.
+    """
+    _seed(session)
+    lock = _CountingLock()
+    agent = build_reports_agent(TestModel())
+    chat = create_chat(session)
+
+    agent.run_sync("summarise everything", deps=ReportsChatDeps(session=session, lock=lock))
+
+    assert lock.acquisitions >= 4, "a tool bypassed _read and used the session directly"
+    assert lock.max_concurrent == 1
+    assert corpus_overview(session).findings_total == 3  # still read-only
+    assert chat.id is not None
 
 
 # NOTE: stream_answer (the async streaming counterpart of answer_question) is
