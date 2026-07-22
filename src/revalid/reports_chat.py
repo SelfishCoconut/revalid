@@ -15,9 +15,11 @@ without an LLM — that the agent's tools wrap thinly.
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
@@ -277,9 +279,43 @@ def get_finding(session: Session, finding_id: int) -> FindingDetail | None:
 
 @dataclass
 class ReportsChatDeps:
-    """Runtime dependency injected into the reports agent's tools: a DB session."""
+    """Runtime dependency injected into the reports agent's tools: a DB session.
+
+    Attributes:
+        session: The read-only DB session every tool queries through.
+        lock: Serialises the tool bodies that share ``session`` (issue #156).
+            Pydantic AI runs **sync** tools in worker threads and runs them
+            *concurrently* when one model turn emits several tool calls — the
+            normal case for a corpus question. A SQLAlchemy ``Session`` is not
+            thread-safe, and neither engine this app builds stops the overlap:
+            the in-memory engine shares one connection through ``StaticPool``
+            with ``check_same_thread=False``, and the pysqlite dialect disables
+            that same guard for file databases. Overlapping use therefore
+            corrupts the connection's result/parameter state rather than
+            raising, surfacing as ``InterfaceError`` or an ``IndexError`` from
+            the result proxy. Concurrency buys nothing here — these are short
+            local SQLite reads — so the tools take turns.
+    """
 
     session: Session
+    lock: AbstractContextManager[bool] = field(default_factory=threading.Lock)
+
+
+def _read[T](ctx: RunContext[ReportsChatDeps], query: Callable[[Session], T]) -> T:
+    """Run one read-only query against the shared session, serialised (issue #156).
+
+    The single seam through which every agent tool touches the DB, so the
+    locking discipline is stated once instead of being re-derived in each tool.
+
+    Args:
+        ctx: The tool's run context, carrying the session and its lock.
+        query: A read-only query function taking the session.
+
+    Returns:
+        Whatever ``query`` returns.
+    """
+    with ctx.deps.lock:
+        return query(ctx.deps.session)
 
 
 _INSTRUCTIONS = """\
@@ -323,17 +359,20 @@ def build_reports_agent(
         defer_model_check=True,
     )
 
+    # Every tool body goes through `_read`: the tools may run concurrently in
+    # worker threads and share one non-thread-safe Session (issue #156).
+
     @agent.tool
     def get_corpus_overview(ctx: RunContext[ReportsChatDeps]) -> CorpusOverview:
         """Return whole-corpus counts: reports by status, findings by severity, verdicts."""
-        return corpus_overview(ctx.deps.session)
+        return _read(ctx, corpus_overview)
 
     @agent.tool
     def list_all_reports(
         ctx: RunContext[ReportsChatDeps], include_archived: bool = False
     ) -> list[ReportBrief]:
         """List reports (id, filename, status, finding count); archived excluded by default."""
-        return list_reports(ctx.deps.session, include_archived=include_archived)
+        return _read(ctx, lambda s: list_reports(s, include_archived=include_archived))
 
     @agent.tool
     def search_findings(
@@ -343,12 +382,14 @@ def build_reports_agent(
         report_id: int | None = None,
     ) -> FindingSearch:
         """Search current findings by keyword/severity/report; returns an exact total."""
-        return find_findings(ctx.deps.session, query=query, severity=severity, report_id=report_id)
+        return _read(
+            ctx, lambda s: find_findings(s, query=query, severity=severity, report_id=report_id)
+        )
 
     @agent.tool
     def finding_detail(ctx: RunContext[ReportsChatDeps], finding_id: int) -> FindingDetail | None:
         """Return one finding's full content and its latest verdict, or null if unknown."""
-        return get_finding(ctx.deps.session, finding_id)
+        return _read(ctx, lambda s: get_finding(s, finding_id))
 
     return agent
 
