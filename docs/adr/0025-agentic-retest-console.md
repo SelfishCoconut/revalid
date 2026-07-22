@@ -374,3 +374,58 @@ Measured end to end on a live model: first frame at +3.7 s, last at +12.5 s of a
 14.0 s turn, 36 WebSocket frames, 3.5 KB of reasoning, and the channel empty
 afterwards.
 The decision above is otherwise unchanged.
+
+## Update — 2026-07-22: what the egress lock actually guarantees (issue #181)
+
+Section 2 above says the sandbox is "**physically unable** to reach anything but
+the lab" and calls the arrangement "the FR-06 allowlist becomes network
+membership". The first claim is right in spirit and overstated in letter; the
+second is now the *only* mechanism, because `src/revalid/allowlist.py` was
+deleted with the batch path (ADR-0033). Nothing anywhere inspects a target
+string. This note records the real boundary so the docs stop promising a guard
+that does not exist.
+
+**What holds.** The per-session `internal=True` bridge has no gateway and
+dockerd drops off-bridge traffic. Command content genuinely never needs
+inspecting: `curl` to an arbitrary IP, `nmap` sweeps, `--proxy`, IPv6 and
+`bash -c` are all equally routeless. Container escape surface is likewise clean —
+no Docker socket, no `privileged`, no `network_mode=host`, no capability grants,
+no host mounts. The approval gate is structural in Pydantic AI, not advisory.
+
+**What the wording hid.**
+
+1. *The reachable set is exactly one hardcoded container.* `DEFAULT_LAB_CONTAINER`
+   is `revalid-juice-shop` and `app.py` constructs `DockerSandbox(sid)` with no
+   override — no env var, no setting, no UI field. **Public IPs are unreachable
+   by construction**, and so is the host's own `localhost`: inside the sandbox,
+   `localhost` is the sandbox. The lab answers only as
+   `http://revalid-juice-shop:3000`. A session scoped to `http://localhost:3000/…`
+   — what a report's `affected_endpoints` typically say — cannot connect, and
+   that failure presents as a connection error rather than a refusal.
+2. *The lab container is dual-homed.* `network.connect()` **adds** the internal
+   network; it never removes `lab_default`, which retains internet and
+   host-gateway routing. The sandbox cannot route through it (no `NET_ADMIN`,
+   no forwarding), so this is not a bypass — but the egress lock protects
+   against *the agent*, not against code the agent successfully executes **on
+   the target**. For an RCE finding, that distinction is the whole point.
+3. *`internal=True` does not reliably block DNS.* libnetwork's embedded resolver
+   forwards external queries from the **daemon's** namespace when the host
+   resolver is a loopback stub. The manual verification recorded above is
+   accurate on this machine (a non-loopback Tailscale resolver), but on
+   systemd-resolved hosts — Debian/Ubuntu defaults, including the Ubuntu runners
+   that execute `system-tests.yml` — the "egress-locked" container gets working
+   recursive DNS, and the image ships `dnsutils`. No TCP egress, but a live
+   covert channel.
+4. *The system test proves less than it looks like it proves.*
+   `test_retest_session_system.py` asserts only that a curl to `example.com`
+   fails — which passes on DNS failure alone. It never probes a raw IP literal,
+   so it would not catch (3) or a routing regression.
+
+**Not changed here.** This is a documentation correction, not a decision
+reversal: the network-membership boundary stays, and it remains the right
+mechanism. Follow-ups are tracked separately — making the lab target
+configurable, pinning the sandbox resolver, strengthening the egress assertion,
+and an egress-proxy design if retesting real external hosts is ever in scope.
+Until such a design exists and is recorded here, **retesting a public IP is not
+supported**, and the §6 rule stands: non-lab targets require written
+authorization recorded as an ADR first.
