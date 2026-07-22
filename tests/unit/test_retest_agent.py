@@ -10,13 +10,129 @@ lets the sandbox execute and the model conclude.
 
 from __future__ import annotations
 
-from pydantic_ai import DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
-from pydantic_ai.models.function import FunctionModel
-from tests._retest_helpers import script_respond_then_conclude, script_run_then_conclude
+from collections.abc import Callable
+
+from pydantic_ai import (
+    Agent,
+    AgentRunResult,
+    DeferredToolRequests,
+    DeferredToolResults,
+    ToolApproved,
+    ToolDenied,
+)
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+)
+from pydantic_ai.models.function import AgentInfo, FunctionModel
+from tests._retest_helpers import (
+    has_command_result,
+    script_respond_then_conclude,
+    script_run_then_conclude,
+)
 
 from revalid.domain import VerdictStatus
-from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, build_retest_agent
+from revalid.retest_agent import (
+    MAX_COMMAND_TIMEOUT,
+    ConcludeOutput,
+    RetestSessionDeps,
+    build_retest_agent,
+    clamp_timeout,
+)
 from revalid.sandbox import CommandResult, FakeSandbox
+
+_RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
+_RetestRun = AgentRunResult[ConcludeOutput | DeferredToolRequests]
+_Script = Callable[[list[ModelMessage], AgentInfo], ModelResponse]
+
+
+def _script_run_with_timeout(seconds: int) -> _Script:
+    """A FunctionModel script that proposes one command with ``timeout_seconds``, then concludes."""
+
+    def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if not has_command_result(messages):
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="run_command",
+                        args={
+                            "command": "nmap -Pn -T4 --top-ports 100 revalid-juice-shop",
+                            "rationale": "scan the target for open services",
+                            "timeout_seconds": seconds,
+                        },
+                    )
+                ]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=info.output_tools[0].name,
+                    args={"status": "still_open", "rationale": "port still open"},
+                )
+            ]
+        )
+
+    return script
+
+
+def _approve_and_resume(
+    agent: _RetestAgent, deps: RetestSessionDeps, first: _RetestRun
+) -> _RetestRun:
+    """Approve the single deferred call in ``first`` and return the resumed run."""
+    output = first.output
+    assert isinstance(output, DeferredToolRequests)
+    [call] = output.approvals
+    results = DeferredToolResults()
+    results.approvals[call.tool_call_id] = ToolApproved()
+    return agent.run_sync(
+        deps=deps, message_history=first.all_messages(), deferred_tool_results=results
+    )
+
+
+def test_clamp_timeout_bounds_the_agent_choice() -> None:
+    """The agent-chosen timeout is clamped to [1, MAX] so it can never hang or be zero."""
+    assert clamp_timeout(0) == 1
+    assert clamp_timeout(-5) == 1
+    assert clamp_timeout(45) == 45
+    assert clamp_timeout(99999) == MAX_COMMAND_TIMEOUT
+
+
+def test_run_command_passes_agent_chosen_timeout_to_sandbox() -> None:
+    """The model's ``timeout_seconds`` reaches ``sandbox.exec`` (issue #150)."""
+    box = FakeSandbox([CommandResult(stdout="80/tcp open", stderr="", exit_code=0, elapsed_ms=900)])
+    deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
+    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(120)))
+    first = agent.run_sync("Retest the open-port finding.", deps=deps)
+    _approve_and_resume(agent, deps, first)
+    assert box.timeouts == [120]
+
+
+def test_run_command_clamps_an_excessive_timeout() -> None:
+    """A model asking for an unbounded wait is clamped to the ceiling before it runs."""
+    box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)])
+    deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
+    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(10_000)))
+    first = agent.run_sync("Retest.", deps=deps)
+    _approve_and_resume(agent, deps, first)
+    assert box.timeouts == [MAX_COMMAND_TIMEOUT]
+
+
+def test_run_command_flags_a_timed_out_command_to_the_model() -> None:
+    """A command killed for overrunning (exit 124) is annotated in the tool return."""
+    box = FakeSandbox([CommandResult(stdout="", stderr="", exit_code=124, elapsed_ms=30_000)])
+    deps = RetestSessionDeps(sandbox=box, emit_output=lambda *_: None)
+    agent = build_retest_agent(FunctionModel(_script_run_with_timeout(30)))
+    first = agent.run_sync("Retest.", deps=deps)
+    second = _approve_and_resume(agent, deps, first)
+    returns = [
+        str(part.content)
+        for msg in second.all_messages()
+        for part in getattr(msg, "parts", [])
+        if isinstance(part, ToolReturnPart) and part.tool_name == "run_command"
+    ]
+    assert returns and "terminated" in returns[0] and "30s" in returns[0]
 
 
 def test_agent_exposes_no_set_plan_tool() -> None:

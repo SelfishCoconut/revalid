@@ -155,11 +155,26 @@ behind by a crashed prior session of the same id (it would otherwise 409
 forever), and `stop()` is tolerant at every step of "already gone" so a partial
 failure cannot block the rest of the teardown.
 
+Each approved command runs under an **agent-chosen timeout** (issue #150): the
+`run_command` tool takes a `timeout_seconds` the model sets to fit the command (a
+few seconds for a `curl`, more for a scan), clamped to a hard ceiling so it can
+never ask for an unbounded wait. The sandbox enforces it in-container by wrapping
+the command with `timeout`, so a hanging or over-long command (an nmap sweep, or
+one blocked on stdin) is killed rather than wedging the session — and the model
+observes that it timed out and can retry with a narrower scope.
+
 ### The loop
+
+The operator owns the session's lifecycle (issue #150): besides approving each
+command they can **Start** a deferred session, **Stop** a running one (a
+cooperative pause that keeps the sandbox alive), **Resume** it, **Restart** into
+a fresh attempt, or **Conclude** it themselves at any live point.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> starting
+    [*] --> idle: Restart (deferred)
+    [*] --> starting: launch
+    idle --> starting: operator Start
     starting --> thinking: sandbox up, first agent step
     thinking --> awaiting_command: proposes run_command (gated)
     awaiting_command --> running_command: operator approves
@@ -167,12 +182,15 @@ stateDiagram-v2
     running_command --> thinking: output fed back to the agent
     thinking --> needs_guidance: agent is out of ideas (ADR-0034)
     needs_guidance --> thinking: operator steers → Keep going
+    awaiting_command --> stopped: operator Stop
+    stopped --> awaiting_command: operator Resume
     needs_guidance --> concluded: operator concludes manually
     thinking --> concluded: ConcludeOutput(fixed | still_open)
+    stopped --> concluded: operator concludes manually
     thinking --> error: unhandled failure
     concluded --> [*]
     error --> [*]
-    starting --> ended: operator ends the session
+    thinking --> ended: operator ends the session
     ended --> [*]
 ```
 
@@ -187,6 +205,12 @@ orchestrator records a `command_proposed` event, sets the status to
 (a double-clicked Approve) are made safe by a compare-and-swap on the pending
 call id under a lock.
 
+Two non-terminal states give the operator lifecycle control: **`idle`** (created
+but not started — a Restart lands here so the fresh attempt never auto-runs; the
+sandbox is provisioned only on Start) and **`stopped`** (an operator pause that
+keeps the sandbox alive so Resume can continue). Stop is *cooperative*: a command
+already running finishes and its output is recorded before the session parks.
+
 The agent has exactly two tools: `run_command` (gated) and `respond` (prose to
 the operator, runs nothing).
 
@@ -199,7 +223,10 @@ the operator, runs nothing).
 | Send a message | `.../message` | steers the agent, or asks it a question |
 | Change the goal | `.../goal`, `.../goal/regenerate` | the goal stays user-owned |
 | Free launch | `.../free-launch` | auto-approves the agent's commands so the loop runs unattended — the one deliberate relaxation of the gate (ADR-0029); the egress lock still holds |
-| Keep going / conclude a paused session | `.../continue`, `.../conclude` | the ADR-0034 pause-and-ask exits |
+| **Start** | `.../start` | provisions the sandbox and runs the first step of an `idle` (deferred/Restarted) session |
+| **Stop / Resume** | `.../stop`, `.../resume` | cooperatively pause a running session (sandbox kept alive) and continue it (issue #150) |
+| **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
+| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes a `needs_guidance` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
 | End it | `.../end` | terminal; sandbox torn down |
 
 ### Concluding — and the honest "I don't know"

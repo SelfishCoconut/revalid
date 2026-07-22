@@ -159,8 +159,16 @@ class RetestSessionStatus(enum.StrEnum):
     the non-terminal ``NEEDS_GUIDANCE`` state, asking the operator to steer or
     conclude (ADR-0034). ``GIVEN_UP`` is retired — kept only so any legacy row
     stays terminal.
+
+    Two further non-terminal states give the operator lifecycle control (issue
+    #150): ``IDLE`` — created but not yet started, awaiting a ``Start`` (a
+    ``Restart`` lands here so it never auto-runs); and ``STOPPED`` — the operator
+    paused a running session, its sandbox kept alive, awaiting ``Resume``.
     """
 
+    #: Created but not started: no sandbox yet, awaiting an operator ``Start``.
+    #: A ``Restart`` opens a session here so the fresh attempt never auto-runs.
+    IDLE = "idle"
     STARTING = "starting"
     #: The agent is computing its next turn (an LLM call is in flight). Emitted
     #: before each ``agent.run_sync`` so the console can show a live "thinking"
@@ -172,6 +180,9 @@ class RetestSessionStatus(enum.StrEnum):
     #: handed back to the operator (ADR-0034). Non-terminal — the sandbox stays
     #: alive; the operator steers and keeps going, or concludes.
     NEEDS_GUIDANCE = "needs_guidance"
+    #: The operator paused a running session (issue #150). Non-terminal — the
+    #: sandbox stays alive; ``Resume`` continues, ``Restart``/``Conclude`` end it.
+    STOPPED = "stopped"
     CONCLUDED = "concluded"
     GIVEN_UP = "given_up"
     ENDED = "ended"

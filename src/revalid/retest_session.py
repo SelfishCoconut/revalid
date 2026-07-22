@@ -40,7 +40,14 @@ from revalid.domain import (
     SessionEventKind,
     VerdictStatus,
 )
-from revalid.retest_agent import ConcludeOutput, RetestSessionDeps, format_observations
+from revalid.retest_agent import (
+    DEFAULT_COMMAND_TIMEOUT,
+    MAX_COMMAND_TIMEOUT,
+    ConcludeOutput,
+    RetestSessionDeps,
+    clamp_timeout,
+    format_observations,
+)
 from revalid.sandbox import CommandResult, Sandbox
 
 _TERMINAL: frozenset[RetestSessionStatus] = frozenset(
@@ -71,8 +78,9 @@ def create_session(
     finding_id: int,
     model: str,
     free_launch: bool = False,
+    deferred: bool = False,
 ) -> RetestSessionRecord:
-    """Insert a ``starting`` session row and return it.
+    """Insert a session row and return it.
 
     Args:
         session: Active DB session.
@@ -80,10 +88,14 @@ def create_session(
         model: The resolved LLM model string driving the agent.
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (plan changes stay gated regardless). FR-17 Slice 5.
+        deferred: When ``True``, open the session ``idle`` (created but not started)
+            so it waits for an operator ``Start`` instead of auto-running — the
+            Restart path (issue #150). Default ``False`` opens it ``starting``.
     """
+    status = RetestSessionStatus.IDLE if deferred else RetestSessionStatus.STARTING
     record = RetestSessionRecord(
         finding_id=finding_id,
-        status=RetestSessionStatus.STARTING.value,
+        status=status.value,
         model=model,
         free_launch=free_launch,
     )
@@ -122,6 +134,38 @@ def load_events_after(session: Session, session_id: int, after_seq: int) -> list
         .order_by(SessionEventRecord.seq)
     ).all()
     return [{"seq": r.seq, "kind": r.kind, "payload": r.payload} for r in rows]
+
+
+def _latest_payload(events: list[dict[str, Any]], kind: SessionEventKind) -> dict[str, Any] | None:
+    """Return the payload of the most recent event of ``kind``, or ``None``."""
+    for event in reversed(events):
+        if event["kind"] == kind.value:
+            payload: dict[str, Any] = event["payload"]
+            return payload
+    return None
+
+
+def session_goal(session: Session, session_id: int) -> tuple[str, ...]:
+    """Return the session's current goal steps (latest ``plan_updated``), or empty.
+
+    Reads the goal back from the transcript so a deferred (``idle``) session's
+    Start (issue #150) reconstructs the goal recorded at create time, without any
+    in-memory carry that a backend restart would lose.
+    """
+    payload = _latest_payload(
+        load_events_after(session, session_id, 0), SessionEventKind.PLAN_UPDATED
+    )
+    steps = payload.get("steps") if payload else None
+    return tuple(str(s) for s in steps) if isinstance(steps, list) else ()
+
+
+def session_scope(session: Session, session_id: int) -> tuple[str, ...]:
+    """Return the session's retest scope (the launch ``target_set`` endpoints), or empty."""
+    payload = _latest_payload(
+        load_events_after(session, session_id, 0), SessionEventKind.TARGET_SET
+    )
+    endpoints = payload.get("endpoints") if payload else None
+    return tuple(str(e) for e in endpoints) if isinstance(endpoints, list) else ()
 
 
 def set_status(session: Session, session_id: int, status: RetestSessionStatus) -> None:
@@ -325,6 +369,11 @@ class LiveSession:
     #: handed back. Set by ``_pause_for_guidance``, cleared by ``continue_session``;
     #: the free-launch loop stops while it is ``True``.
     awaiting_guidance: bool = False
+    #: The operator pressed Stop (issue #150): a cooperative pause. Set by
+    #: ``stop_session``, cleared by ``resume_session``. An in-flight step that
+    #: finishes while this is ``True`` parks the session in ``stopped`` instead of
+    #: advancing, and the free-launch loop halts — the sandbox is kept alive.
+    stopped: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     #: Manual operator commands (`!`) run since the agent's last turn, buffered
     #: here and surfaced to the agent on its next turn so it observes what the
@@ -455,6 +504,12 @@ def _emit_proposal(session: Session, session_id: int, live: LiveSession, call: A
         {
             "command": args["command"],
             "rationale": args["rationale"],
+            # The agent-chosen per-command cap (FR-17): surfaced at the gate so the
+            # operator sees how long the command may run before approving. Absent
+            # when the model omits it — the tool then applies its own default.
+            "timeout_seconds": clamp_timeout(
+                int(args.get("timeout_seconds", DEFAULT_COMMAND_TIMEOUT))
+            ),
             "tool_call_id": call.tool_call_id,
         },
     )
@@ -481,7 +536,11 @@ def _dispatch_output(
     output = result.output
     if isinstance(output, DeferredToolRequests) and output.approvals:
         _emit_proposal(session, session_id, live, output.approvals[0])
-        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
+        # If the operator pressed Stop while this step was thinking (issue #150),
+        # hold the freshly proposed command and park in `stopped` rather than
+        # opening the gate; Resume re-opens it. The pending call is retained.
+        park = RetestSessionStatus.STOPPED if live.stopped else RetestSessionStatus.AWAITING_COMMAND
+        set_status(session, session_id, park)
     elif isinstance(output, ConcludeOutput):
         if output.status is VerdictStatus.INCONCLUSIVE:
             # The agent hands back rather than terminating: it has exhausted the
@@ -677,6 +736,7 @@ def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) ->
             or not live.free_launch
             or live.pending_call_id is None
             or live.awaiting_guidance
+            or live.stopped  # operator pressed Stop (issue #150): halt auto-run
         ):
             return
         call_id = _consume_pending_call(live, live.pending_call_id)
@@ -785,7 +845,7 @@ def submit_human_command(
     session_id: int,
     command: str,
     *,
-    timeout: float = 30.0,
+    timeout: int = MAX_COMMAND_TIMEOUT,
 ) -> None:
     """Run a manual operator command (`!`) in the live session's sandbox (FR-17 Slice 2).
 
@@ -803,12 +863,14 @@ def submit_human_command(
         registry: The live-session registry (holds the sandbox + observation buffer).
         session_id: The retest session to run the command in.
         command: The exact shell command the operator submitted (without the `!`).
-        timeout: Per-command timeout, the same limit applied to the agent's commands.
+        timeout: Per-command cap in seconds. Defaults to the hard ceiling — the
+            operator ran it deliberately (it may be a slow scan) — and is clamped
+            to that ceiling so even a manual command can never wedge the sandbox.
     """
     live = registry.get(session_id)
     if live is None:
         return
-    result = live.sandbox.exec(command, timeout=timeout)
+    result = live.sandbox.exec(command, timeout=clamp_timeout(timeout))
     append_event(
         session,
         session_id,
@@ -1022,6 +1084,50 @@ def continue_session(session: Session, registry: SessionRegistry, session_id: in
     _resume_run(session, registry, session_id, live)
 
 
+def stop_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Operator pauses a running session — Stop (issue #150).
+
+    A cooperative pause: sets the live ``stopped`` flag and moves the row to the
+    non-terminal ``STOPPED`` state, keeping the sandbox alive. A command already
+    running finishes (its output is recorded) and an in-flight agent step, on
+    completion, parks in ``stopped`` rather than advancing (see
+    :func:`_dispatch_output`); the free-launch loop halts (:func:`_drive_auto`).
+    A no-op if the session is not live or is already terminal or stopped.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or RetestSessionStatus(record.status) in _TERMINAL:
+        return
+    live = registry.get(session_id)
+    if live is None or RetestSessionStatus(record.status) is RetestSessionStatus.STOPPED:
+        return
+    live.stopped = True
+    set_status(session, session_id, RetestSessionStatus.STOPPED)
+
+
+def resume_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Operator resumes a stopped session — Resume (issue #150).
+
+    Clears the ``stopped`` flag and continues where the pause left off: if a
+    command was held pending when the operator stopped, the gate re-opens
+    (``awaiting_command``, then the free-launch loop drives it if enabled);
+    otherwise the agent is re-run for its next step. A no-op unless the session
+    is in ``STOPPED`` with a live agent (a stopped session that outlived a backend
+    restart has no sandbox — the operator restarts it instead).
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or RetestSessionStatus(record.status) is not RetestSessionStatus.STOPPED:
+        return
+    live = registry.get(session_id)
+    if live is None:
+        return
+    live.stopped = False
+    if live.pending_call_id is not None:
+        set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
+        _drive_auto(session, registry, session_id)
+    else:
+        _resume_run(session, registry, session_id, live)
+
+
 def conclude_session(
     session: Session,
     registry: SessionRegistry,
@@ -1031,10 +1137,14 @@ def conclude_session(
 ) -> None:
     """Operator manually concludes a session with a determination — ADR-0034.
 
-    The operator's own verdict for a paused (or otherwise live) session: writes it
-    (``actor="operator"``, the only path that can record ``inconclusive``) and
-    tears down the sandbox. A no-op if the session is already terminal. Works even
-    on an orphaned paused session (the verdict is recorded; the teardown no-ops).
+    The operator's own verdict, recordable at ANY live point in the retest (issue
+    #150) — not only at a ``needs_guidance`` pause: while a command awaits approval,
+    or even while the agent is mid-step. Writes the verdict (``actor="operator"``,
+    the only path that can record ``inconclusive``) and tears down the sandbox. A
+    no-op if the session is already terminal. Works on an orphaned session too (the
+    verdict is recorded; the teardown no-ops). When invoked mid-step, the in-flight
+    agent turn's resulting failure is swallowed rather than clobbering this verdict
+    (see :func:`_fail`).
 
     Args:
         session: Active DB session for this call.
@@ -1058,7 +1168,22 @@ def conclude_session(
 
 
 def _fail(session: Session, registry: SessionRegistry, session_id: int, detail: str) -> None:
-    """Record an ``error`` event, set status ``error``, and tear down (orchestration boundary)."""
+    """Record an ``error`` event, set status ``error``, and tear down (orchestration boundary).
+
+    Guards the conclude-anytime race (issue #150): the operator may conclude or end
+    a session while an agent step is still in flight (``thinking``/``running_command``).
+    Concluding tears the sandbox down, which makes the in-flight ``run_command`` raise —
+    and that exception must NOT overwrite the operator's just-recorded verdict with an
+    ``error``. So if the row is already terminal (a conclude/end committed on another
+    DB session — hence the ``refresh`` to observe it), swallow the failure and only
+    finish the teardown.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is not None:
+        session.refresh(record)
+        if RetestSessionStatus(record.status) in _TERMINAL:
+            _teardown(registry, session_id)
+            return
     append_event(session, session_id, SessionEventKind.ERROR, {"detail": detail})
     set_status(session, session_id, RetestSessionStatus.ERROR)
     _teardown(registry, session_id)

@@ -65,7 +65,7 @@ function renderApp() {
   );
 }
 
-describe("Start retest flow (route-level)", () => {
+describe("Open-console flow (route-level)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(client.listFindings).mockResolvedValue([finding]);
@@ -76,13 +76,13 @@ describe("Start retest flow (route-level)", () => {
     vi.mocked(client.startRetestSession).mockResolvedValue(createdSession);
   });
 
-  it("opens the console on the just-created session after Start retest, without bouncing to goal", async () => {
+  it("opens the console on the just-created session after Open console, without bouncing to goal", async () => {
     renderApp();
 
     // Wait for the draft to seed the textarea, confirming GoalStage mounted.
     await screen.findByDisplayValue(/confirm endpoint/);
 
-    await userEvent.click(screen.getByRole("button", { name: /start retest/i }));
+    await userEvent.click(screen.getByRole("button", { name: /open console/i }));
 
     // Must land on the console for the *new* session (id 5), not redirect
     // back to /goal because the sessions cache was still the stale `[]`.

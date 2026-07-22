@@ -7,7 +7,6 @@ import {
   adjudicateSession,
   approveCommand,
   concludeSession,
-  continueSession,
   endRetestSession,
   getRetestSession,
   regenerateSessionGoal,
@@ -15,12 +14,29 @@ import {
   setFreeLaunch,
   setSessionGoal,
   startRetestSession,
+  stopSession,
   submitHumanCommand,
   submitMessage,
   type SessionEvent,
 } from "../api/client";
 import { RetestTerminal } from "../components/RetestTerminal";
 import { StatusBadge } from "../components/StatusBadge";
+import {
+  AlertIcon,
+  CheckIcon,
+  CrossIcon,
+  ExitIcon,
+  FlagIcon,
+  GoalIcon,
+  PauseIcon,
+  PencilIcon,
+  PowerIcon,
+  RestartIcon,
+  SendIcon,
+  TargetIcon,
+  TerminalIcon,
+  VerdictIcon,
+} from "../components/icons";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { queryKeys } from "../hooks/queryKeys";
@@ -68,6 +84,9 @@ function toTerminalLines(events: SessionEvent[]): string[] {
 /** Session statuses past which the sandbox is gone, so `!` commands can't run. */
 const OVER_STATUSES = new Set(["concluded", "ended", "given_up", "error"]);
 
+/** Statuses where the agent is actively working, so the operator can Stop it (#150). */
+const RUNNING_STATUSES = new Set(["starting", "thinking", "awaiting_command", "running_command"]);
+
 /** Extract the ordered plan steps from an event payload (defensively typed). */
 function payloadSteps(payload: Record<string, unknown>): string[] {
   return Array.isArray(payload.steps) ? payload.steps.map(String) : [];
@@ -112,11 +131,13 @@ function isThinking(status: string): boolean {
 /** A short, user-facing label for the session's lifecycle status. */
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
+    idle: "Not started",
     starting: "Working",
     thinking: "Working",
     running_command: "Working",
     awaiting_command: "Awaiting your approval",
     needs_guidance: "Paused — needs you",
+    stopped: "Paused by you",
     concluded: "Concluded",
     given_up: "Ended",
     ended: "Ended",
@@ -238,20 +259,30 @@ export function RetestSession({
     mutationFn: () => endRetestSession(id),
   });
   // Restart abandons this attempt and opens a fresh session for the same finding,
-  // seeded with the current goal so the operator keeps their framing. The old
-  // session is ended first to free its sandbox; then the finding's session list is
-  // refreshed and the view follows the new session (the finding stage renders its
-  // newest session).
+  // seeded with the current goal + scope so the operator keeps their framing. The
+  // fresh session is opened **deferred** (issue #150): it lands `idle` and waits for
+  // an explicit Start rather than auto-running. The old session is ended first to
+  // free its sandbox; then the finding's session list is refreshed and the view
+  // follows the new session (the finding stage renders its newest session).
   const restartMutation = useMutation({
-    mutationFn: ({ findingId, goal }: { findingId: number; goal: string[] }) =>
+    mutationFn: ({ findingId, goal, scope }: { findingId: number; goal: string[]; scope: string[] }) =>
       endRetestSession(id).then(() =>
-        startRetestSession(findingId, goal.length > 0 ? { initial_goal: goal } : undefined),
+        startRetestSession(findingId, {
+          deferred: true,
+          ...(goal.length > 0 ? { initial_goal: goal } : {}),
+          ...(scope.length > 0 ? { target_endpoints: scope } : {}),
+        }),
       ),
     onSuccess: async (_fresh, { findingId }) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.findingSessions(findingId) });
       navigate(`/findings/${String(findingId)}/retest`);
     },
   });
+  // Stop pauses a running session, keeping its sandbox alive (issue #150). It has
+  // no Start/Resume counterpart in the UI: the server wakes a parked session when
+  // the operator messages it (#163), so `POST …/message` is the only resume path
+  // the console needs. The lifecycle routes themselves remain as programmatic API.
+  const stopMutation = useMutation({ mutationFn: () => stopSession(id) });
   // The operator's own commands (`!`) run ungated in the same sandbox; separate
   // mutation so its pending/error state is independent of the gate buttons.
   const humanCommandMutation = useMutation({
@@ -292,11 +323,8 @@ export function RetestSession({
   });
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
-  // Pause-and-ask (ADR-0034): when the session is paused for guidance, Keep going
-  // raises the budget and resumes; Conclude records the operator's determination.
-  const continueMutation = useMutation({
-    mutationFn: () => continueSession(id),
-  });
+  // Pause-and-ask (ADR-0034): at a guidance pause the operator either replies —
+  // which resumes the agent server-side (#163) — or concludes the retest here.
   const concludeMutation = useMutation({
     mutationFn: (v: { status: string; rationale: string }) =>
       concludeSession(id, v.status, v.rationale),
@@ -336,6 +364,7 @@ export function RetestSession({
             approveMutation.mutate(toolCallId);
           }}
         >
+          <CheckIcon />
           Approve
         </Button>
         <Button
@@ -345,6 +374,7 @@ export function RetestSession({
             rejectMutation.mutate(toolCallId);
           }}
         >
+          <CrossIcon />
           Reject
         </Button>
         <span className="text-[11px] text-faint">{note}</span>
@@ -365,12 +395,22 @@ export function RetestSession({
   const trimmed = input.trim();
   const commandTrimmed = command.trim();
   const sessionOver = OVER_STATUSES.has(status);
+  // Lifecycle-derived flags (issue #150). `idle` = created but not started (no
+  // sandbox); `stopped` = operator-paused (sandbox alive). `sandboxLive` gates the
+  // actions that need a running sandbox — `!` commands, Conclude, Stop.
+  const isIdle = status === "idle";
+  const isStopped = status === "stopped";
+  const isRunning = RUNNING_STATUSES.has(status);
+  const sandboxLive = !sessionOver && !isIdle;
   const findingId = record?.finding_id ?? null;
-  // The composer now sends chat messages only (Slice 4); operator commands live in
-  // the terminal's own prompt (they run in the sandbox and the agent observes them,
-  // Slice 2). Each needs non-empty content and a session that hasn't ended.
+  // The composer sends chat messages only (Slice 4); operator commands live in the
+  // terminal's own prompt (they run in the sandbox and the agent observes them,
+  // Slice 2). A `!` command still needs a live sandbox — but a *message* does not:
+  // the chat is the lifecycle control (#163), so messaging an `idle` session is
+  // exactly how it gets provisioned and started. Only a session that is over
+  // (concluded/ended/error) has nobody left to talk to.
   const canSendMessage = trimmed.length > 0 && !sessionOver;
-  const canRunCommand = commandTrimmed.length > 0 && !sessionOver;
+  const canRunCommand = commandTrimmed.length > 0 && sandboxLive;
 
   // Keep the newest turn in view as the transcript streams in. `scrollTop`
   // assignment is a no-op under jsdom, so tests need no scroll polyfill.
@@ -408,6 +448,11 @@ export function RetestSession({
           <code className="mt-2 block overflow-x-auto rounded-md border border-line bg-ink/50 px-3 py-2 font-mono text-[13px] text-fg">
             <span className="text-faint">$</span> {String(event.payload.command ?? "")}
           </code>
+          {typeof event.payload.timeout_seconds === "number" && (
+            <p className="mt-1 text-[11px] text-faint">
+              runs up to {String(event.payload.timeout_seconds)}s before it is stopped
+            </p>
+          )}
           {isPending &&
             renderApproval(
               String(event.payload.tool_call_id),
@@ -428,9 +473,14 @@ export function RetestSession({
   });
 
   return (
+    // A *fixed* height, not a floor (#163): with `min-h` the console grew with the
+    // transcript, so the page scrolled, the conversation's own `overflow-y-auto`
+    // never engaged and the composer walked off the bottom of the viewport. Pinning
+    // the height makes the thread scroll inside its panel with the composer welded
+    // to its edge, the way a chat app behaves.
     <div
       className={`flex flex-col gap-3 ${
-        embedded ? "min-h-[calc(100dvh-20rem)]" : "min-h-[calc(100dvh-9rem)]"
+        embedded ? "h-[calc(100dvh-20rem)]" : "h-[calc(100dvh-9rem)]"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -450,53 +500,88 @@ export function RetestSession({
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-3">
-            {/* Auto-run — approve the agent's commands automatically (plan changes stay gated). */}
-            <label className="flex items-center gap-2 text-[13px] text-dim">
-              <input
-                type="checkbox"
-                checked={freeLaunch}
-                disabled={sessionOver || toggleMutation.isPending}
-                onChange={(event) => {
-                  toggleMutation.mutate(event.target.checked);
+            {/* Auto-run — approve the agent's commands automatically (plan changes stay gated).
+                Only meaningful while the sandbox is live (running or stopped). */}
+            {sandboxLive && (
+              <label className="flex items-center gap-2 text-[13px] text-dim">
+                <input
+                  type="checkbox"
+                  checked={freeLaunch}
+                  disabled={toggleMutation.isPending}
+                  onChange={(event) => {
+                    toggleMutation.mutate(event.target.checked);
+                  }}
+                  className="accent-iris disabled:opacity-45"
+                />
+                Auto-run
+              </label>
+            )}
+            {/* Lifecycle controls, each shown only when it makes sense (#150).
+                Stop is the only halt control: there is no Start/Resume counterpart
+                because *talking to* a parked agent is what starts or continues it
+                (#163). One direction is a button, the other is the conversation. */}
+            {isRunning && (
+              <Button
+                variant="ghost"
+                disabled={stopMutation.isPending}
+                onClick={() => {
+                  stopMutation.mutate();
                 }}
-                className="accent-iris disabled:opacity-45"
-              />
-              Auto-run
-            </label>
+              >
+                <PauseIcon />
+                Stop
+              </Button>
+            )}
+            {/* Conclude is reachable from any live state (#150). In needs_guidance the
+                pause banner carries its own Conclude button, so skip it here to keep
+                a single entry point. */}
+            {sandboxLive && !concluding && status !== "needs_guidance" && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setConcluding(true);
+                }}
+              >
+                <FlagIcon />
+                Conclude…
+              </Button>
+            )}
             <Button
               variant="ghost"
               disabled={findingId === null || restartMutation.isPending}
               onClick={() => {
-                if (findingId !== null) restartMutation.mutate({ findingId, goal: planSteps });
+                if (findingId !== null)
+                  restartMutation.mutate({ findingId, goal: planSteps, scope: targetEndpoints });
               }}
             >
+              <RestartIcon />
               Restart
             </Button>
-            <Button
-              variant="ghost"
-              disabled={endMutation.isPending}
-              onClick={() => {
-                endMutation.mutate();
-              }}
-            >
-              End session
-            </Button>
+            {!sessionOver && (
+              <Button
+                variant="ghost"
+                disabled={endMutation.isPending}
+                onClick={() => {
+                  endMutation.mutate();
+                }}
+              >
+                <ExitIcon />
+                End session
+              </Button>
+            )}
           </div>
-          {toggleMutation.isError && (
-            <p role="alert" className="text-sm text-danger-fg">
-              {errorMessage(toggleMutation.error)}
-            </p>
-          )}
-          {endMutation.isError && (
-            <p role="alert" className="text-sm text-danger-fg">
-              {errorMessage(endMutation.error)}
-            </p>
-          )}
-          {restartMutation.isError && (
-            <p role="alert" className="text-sm text-danger-fg">
-              {errorMessage(restartMutation.error)}
-            </p>
-          )}
+          {[
+            toggleMutation.error,
+            endMutation.error,
+            restartMutation.error,
+            stopMutation.error,
+          ]
+            .filter(Boolean)
+            .map((err, i) => (
+              <p key={i} role="alert" className="text-sm text-danger-fg">
+                {errorMessage(err)}
+              </p>
+            ))}
         </div>
       </div>
 
@@ -505,13 +590,19 @@ export function RetestSession({
         {/* Current goal — the user-owned checklist, full width below the stages bar (FR-17 6b-ii). */}
         <Panel className="shrink-0">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-            <Eyebrow>Current goal</Eyebrow>
+            <span className="flex items-center gap-2 text-faint">
+              <GoalIcon />
+              <Eyebrow>Current goal</Eyebrow>
+            </span>
           </div>
           <div className="space-y-3 p-4">
             {targetEndpoints.length > 0 && (
               <div className="rounded-lg border border-line bg-panel-2/40 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Eyebrow>Scope</Eyebrow>
+                  <span className="flex items-center gap-2 text-faint">
+                    <TargetIcon />
+                    <Eyebrow>Scope</Eyebrow>
+                  </span>
                   <span className="text-[11px] text-faint">set at launch — Restart to change</span>
                 </div>
                 <ul className="mt-1.5 space-y-0.5">
@@ -576,6 +667,7 @@ export function RetestSession({
                         setEditingGoal(true);
                       }}
                     >
+                      <PencilIcon />
                       Edit goal
                     </Button>
                     <Button
@@ -585,6 +677,7 @@ export function RetestSession({
                         regenerateGoalMutation.mutate();
                       }}
                     >
+                      <RestartIcon />
                       {regenerateGoalMutation.isPending ? "Regenerating…" : "Regenerate goal"}
                     </Button>
                   </div>
@@ -599,10 +692,16 @@ export function RetestSession({
           </div>
         </Panel>
 
-        {/* Conversation — a boxed chat with the agent, panelled like the rest. A
-            min-height keeps it usable so the docked terminal can never squeeze the
-            approval gate to nothing on a short viewport (the page scrolls instead). */}
-        <Panel className="flex min-h-[16rem] flex-1 flex-col overflow-hidden">
+        {/* Conversation — one chat panel (#157): the scrolling transcript with the
+            composer welded to its bottom edge, so the agent's turns, the operator's
+            turns, the gate, and the box you type into all read as a single thread
+            rather than a stack of disconnected boxes. A min-height keeps it usable
+            so the docked terminal can never squeeze the approval gate to nothing on
+            a short viewport (the page scrolls instead). */}
+        {/* A modest floor, not 20rem: the root is now a fixed height (#163), so an
+            over-tall floor here would push the composer out of the console when the
+            terminal is expanded. The thread scrolls internally instead. */}
+        <Panel className="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
           <PanelHeader eyebrow="Conversation" />
           <div
             ref={chatRef}
@@ -611,11 +710,45 @@ export function RetestSession({
             className="min-h-0 flex-1 overflow-y-auto p-4"
           >
             <div className="flex w-full flex-col gap-3 pb-1">
-            {chatItems.length === 0 && !verdict && !isThinking(status) && (
+            {/* An idle session has run nothing — no sandbox, no LLM call. It wakes
+                when you talk to it (#163): the first message provisions the
+                egress-locked sandbox and becomes the opening turn's steer, so the
+                agent never starts unbidden and there is nothing extra to press. */}
+            {isIdle && (
+              <div
+                aria-label="asleep"
+                className="flex flex-col items-center gap-2 rounded-lg border border-line bg-panel-2/40 px-4 py-8 text-center"
+              >
+                <span className="flex items-center gap-2 text-faint">
+                  <PowerIcon />
+                  <Eyebrow>Agent asleep</Eyebrow>
+                </span>
+                <p className="max-w-sm text-sm text-dim">
+                  The goal and scope are set, but nothing has run yet. Send a message below to wake
+                  it — that provisions the sandbox and becomes its first instruction.
+                </p>
+              </div>
+            )}
+            {chatItems.length === 0 && !verdict && !isThinking(status) && !isIdle && (
               <p className="text-sm text-dim">Starting the sandboxed retest…</p>
             )}
             {chatItems}
             {isThinking(status) && !awaitingApproval && !verdict && <ThinkingBubble />}
+            {isStopped && (
+              <div
+                aria-label="stopped"
+                className="rounded-lg border border-line bg-panel-2/50 p-4 text-sm text-dim"
+              >
+                <span className="flex items-center gap-2 text-faint">
+                  <PauseIcon />
+                  <Eyebrow>Paused by you</Eyebrow>
+                </span>
+                <p className="mt-1">
+                  The sandbox is kept alive. Message the agent to pick up where it left off, or
+                  conclude the retest yourself.
+                </p>
+              </div>
+            )}
             {status === "needs_guidance" ? (
               // Paused for guidance (ADR-0034): the agent handed back after
               // exhausting its options. The operator steers (chat/commands below)
@@ -625,101 +758,42 @@ export function RetestSession({
                 className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
               >
                 <div>
-                  <Eyebrow>Paused — needs your guidance</Eyebrow>
+                  <span className="flex items-center gap-2 text-iris-fg">
+                    <AlertIcon />
+                    <Eyebrow>Paused — needs your guidance</Eyebrow>
+                  </span>
                   <p className="mt-1 text-sm text-fg">
                     {guidanceReason(events) ?? "The agent asked for your guidance."}
                   </p>
                   <p className="mt-1 text-xs text-dim">
-                    Steer it with a message or a command below, then keep going — or conclude the
-                    retest yourself.
+                    Reply below to keep it going — your message is the steer. Or conclude the retest
+                    yourself.
                   </p>
                 </div>
-                {concluding ? (
-                  <div className="space-y-2">
-                    <select
-                      aria-label="conclude status"
-                      value={concludeStatus}
-                      onChange={(e) => {
-                        setConcludeStatus(e.target.value as VerdictStatus);
-                      }}
-                      className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                    >
-                      {VERDICT_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {STATUS_META[s].label}
-                        </option>
-                      ))}
-                    </select>
-                    <textarea
-                      aria-label="conclude rationale"
-                      value={concludeRationale}
-                      onChange={(e) => {
-                        setConcludeRationale(e.target.value);
-                      }}
-                      placeholder="Your determination and why…"
-                      rows={2}
-                      className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="accent"
-                        disabled={concludeMutation.isPending}
-                        onClick={() => {
-                          concludeMutation.mutate({
-                            status: concludeStatus,
-                            rationale: concludeRationale,
-                          });
-                        }}
-                      >
-                        Record verdict
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setConcluding(false);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
+                {/* No "Keep going" button: replying *is* keeping going (#163). The
+                    Conclude form renders further down the thread (#157). */}
+                {!concluding && (
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="accent"
-                      disabled={continueMutation.isPending}
-                      onClick={() => {
-                        continueMutation.mutate();
-                      }}
-                    >
-                      Keep going
-                    </Button>
                     <Button
                       variant="ghost"
                       onClick={() => {
                         setConcluding(true);
                       }}
                     >
+                      <FlagIcon />
                       Conclude…
                     </Button>
                   </div>
-                )}
-                {continueMutation.isError && (
-                  <p role="alert" className="text-xs text-danger-fg">
-                    {errorMessage(continueMutation.error)}
-                  </p>
-                )}
-                {concludeMutation.isError && (
-                  <p role="alert" className="text-xs text-danger-fg">
-                    {errorMessage(concludeMutation.error)}
-                  </p>
                 )}
               </div>
             ) : status === "given_up" ? (
               // Legacy: sessions from before ADR-0034 could reach a terminal
               // give-up. New sessions pause for guidance instead.
               <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
-                <Eyebrow>Retest ended</Eyebrow>
+                <span className="flex items-center gap-2 text-warn-fg">
+                  <AlertIcon />
+                  <Eyebrow>Retest ended</Eyebrow>
+                </span>
                 <p className="mt-1 text-sm text-warn-fg">
                   {givenUpReason(events) ?? "The agent stopped without a determination."}
                 </p>
@@ -727,7 +801,8 @@ export function RetestSession({
             ) : (
               verdict && (
                 <div className="rounded-lg border border-line bg-panel-2/50 p-4">
-                  <div className="mb-2 flex items-center gap-2">
+                  <div className="mb-2 flex items-center gap-2 text-faint">
+                    <VerdictIcon />
                     <Eyebrow>Verdict</Eyebrow>
                     {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
                   </div>
@@ -740,7 +815,10 @@ export function RetestSession({
                 aria-label="adjudication"
                 className="rounded-lg border border-line bg-panel-2/30 p-4"
               >
-                <Eyebrow>Adjudication</Eyebrow>
+                <span className="flex items-center gap-2 text-faint">
+                  <VerdictIcon />
+                  <Eyebrow>Adjudication</Eyebrow>
+                </span>
                 {adjudicated ? (
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
                     <span className="text-dim">Final verdict (operator):</span>
@@ -818,6 +896,7 @@ export function RetestSession({
                             });
                           }}
                         >
+                          <CheckIcon />
                           Accept
                         </Button>
                         <Button
@@ -826,6 +905,7 @@ export function RetestSession({
                             setOverriding(true);
                           }}
                         >
+                          <PencilIcon />
                           Override…
                         </Button>
                       </div>
@@ -839,48 +919,126 @@ export function RetestSession({
                 )}
               </div>
             )}
+            {/* Conclude — the operator writes their own verdict, available at any
+                live point in the retest (#150). It renders as the newest item in
+                the thread (#157) rather than a detached panel above it, so the
+                form appears where the conversation left off. */}
+            {concluding && sandboxLive && (
+              <div
+                aria-label="conclude"
+                className="space-y-3 rounded-lg border border-iris/50 bg-iris/5 p-4"
+              >
+                <div>
+                  <span className="flex items-center gap-2 text-iris-fg">
+                    <FlagIcon />
+                    <Eyebrow>Conclude the retest yourself</Eyebrow>
+                  </span>
+                  <p className="mt-1 text-xs text-dim">
+                    Record your own determination. The sandbox is torn down and this becomes the
+                    session&rsquo;s verdict.
+                  </p>
+                </div>
+                <select
+                  aria-label="conclude status"
+                  value={concludeStatus}
+                  onChange={(e) => {
+                    setConcludeStatus(e.target.value as VerdictStatus);
+                  }}
+                  className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                >
+                  {VERDICT_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS_META[s].label}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  aria-label="conclude rationale"
+                  value={concludeRationale}
+                  onChange={(e) => {
+                    setConcludeRationale(e.target.value);
+                  }}
+                  placeholder="Your determination and why…"
+                  rows={2}
+                  className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="accent"
+                    disabled={concludeMutation.isPending}
+                    onClick={() => {
+                      concludeMutation.mutate({
+                        status: concludeStatus,
+                        rationale: concludeRationale,
+                      });
+                    }}
+                  >
+                    <VerdictIcon />
+                    Record verdict
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setConcluding(false);
+                    }}
+                  >
+                    <CrossIcon />
+                    Cancel
+                  </Button>
+                </div>
+                {concludeMutation.isError && (
+                  <p role="alert" className="text-xs text-danger-fg">
+                    {errorMessage(concludeMutation.error)}
+                  </p>
+                )}
+              </div>
+            )}
             </div>
           </div>
+
+          {/* Composer — welded to the thread's bottom edge inside the same panel
+              (#157), the way a chat app docks its input. A message is read by the
+              agent on its next turn (Slice 4). */}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!canSendMessage) return;
+              messageMutation.mutate(trimmed);
+              setInput("");
+            }}
+            className="shrink-0 border-t border-line bg-panel-2/30 px-3 py-2.5"
+          >
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
+              <input
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                }}
+                placeholder={
+                  isIdle
+                    ? "Tell the agent to start…"
+                    : isStopped || status === "needs_guidance"
+                      ? "Reply to pick it back up…"
+                      : "Message the agent…"
+                }
+                disabled={sessionOver}
+                aria-label="Message the agent"
+                className="min-w-0 flex-1 bg-transparent text-[14px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
+              />
+              <Button type="submit" variant="accent" disabled={!canSendMessage}>
+                <SendIcon />
+                Send
+              </Button>
+            </div>
+            {messageMutation.isError && (
+              <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
+                {errorMessage(messageMutation.error)}
+              </p>
+            )}
+          </form>
         </Panel>
 
       </div>
-
-      {/* Composer — a chat message to the agent, read on its next turn (Slice 4). */}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSendMessage) return;
-          messageMutation.mutate(trimmed);
-          setInput("");
-        }}
-        className="shrink-0"
-      >
-        <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
-          <input
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-            }}
-            placeholder="Message the agent…"
-            disabled={sessionOver}
-            aria-label="Message the agent"
-            className="min-w-0 flex-1 bg-transparent text-[14px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
-          />
-          <Button type="submit" variant="accent" disabled={!canSendMessage}>
-            Send
-          </Button>
-        </div>
-        {!sessionOver && (
-          <p className="mt-1 px-1 text-[11px] text-faint">
-            The agent replies here; your message also steers its next turn.
-          </p>
-        )}
-        {messageMutation.isError && (
-          <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
-            {errorMessage(messageMutation.error)}
-          </p>
-        )}
-      </form>
 
       {/* Terminal — docked below the conversation: executed output plus your own
           prompt. A command you run here executes once in the isolated sandbox and
@@ -896,7 +1054,10 @@ export function RetestSession({
             terminalOpen ? "border-b border-line" : ""
           }`}
         >
-          <Eyebrow>Terminal</Eyebrow>
+          <span className="flex items-center gap-2 text-faint">
+            <TerminalIcon />
+            <Eyebrow>Terminal</Eyebrow>
+          </span>
           <span className="font-mono text-[11px] text-faint">
             {terminalLines.length} {terminalLines.length === 1 ? "line" : "lines"}{" "}
             {terminalOpen ? "▾" : "▸"}
@@ -920,8 +1081,8 @@ export function RetestSession({
                   onChange={(event) => {
                     setCommand(event.target.value);
                   }}
-                  placeholder={sessionOver ? "Sandbox closed" : "Run a command in the sandbox…"}
-                  disabled={sessionOver}
+                  placeholder={sandboxLive ? "Run a command in the sandbox…" : "Sandbox closed"}
+                  disabled={!sandboxLive}
                   aria-label="Terminal command input"
                   className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-faint disabled:opacity-45"
                 />
