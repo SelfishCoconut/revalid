@@ -19,7 +19,7 @@ from pathlib import Path
 
 from jsonschema import validate
 
-from revalid import retest_session as rs
+import revalid.retest_session as rs
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Finding, SessionEventKind, Severity, VerdictStatus
 from revalid.export import build_export

@@ -7,6 +7,15 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+  # The React SPA (~35 deps) had no ecosystem here at all until #182, so it was
+  # never scanned and never updated.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
   - package-ecosystem: github-actions
     directory: /
     schedule:

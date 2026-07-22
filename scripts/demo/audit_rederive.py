@@ -12,7 +12,7 @@ acceptance / NFR-02).
 
 from __future__ import annotations
 
-from revalid import retest_session as rs
+import revalid.retest_session as rs
 from revalid.audit import rederive_run
 from revalid.db import IN_MEMORY, create_db_engine, session_factory
 from revalid.domain import Finding, SessionEventKind, Severity, VerdictStatus

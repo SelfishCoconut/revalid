@@ -1,12 +1,12 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system sanity uml docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system test-demos sanity sandbox-image uml docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
-	uv run ruff check src tests
-	uv run ruff format --check src tests
+	uv run ruff check src tests scripts
+	uv run ruff format --check src tests scripts
 
 format:
-	uv run ruff format src tests
-	uv run ruff check --fix src tests
+	uv run ruff format src tests scripts
+	uv run ruff check --fix src tests scripts
 
 typecheck:
 	uv run mypy
@@ -21,6 +21,13 @@ test-system:
 	uv run pytest -m system --no-cov
 
 test: test-unit test-integration test-system
+
+# Smoke-run every offline demo (no Docker, no lab, no LLM, no network). These are
+# the PR template's "How to validate" artifacts, so a broken one silently voids
+# the Definition of Done — CI runs this target for exactly that reason (#182).
+# Excluded on purpose: demo-ui (needs a browser) and anything needing the lab.
+test-demos: demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export demo-eval demo-retest-session demo-settings
+	@echo "all offline demos ran clean"
 
 # FR-02 walking-skeleton demo: ingest the synthetic sample, print what persisted
 demo-ingest:

@@ -69,7 +69,7 @@ constraint-dependencies = ["starlette>=1.3.1", "setuptools>=83.0.0"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = [
@@ -102,7 +102,12 @@ max-complexity = 10
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+# `scripts` is in scope on purpose: `scripts/demo/*.py` is the PR template's
+# mandatory "How to validate" artifact, so it is load-bearing process
+# infrastructure, not throwaway. Leaving it unchecked let two demos rot on main
+# (issue #182) — including one that broke on a real behaviour change (#178 made
+# every retest step a streamed run) and was never noticed.
+files = ["src", "tests", "scripts"]
 pretty = true
 
 # pdfplumber ships no type information (no py.typed); reportlab is a dev-only

@@ -14,9 +14,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --locked --extra browser --extra sandbox
-      - name: Install Playwright browser (FR-14)
-        run: uv run playwright install --with-deps chromium
+      # No `--extra browser` / Playwright install: FR-14 was dropped and
+      # src/revalid/browser.py deleted in ADR-0033, so both were provisioning a
+      # browser for code that no longer exists (#182).
+      - run: uv sync --locked --extra sandbox
       - name: Build the sandbox toolbox image (issue #105)
         # The agent's container is egress-locked, so its tools must be baked in;
         # the image is built locally rather than pulled from a registry.
@@ -36,7 +37,33 @@ jobs:
           else
             echo "No lab defined yet — running system-marked tests without targets."
           fi
-      - run: uv run pytest -m system --no-cov
+      - name: Run system tests
+        run: uv run pytest -m system --no-cov --junit-xml=system-report.xml
+      # Every system test skips itself when Docker, the lab or a backend is
+      # missing, so a degraded runner produced a green nightly that had verified
+      # nothing (#182). The retest suite is the one that proves the egress lock,
+      # so a skip there is a failure. test_ollama_extraction is exempt: it needs
+      # an Ollama server the nightly deliberately does not provision.
+      - name: A skipped retest system test is a failed nightly
+        run: |
+          uv run python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+
+          root = ET.parse("system-report.xml").getroot()
+          cases = list(root.iter("testcase"))
+          skipped = [
+              f"{c.get('classname')}::{c.get('name')}"
+              for c in cases
+              if c.find("skipped") is not None
+              and "test_retest_session_system" in (c.get("classname") or "")
+          ]
+          print(f"{len(cases)} system tests collected, {len(skipped)} retest tests skipped")
+          if skipped:
+              sys.exit(
+                  "retest system tests skipped — the sandbox or lab did not provision, "
+                  "so the egress lock was never verified: " + ", ".join(skipped)
+              )
+          PY
       - name: Tear down lab
         if: always()
         run: |
