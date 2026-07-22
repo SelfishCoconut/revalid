@@ -3,19 +3,32 @@ import { Link } from "react-router-dom";
 
 import { DeterminationMeter } from "../components/DeterminationMeter";
 import { ReportActions } from "../components/ReportActions";
+import { SeverityMeter } from "../components/SeverityMeter";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { UploadReport } from "../components/UploadReport";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
+import { useFindings } from "../hooks/useFindings";
 import { useReports } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { formatDate, useDateFormat } from "../lib/dateFormat";
 import { errorMessage } from "../lib/format";
-import { verdictCounts } from "../lib/selectors";
+import {
+  findingsNotArchived,
+  severityCounts,
+  verdictCounts,
+  verdictsFor,
+} from "../lib/selectors";
 
 function Hero() {
   const verdicts = useVerdicts();
-  const counts = verdictCounts(verdicts.data ?? []);
+  const findings = useFindings();
+  // Both meters read the active workspace only: an archived report is shelved,
+  // so its findings must stop inflating the ledger and the risk profile (#162).
+  const archived = useReports(true);
+  const active = findingsNotArchived(findings.data ?? [], archived.data ?? []);
+  const counts = verdictCounts(verdictsFor(verdicts.data ?? [], active));
+  const severity = severityCounts(active);
 
   return (
     <Panel className="overflow-hidden">
@@ -34,6 +47,12 @@ function Hero() {
         <Eyebrow>Determination ledger · one per finding</Eyebrow>
         <div className="mt-4">
           <DeterminationMeter counts={counts} />
+        </div>
+      </div>
+      <div className="border-t border-line bg-panel-2/30 px-6 pt-5 pb-6 sm:px-8">
+        <Eyebrow>Risk profile · severity across active reports</Eyebrow>
+        <div className="mt-4">
+          <SeverityMeter counts={severity} />
         </div>
       </div>
     </Panel>

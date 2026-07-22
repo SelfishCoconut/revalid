@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { DeterminationMeter } from "../components/DeterminationMeter";
 import { ReportMetadataPanel } from "../components/ReportMetadataPanel";
 import { SeverityBadge } from "../components/SeverityBadge";
+import { SeverityMeter } from "../components/SeverityMeter";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
@@ -10,7 +11,7 @@ import { useFindings } from "../hooks/useFindings";
 import { useReport } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
-import { latestVerdict, verdictCounts } from "../lib/selectors";
+import { latestVerdict, severityCounts, verdictCounts, verdictsFor } from "../lib/selectors";
 
 function BackLink({ to, children }: { to: string; children: string }) {
   return (
@@ -48,10 +49,8 @@ export function ReportDetail() {
   // Per-report determination roll-up (issue #130): one current verdict per
   // finding in this report, aggregated into the still-open/inconclusive/fixed
   // meter that used to live on each finding's Verdict page.
-  const reportFindingIds = new Set((findings.data ?? []).map((finding) => finding.id));
-  const reportVerdicts = (verdicts.data ?? []).filter((verdict) =>
-    reportFindingIds.has(verdict.finding_id),
-  );
+  const reportFindings = findings.data ?? [];
+  const reportVerdicts = verdictsFor(verdicts.data ?? [], reportFindings);
 
   return (
     <div className="rev-rise space-y-6">
@@ -82,11 +81,21 @@ export function ReportDetail() {
 
       {ready && <ReportMetadataPanel report={data} />}
 
-      {ready && (findings.data ?? []).length > 0 && (
-        <Panel className="p-5">
-          <Eyebrow>Determinations</Eyebrow>
-          <div className="mt-4">
-            <DeterminationMeter counts={verdictCounts(reportVerdicts)} />
+      {ready && reportFindings.length > 0 && (
+        <Panel className="overflow-hidden">
+          <div className="p-5">
+            <Eyebrow>Determinations</Eyebrow>
+            <div className="mt-4">
+              <DeterminationMeter counts={verdictCounts(reportVerdicts)} />
+            </div>
+          </div>
+          {/* The overview's risk profile, scoped to this report (#161): what the
+              stakes are here, read against the determinations right above it. */}
+          <div className="border-t border-line bg-panel-2/30 p-5">
+            <Eyebrow>Risk profile · severity in this report</Eyebrow>
+            <div className="mt-4">
+              <SeverityMeter counts={severityCounts(reportFindings)} />
+            </div>
           </div>
         </Panel>
       )}
@@ -109,13 +118,13 @@ export function ReportDetail() {
             <p role="alert" className="px-4 py-6 text-sm text-danger-fg">
               {errorMessage(findings.error)}
             </p>
-          ) : (findings.data ?? []).length === 0 ? (
+          ) : reportFindings.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-faint">
               No findings extracted from this report.
             </p>
           ) : (
             <ul className="divide-y divide-line/60">
-              {(findings.data ?? []).map((finding) => {
+              {reportFindings.map((finding) => {
                 const latest = latestVerdict(verdicts.data ?? [], finding.id);
                 return (
                   <li key={finding.id}>
