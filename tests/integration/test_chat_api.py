@@ -5,10 +5,14 @@ answers from the corpus-overview tool), proving create → ask → persist →
 re-read → delete through the ``/api`` surface with no network and no real model.
 """
 
+from typing import cast
+
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.test import TestModel
 
 from revalid.app import create_app, get_reports_agent
 from revalid.db import IN_MEMORY, ReportRecord, create_db_engine
@@ -91,9 +95,43 @@ def test_chat_lifecycle_over_api(client: TestClient) -> None:
     assert client.get(f"/api/chats/{chat_id}").status_code == 404
 
 
+def test_chat_message_streams_sse_and_persists(client: TestClient) -> None:
+    # The streaming route needs a stream-capable model; the fixture's FunctionModel
+    # cannot stream, so swap in a TestModel. call_tools=[] keeps the streamed run
+    # off the DB tools (proven by the blocking test) so this focuses on the SSE
+    # transport + persistence without the shared-connection worker-thread flake.
+    app = cast(FastAPI, client.app)
+    app.dependency_overrides[get_reports_agent] = lambda: build_reports_agent(
+        TestModel(call_tools=[], custom_output_text="There is 1 report.")
+    )
+    chat_id = client.post("/api/chats").json()["id"]
+
+    with client.stream(
+        "POST",
+        f"/api/chats/{chat_id}/messages/stream",
+        json={"content": "how many reports?"},
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    # SSE framing: token frame(s) carrying the reply, then the done sentinel.
+    assert "event: token" in body
+    assert "There is 1 report." in body
+    assert "event: done" in body
+
+    # The completed reply is persisted and readable via the blocking read route.
+    reread = client.get(f"/api/chats/{chat_id}").json()
+    assert [(m["role"], m["content"]) for m in reread["messages"]] == [
+        ("user", "how many reports?"),
+        ("assistant", "There is 1 report."),
+    ]
+
+
 def test_unknown_thread_is_404(client: TestClient) -> None:
     assert client.get("/api/chats/999").status_code == 404
     assert client.post("/api/chats/999/messages", json={"content": "hi"}).status_code == 404
+    assert client.post("/api/chats/999/messages/stream", json={"content": "hi"}).status_code == 404
     assert client.delete("/api/chats/999").status_code == 404
 
 

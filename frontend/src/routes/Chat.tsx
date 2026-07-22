@@ -5,7 +5,7 @@ import type { ChatMessage, ChatSummary } from "../api/types";
 import { Spinner } from "../components/Spinner";
 import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel } from "../components/ui/Panel";
-import { useChat, useChats, useCreateChat, useDeleteChat, useSendMessage } from "../hooks/useChats";
+import { useChat, useChats, useCreateChat, useDeleteChat, useStreamingSend } from "../hooks/useChats";
 import { errorMessage, formatDateTime } from "../lib/format";
 
 const EXAMPLES = [
@@ -101,7 +101,7 @@ function Composer({
 /** The active thread: transcript + composer, with an optimistic pending turn. */
 function Conversation({ chatId }: { chatId: number }) {
   const chat = useChat(chatId);
-  const send = useSendMessage(chatId);
+  const { send, isStreaming, streamed, error } = useStreamingSend(chatId);
   const [pending, setPending] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -109,14 +109,12 @@ function Conversation({ chatId }: { chatId: number }) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, pending]);
+  }, [messages.length, pending, streamed]);
 
   function handleSend(text: string) {
     setPending(text);
-    send.mutate(text, {
-      onSettled: () => {
-        setPending(null);
-      },
+    void send(text).finally(() => {
+      setPending(null);
     });
   }
 
@@ -135,7 +133,7 @@ function Conversation({ chatId }: { chatId: number }) {
     );
   }
 
-  const empty = messages.length === 0 && pending === null;
+  const empty = messages.length === 0 && pending === null && !isStreaming;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -171,17 +169,24 @@ function Conversation({ chatId }: { chatId: number }) {
                 message={{ id: -1, role: "user", content: pending, created_at: "" }}
               />
             )}
-            {send.isPending && <Thinking />}
+            {isStreaming &&
+              (streamed ? (
+                <Bubble
+                  message={{ id: -2, role: "assistant", content: streamed, created_at: "" }}
+                />
+              ) : (
+                <Thinking />
+              ))}
           </>
         )}
-        {send.isError && (
+        {error && (
           <p role="alert" className="text-[12px] text-danger-fg">
-            {errorMessage(send.error)}
+            {errorMessage(error)}
           </p>
         )}
         <div ref={endRef} />
       </div>
-      <Composer disabled={send.isPending} onSend={handleSend} />
+      <Composer disabled={isStreaming} onSend={handleSend} />
     </div>
   );
 }

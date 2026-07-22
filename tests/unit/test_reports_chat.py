@@ -320,3 +320,13 @@ def test_agent_tools_execute_read_only(session: Session) -> None:
     assert reply.content  # TestModel echoes the tool outputs as JSON
     # Read-only: the corpus is unchanged after the agent ran its tools.
     assert corpus_overview(session).findings_total == 3
+
+
+# NOTE: stream_answer (the async streaming counterpart of answer_question) is
+# proven end-to-end by tests/integration/test_chat_api.py (real ASGI + SSE frames
+# + persistence). It is intentionally NOT unit-tested here: driving its async
+# generator needs an explicit event loop (asyncio/anyio.run), which competes with
+# the background portal Pydantic AI reuses for the run_sync-based agent tests above
+# and intermittently corrupts the shared in-memory SQLite connection. Its
+# persistence + "(no answer)" fallback logic is identical to answer_question, which
+# IS unit-tested (test_answer_question_* above).

@@ -67,13 +67,22 @@ describe("Chat", () => {
     expect(await screen.findByText("There are 3 reports.")).toBeInTheDocument();
   });
 
-  it("sends a typed question and shows the reply", async () => {
-    vi.mocked(client.getChat).mockResolvedValue(detail([]));
-    vi.mocked(client.sendChatMessage).mockResolvedValue(
-      detail([
-        { id: 1, role: "user", content: "how many criticals?", created_at: "" },
-        { id: 2, role: "assistant", content: "Two critical findings.", created_at: "" },
-      ]),
+  it("streams a typed question's reply token-by-token and shows it", async () => {
+    // The stream drains, then the hook refetches the persisted thread — so the
+    // second getChat returns the completed turn the live tokens handed off to.
+    vi.mocked(client.getChat)
+      .mockResolvedValueOnce(detail([]))
+      .mockResolvedValue(
+        detail([
+          { id: 1, role: "user", content: "how many criticals?", created_at: "" },
+          { id: 2, role: "assistant", content: "Two critical findings.", created_at: "" },
+        ]),
+      );
+    vi.mocked(client.streamChatMessage).mockImplementation(
+      async (_id, _content, onToken) => {
+        onToken("Two critical ");
+        onToken("findings.");
+      },
     );
     renderChat("/chat/1");
 
@@ -81,16 +90,20 @@ describe("Chat", () => {
     await userEvent.type(box, "how many criticals?");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(client.sendChatMessage).toHaveBeenCalledWith(1, "how many criticals?");
+    const [id, content] = vi.mocked(client.streamChatMessage).mock.calls[0];
+    expect(id).toBe(1);
+    expect(content).toBe("how many criticals?");
     expect(await screen.findByText("Two critical findings.")).toBeInTheDocument();
   });
 
   it("sends an example prompt on click from the empty conversation", async () => {
-    vi.mocked(client.sendChatMessage).mockResolvedValue(detail([]));
+    vi.mocked(client.streamChatMessage).mockResolvedValue(undefined);
     renderChat("/chat/1");
     const example = await screen.findByText("How many reports do we have?");
     await userEvent.click(example);
-    expect(client.sendChatMessage).toHaveBeenCalledWith(1, "How many reports do we have?");
+    const [id, content] = vi.mocked(client.streamChatMessage).mock.calls[0];
+    expect(id).toBe(1);
+    expect(content).toBe("How many reports do we have?");
   });
 
   it("lists threads and deletes one", async () => {

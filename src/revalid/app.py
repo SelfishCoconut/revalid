@@ -11,7 +11,8 @@ authentication in TFG scope.
 import asyncio
 import contextlib
 import hashlib
-from collections.abc import Iterable, Iterator
+import json
+from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, cast
@@ -26,7 +27,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, DeferredToolRequests
@@ -93,6 +94,7 @@ from revalid.reports_chat import (
     delete_chat,
     list_chats,
     list_messages,
+    stream_answer,
 )
 from revalid.retest_agent import (
     ConcludeOutput,
@@ -2025,6 +2027,11 @@ def _register_chat_routes(router: APIRouter, sessions: sessionmaker[Session]) ->
         delete_chat(session, chat_id)
 
 
+def _sse(event: str, data: dict[str, Any]) -> str:
+    """Frame one Server-Sent Event: an ``event:`` type line and a JSON ``data:`` line."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
 def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-18 chat message route: ask the read-only reports assistant.
 
@@ -2059,6 +2066,44 @@ def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Sessi
             raise HTTPException(status_code=404, detail="chat not found")
         answer_question(agent, session, chat, body.content)
         return ChatDetailOut.of(chat, list_messages(session, chat_id))
+
+    @router.post("/chats/{chat_id}/messages/stream")
+    async def post_message_stream(
+        chat_id: int,
+        body: ChatMessageIn,
+        session: SessionDep,
+        agent: ReportsChatAgentDep,
+    ) -> StreamingResponse:
+        """Stream the reports assistant's reply token-by-token as Server-Sent Events (FR-18).
+
+        A streaming counterpart to :func:`post_message`: the same read-only agent
+        and the same persistence, but the reply's text is emitted as it is
+        generated so the SPA renders it live. The thread is validated up front (a
+        proper 404 when the chat is missing); the stream then opens its **own**
+        session — the request-scoped one closes when this function returns, before
+        the body is consumed — and once it drains, the client re-syncs the
+        authoritative thread. Async so :func:`stream_answer` runs in the request's
+        event loop (not a threadpool). Framing: one ``event: token`` frame per
+        delta, a final ``event: done`` sentinel, and ``event: error`` on failure.
+        """
+        if session.get(ChatSessionRecord, chat_id) is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+
+        async def events() -> AsyncIterator[str]:
+            with sessions() as stream_session:
+                chat = stream_session.get(ChatSessionRecord, chat_id)
+                if chat is None:  # deleted between the pre-flight check and now
+                    yield _sse("error", {"detail": "chat not found"})
+                    return
+                try:
+                    async for delta in stream_answer(agent, stream_session, chat, body.content):
+                        yield _sse("token", {"text": delta})
+                except Exception as exc:
+                    yield _sse("error", {"detail": str(exc)})
+                    return
+                yield _sse("done", {})
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
 
 def _register_api_fallback(app: FastAPI) -> None:

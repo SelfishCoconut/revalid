@@ -208,13 +208,76 @@ export function getChat(id: number): Promise<ChatDetail> {
   return request<ChatDetail>(`/chats/${String(id)}`);
 }
 
+/** One decoded Server-Sent Event frame from the chat stream. */
+type ChatStreamEvent =
+  | { type: "token"; text: string }
+  | { type: "error"; detail: string }
+  | { type: "done" }
+  | { type: "other" };
+
+/** Decode a single SSE frame (`event:` + `data:` lines) into a typed event. */
+function parseChatFrame(frame: string): ChatStreamEvent {
+  let name = "message";
+  let data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) name = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(data || "{}");
+    if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
+  } catch {
+    // A malformed frame is treated as an empty event and skipped.
+  }
+  if (name === "token") return { type: "token", text: typeof payload.text === "string" ? payload.text : "" };
+  if (name === "error") {
+    return { type: "error", detail: typeof payload.detail === "string" ? payload.detail : "stream error" };
+  }
+  if (name === "done") return { type: "done" };
+  return { type: "other" };
+}
+
 /**
- * Ask the read-only reports assistant a question. The backend records the turn,
- * runs the agent (which may be slow on a local model), persists the reply, and
- * returns the whole updated thread so the caller re-syncs in one round trip.
+ * Ask the read-only reports assistant and stream its reply token-by-token (FR-18).
+ *
+ * POSTs to the SSE endpoint and reads the response body incrementally, invoking
+ * `onToken` with each text delta as it is generated so the UI renders the answer
+ * live. Resolves when the stream ends; throws {@link ApiError} on a non-2xx
+ * response or an in-band error event. The backend persists the completed reply, so
+ * the caller refetches the authoritative thread once this resolves.
  */
-export function sendChatMessage(id: number, content: string): Promise<ChatDetail> {
-  return request<ChatDetail>(`/chats/${String(id)}/messages`, jsonInit("POST", { content }));
+export async function streamChatMessage(
+  id: number,
+  content: string,
+  onToken: (delta: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/chats/${String(id)}/messages/stream`, {
+    ...jsonInit("POST", { content }),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new ApiError(response.status, await extractDetail(response));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Frames are blank-line delimited; drain every complete one from the buffer.
+    let split = buffer.indexOf("\n\n");
+    while (split !== -1) {
+      const event = parseChatFrame(buffer.slice(0, split));
+      buffer = buffer.slice(split + 2);
+      if (event.type === "token") onToken(event.text);
+      else if (event.type === "error") throw new ApiError(500, event.detail);
+      split = buffer.indexOf("\n\n");
+    }
+  }
 }
 
 /** Delete a thread and all its messages. */
