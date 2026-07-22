@@ -495,6 +495,108 @@ def test_conclude_session_records_operator_verdict_and_tears_down() -> None:
     assert registry.get(s.id) is None and box.stopped  # torn down
 
 
+def test_conclude_session_from_awaiting_command_writes_verdict() -> None:
+    """Conclude-anytime (#150): the operator concludes while a command awaits approval."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")  # → awaiting_command
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # a command is pending
+        rs.conclude_session(session, registry, s.id, VerdictStatus.STILL_OPEN, "seen enough")
+        session.refresh(s)
+        rows = session.scalars(select(VerdictRecord)).all()
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.verdict_status == "still_open"
+    assert rows and rows[0].actor == "operator"
+    assert registry.get(s.id) is None and box.stopped  # torn down
+
+
+def test_fail_does_not_clobber_a_concluded_session() -> None:
+    """A late agent-step failure after an operator conclude must not overwrite the verdict (#150).
+
+    The conclude-anytime race guard in :func:`_fail`.
+    """
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        rs.conclude_session(session, registry, s.id, VerdictStatus.FIXED, "operator call")
+        # An in-flight step that raised *after* the conclude routes here; it must no-op.
+        rs._fail(session, registry, s.id, "sandbox vanished mid-exec")
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.status == RetestSessionStatus.CONCLUDED.value  # not clobbered to error
+    assert s.verdict_status == "fixed"
+    assert not any(e["kind"] == SessionEventKind.ERROR.value for e in events)
+
+
+def test_stop_pauses_keeping_sandbox_then_resume_reopens_pending_command() -> None:
+    """Stop parks a live session in `stopped` (sandbox alive); Resume re-opens the gate (#150)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        cid = _pending_cid(registry, s.id)
+
+        rs.stop_session(session, registry, s.id)
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.STOPPED.value
+        live = registry.get(s.id)
+        assert live is not None and live.stopped and not box.stopped  # sandbox kept alive
+        assert live.pending_call_id == cid  # the proposed command is held, not dropped
+
+        rs.resume_session(session, registry, s.id)
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # gate re-opened
+    assert registry.get(s.id) is not None  # still live
+
+
+def test_stop_halts_the_free_launch_auto_run_loop() -> None:
+    """A stopped session's free-launch loop runs nothing (#150)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox([CommandResult(stdout="x", stderr="", exit_code=0, elapsed_ms=1)])
+        agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")  # gated → pending command
+        live = registry.get(s.id)
+        assert live is not None
+        live.free_launch = True
+        live.stopped = True  # operator stopped
+        rs._drive_auto(session, registry, s.id)  # must respect the stop
+    assert box.commands == []  # nothing auto-ran while stopped
+
+
+def test_create_session_deferred_opens_idle_and_reads_back_goal_and_scope() -> None:
+    """A deferred (Restart) session opens `idle`; its recorded goal + scope read back (#150)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", deferred=True)
+        assert s.status == RetestSessionStatus.IDLE.value
+        rs.append_event(session, s.id, SessionEventKind.TARGET_SET, {"endpoints": ["http://t/x"]})
+        rs.append_event(
+            session, s.id, SessionEventKind.PLAN_UPDATED, {"steps": ["step a", "step b"]}
+        )
+        assert rs.session_scope(session, s.id) == ("http://t/x",)
+        assert rs.session_goal(session, s.id) == ("step a", "step b")
+
+
 def test_enable_free_launch_auto_approves_pending_command() -> None:
     """Turning free-launch on with a command pending drives it to a verdict."""
     sessions = session_factory(create_db_engine(IN_MEMORY))

@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { startRetestSession } from "../../api/client";
 import type { RetestSessionSummary } from "../../api/types";
 import { NotesThread } from "../../components/NotesThread";
+import { RestartIcon, TerminalIcon } from "../../components/icons";
 import { Button } from "../../components/ui/Button";
 import { Eyebrow, Panel } from "../../components/ui/Panel";
 import { queryKeys } from "../../hooks/queryKeys";
@@ -39,9 +40,14 @@ export function GoalStage() {
     setText(draft.data.steps.join("\n"));
   }
 
+  // Opened **deferred** (#157): the session lands `idle` — scope and goal
+  // recorded, but no sandbox provisioned and no LLM call made — and waits in the
+  // console for an explicit "Wake the agent". Restart has always opened this way
+  // (#150); now first launch does too, so a session never runs unbidden.
   const start = useMutation({
     mutationFn: () =>
       startRetestSession(findingId, {
+        deferred: true,
         initial_goal: text.split("\n").map((s) => s.trim()).filter(Boolean),
         target_endpoints: endpoints.map((s) => s.trim()).filter(Boolean),
       }),
@@ -122,6 +128,7 @@ export function GoalStage() {
             disabled={draft.isFetching}
             onClick={() => void draft.refetch()}
           >
+            <RestartIcon />
             {draft.isFetching ? "Generating…" : "Regenerate"}
           </Button>
         </div>
@@ -147,10 +154,11 @@ export function GoalStage() {
                 start.mutate();
               }}
             >
-              {start.isPending ? "Starting…" : "Start retest"}
+              <TerminalIcon />
+              {start.isPending ? "Opening…" : "Open console"}
             </Button>
             <span className="font-mono text-[11px] text-faint">
-              Launches the egress-locked agent with this goal.
+              Opens the console with this goal — nothing runs until you wake the agent.
             </span>
           </div>
           {draft.isError && (

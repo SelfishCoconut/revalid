@@ -33,15 +33,15 @@ function MenuIcon() {
 export function App() {
   const { theme, setTheme } = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // The agentic retest console is a cockpit: it earns the full column width so the
-  // conversation, goal rail, and terminal aren't squeezed into the reading-width
-  // cap the rest of the app uses. Both entry points (the finding stage and the
-  // deep-link session route) get it.
   const { pathname } = useLocation();
-  // Every finding stage (extract/goal/retest/verdict) and the retest console
-  // get the full-width shell; overview/report/settings stay in the reading column.
-  const wideRoute =
+  // Content width is generous by DEFAULT: every page — including any added later —
+  // fills the available column instead of a cramped reading strip, so page width is
+  // never a per-route afterthought (add a page, it's wide, done). The agentic retest
+  // cockpit (finding stages + the deep-link session route) opts into a little extra
+  // width for its multi-panel layout (conversation + goal rail + terminal).
+  const cockpitRoute =
     pathname.startsWith("/findings/") || pathname.startsWith("/retest-sessions/");
+  const contentWidth = cockpitRoute ? "max-w-[100rem]" : "max-w-[90rem]";
 
   // Sidebar links close the drawer via onNavigate; also close it on Escape.
   useEffect(() => {
@@ -81,11 +81,7 @@ export function App() {
           </NavLink>
         </header>
 
-        <main
-          className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${
-            wideRoute ? "max-w-[100rem]" : "max-w-[64rem]"
-          }`}
-        >
+        <main className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${contentWidth}`}>
           <Routes>
             <Route path="/" element={<ReportsOverview />} />
             <Route path="/chat" element={<Chat />} />
@@ -105,7 +101,7 @@ export function App() {
         </main>
 
         <footer className="border-t border-line">
-          <div className="mx-auto flex max-w-[64rem] flex-wrap items-center gap-x-2 gap-y-1 px-5 py-4 font-mono text-[11px] text-faint">
+          <div className="mx-auto flex max-w-[90rem] flex-wrap items-center gap-x-2 gap-y-1 px-5 py-4 font-mono text-[11px] text-faint">
             <span className="text-dim">revalid</span>
             <span aria-hidden="true">·</span>
             <span>AI-driven revalidation of pentest findings</span>

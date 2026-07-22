@@ -98,8 +98,11 @@ describe("GoalStage", () => {
     expect(
       screen.getByDisplayValue("http://revalid-juice-shop:3000/rest/user/login"),
     ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /start retest/i }));
+    // Opening the console launches **deferred** (#157): the session lands idle,
+    // provisioning nothing, and waits for an explicit wake in the console.
+    await userEvent.click(screen.getByRole("button", { name: /open console/i }));
     expect(client.startRetestSession).toHaveBeenCalledWith(7, {
+      deferred: true,
       initial_goal: ["confirm endpoint", "retry bypass"],
       target_endpoints: ["http://revalid-juice-shop:3000/rest/user/login"],
     });

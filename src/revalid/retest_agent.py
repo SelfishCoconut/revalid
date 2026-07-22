@@ -17,9 +17,23 @@ from pydantic_ai.models import KnownModelName, Model
 
 from revalid.domain import VerdictStatus
 from revalid.llm import resolve_model
-from revalid.sandbox import CommandResult, Sandbox
+from revalid.sandbox import TIMEOUT_EXIT_CODES, CommandResult, Sandbox
 
 _MAX_TOOL_RETRIES = 2
+
+#: Per-command wall-clock cap when the agent does not choose one. Kept short so a
+#: quick probe (curl) never lingers; the agent raises it explicitly for slow tools.
+DEFAULT_COMMAND_TIMEOUT = 30
+#: Hard ceiling on the agent-chosen per-command timeout. The model picks how long
+#: each command may run (a scan needs longer than a curl), but cannot ask for an
+#: unbounded wait — a runaway or hanging command is always killed by this bound.
+MAX_COMMAND_TIMEOUT = 300
+
+
+def clamp_timeout(seconds: int) -> int:
+    """Clamp an agent-requested per-command timeout to ``[1, MAX_COMMAND_TIMEOUT]``."""
+    return max(1, min(seconds, MAX_COMMAND_TIMEOUT))
+
 
 _INSTRUCTIONS = """\
 You are a penetration-test *retester*. You are given one finding to re-verify \
@@ -29,6 +43,14 @@ Rules:
 - Work one command at a time. Propose a single shell command plus a \
 one-line rationale; a human approves or rejects each before it runs.
 - The sandbox can reach ONLY the lab target — never the internet or the host.
+- Every command must be NON-INTERACTIVE and self-terminating: never wait on \
+stdin, and never background a command (no trailing `&`) — you only see output \
+once it exits.
+- Choose `timeout_seconds` to fit the command: a quick probe (curl) needs only \
+a few seconds; a port scan or fuzzing run may need 60-180. The command is killed \
+if it overruns; if you see it "timed out", either raise the limit or narrow the \
+scope (e.g. scan fewer ports) — a bounded `nmap -Pn -T4 --top-ports 100` beats a \
+full-range sweep that never finishes.
 - Prefer non-destructive verification. Do not attempt to damage the target.
 - When you are confident, conclude with a determination: `still_open` (the issue \
 reproduces) or `fixed` (it does not). That ends the session.
@@ -69,7 +91,6 @@ class RetestSessionDeps:
 
     sandbox: Sandbox
     emit_output: Callable[[str, CommandResult], None]
-    command_timeout: float = 30.0
     #: Returns (and clears) any manual operator commands run since the agent's
     #: last turn, so the agent observes what the human did (FR-17 Slice 2). The
     #: default surfaces nothing — the human-command path (`!`) injects the real
@@ -131,20 +152,33 @@ def build_retest_agent(
     )
 
     @agent.tool(requires_approval=True)
-    def run_command(ctx: RunContext[RetestSessionDeps], command: str, rationale: str) -> str:
+    def run_command(
+        ctx: RunContext[RetestSessionDeps],
+        command: str,
+        rationale: str,
+        timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT,
+    ) -> str:
         """Run one shell command in the egress-locked sandbox and return its output.
 
         Args:
             ctx: The run context carrying the sandbox + output-emit callback.
             command: The exact shell command to execute (lab target only).
             rationale: A one-line reason this command advances the retest.
+            timeout_seconds: How long the command may run before it is killed —
+                pick a value that fits it (a few seconds for a curl, more for a
+                scan). Clamped to at most ``MAX_COMMAND_TIMEOUT`` seconds.
 
         Returns:
-            The command's exit code, timing, stdout and stderr as text.
+            The command's exit code, timing, stdout and stderr as text; a note is
+            appended when the command was killed for exceeding its timeout.
         """
-        result = ctx.deps.sandbox.exec(command, timeout=ctx.deps.command_timeout)
+        timeout = clamp_timeout(timeout_seconds)
+        result = ctx.deps.sandbox.exec(command, timeout=timeout)
         ctx.deps.emit_output(command, result)
-        return _format_result(result) + format_observations(ctx.deps.drain_observations())
+        text = _format_result(result)
+        if result.exit_code in TIMEOUT_EXIT_CODES:
+            text += f"\n[terminated: the command exceeded its {timeout}s timeout]"
+        return text + format_observations(ctx.deps.drain_observations())
 
     @agent.tool
     def respond(ctx: RunContext[RetestSessionDeps], message: str) -> str:

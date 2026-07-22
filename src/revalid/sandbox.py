@@ -27,6 +27,10 @@ DEFAULT_LAB_CONTAINER = "revalid-juice-shop"
 LAB_BASE_URL_ENV = "REVALID_LAB_BASE_URL"
 #: Default lab target base URL (the local Juice Shop; see lab/docker-compose.yml).
 DEFAULT_LAB_BASE_URL = "http://localhost:3000"
+#: Exit codes a command exits with when the in-container ``timeout`` wrapper kills
+#: it for overrunning its limit: 124 (coreutils), 143 (busybox SIGTERM), 137
+#: (SIGKILL). ``run_command`` maps these to a "timed out" note for the agent.
+TIMEOUT_EXIT_CODES = frozenset({124, 137, 143})
 
 
 class CommandResult(BaseModel):
@@ -84,6 +88,9 @@ class FakeSandbox:
         """Store the scripted results (or callable) to replay in :meth:`exec`."""
         self._script = script
         self.commands: list[str] = []
+        #: The per-command timeouts passed to :meth:`exec`, in order — lets tests
+        #: assert the agent-chosen ``timeout_seconds`` reaches the sandbox (#150).
+        self.timeouts: list[float] = []
         self.started = False
         self.stopped = False
 
@@ -94,6 +101,7 @@ class FakeSandbox:
     def exec(self, command: str, *, timeout: float) -> CommandResult:
         """Return the next scripted result (or apply the callable)."""
         self.commands.append(command)
+        self.timeouts.append(timeout)
         if callable(self._script):
             return self._script(command)
         if not self._script:
@@ -179,13 +187,25 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         stale.remove()
 
     def exec(self, command: str, *, timeout: float) -> CommandResult:
-        """Run ``command`` inside the live container and capture stdout/stderr/exit code."""
+        """Run ``command`` inside the live container, capped at ``timeout`` seconds.
+
+        Docker's ``exec_run`` is blocking (the model always sees the *complete*
+        output before its next turn) but has **no native timeout**, so the cap is
+        enforced in-container by wrapping the command with ``timeout`` — present on
+        both the alpine/busybox base of the default image and a coreutils-based
+        Kali image (#105). A command that overruns is killed and exits non-zero
+        (124 on coreutils, 143/SIGTERM on busybox); ``run_command`` surfaces that to
+        the agent, which chose the limit and can retry with a narrower scope. Without
+        this, a hanging or unbounded command (e.g. an nmap sweep, or one blocked on
+        stdin) would wedge the session at ``running_command`` forever.
+        """
         import time
 
         if self._container is None:
             raise SandboxUnavailableError("sandbox not started")
         start = time.monotonic()
-        code, output = self._container.exec_run(["sh", "-c", command], demux=True)
+        wrapped = ["timeout", str(int(timeout)), "sh", "-c", command]
+        code, output = self._container.exec_run(wrapped, demux=True)
         elapsed_ms = int((time.monotonic() - start) * 1000)
         stdout, stderr = output
         return CommandResult(

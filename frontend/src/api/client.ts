@@ -264,6 +264,9 @@ export interface StartSessionOptions {
    * launch (reachability is fixed when the sandbox is provisioned); defaults to
    * the finding's endpoints server-side when omitted. */
   target_endpoints?: string[];
+  /** Open the session `idle` (created but not started) instead of auto-running —
+   * the Restart path (issue #150). The operator presses Start to begin. */
+  deferred?: boolean;
 }
 
 /** Start an agentic retest session for a finding (backend replies with the new session). */
@@ -310,6 +313,21 @@ export function rejectCommand(id: number, cid: string, reason = ""): Promise<{ s
 
 export function endRetestSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/end`, { method: "POST" });
+}
+
+/** Start an `idle` (deferred) session — the operator's Start (issue #150). */
+export function startSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/start`, { method: "POST" });
+}
+
+/** Pause a running session, keeping its sandbox alive — Stop (issue #150). */
+export function stopSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/stop`, { method: "POST" });
+}
+
+/** Resume a stopped session — Resume (issue #150). May drive further agent turns. */
+export function resumeSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/resume`, { method: "POST" });
 }
 
 /**

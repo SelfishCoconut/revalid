@@ -123,6 +123,139 @@ def test_start_session_records_target_scope() -> None:
         assert scope["payload"]["endpoints"] == ["http://revalid-juice-shop:3000/rest/user/login"]
 
 
+def test_deferred_launch_opens_idle_and_start_runs_it() -> None:
+    """Restart's deferred launch (#150): the session opens `idle` with goal+scope, Start runs it."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session",
+            json={
+                "deferred": True,
+                "initial_goal": ["Re-check the login endpoint"],
+                "target_endpoints": ["http://revalid-juice-shop:3000/rest/user/login"],
+            },
+        )
+        assert started.status_code == 202
+        sid = started.json()["id"]
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "idle"  # created but not started
+        kinds = [e["kind"] for e in state["events"]]
+        assert "target_set" in kinds and "plan_updated" in kinds  # goal + scope shown
+        assert "command_proposed" not in kinds  # nothing has run — no sandbox yet
+
+        # The transcript must record the `idle` state itself (#157). The console
+        # derives status from the latest `state_change` and falls back to
+        # `starting` when there is none — without this event an unstarted session
+        # renders as "Working" and never offers its wake action.
+        states = [e["payload"]["to"] for e in state["events"] if e["kind"] == "state_change"]
+        assert states == ["idle"]
+
+        assert client.post(f"/api/retest-sessions/{sid}/start").status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "awaiting_command"  # first agent step proposed a command
+
+
+def test_start_is_a_noop_on_an_already_running_session() -> None:
+    """Start only advances an `idle` session; on a running one it does nothing (#150)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+        assert client.post(f"/api/retest-sessions/{sid}/start").status_code == 202
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+
+
+def test_stop_and_resume_roundtrip() -> None:
+    """Stop parks a live session in `stopped`; Resume returns it to awaiting the gate (#150)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+
+        assert client.post(f"/api/retest-sessions/{sid}/stop").status_code == 202
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "stopped"
+
+        assert client.post(f"/api/retest-sessions/{sid}/resume").status_code == 202
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+
+
+def test_message_wakes_an_idle_session_with_that_message_as_the_steer() -> None:
+    """The chat is the lifecycle control (#163): messaging an `idle` session starts it.
+
+    No Start button, no `POST …/start` — the message alone provisions the sandbox
+    and drives the first agent turn, and is recorded in the transcript as the
+    operator's opening instruction.
+    """
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session", json={"deferred": True}).json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "idle"
+
+        resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "start the retest"})
+        assert resp.status_code == 202
+
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "awaiting_command"  # woken: the first step proposed a command
+        kinds = [e["kind"] for e in state["events"]]
+        assert "human_message" in kinds  # the steer is in the transcript
+        # No Q&A stand-in reply: the real agent is the one answering now (#163).
+        assert "agent_message" not in kinds
+
+
+def test_message_resumes_a_stopped_session() -> None:
+    """A message to a `stopped` session picks it back up — there is no Resume button (#163)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.post(f"/api/retest-sessions/{sid}/stop").status_code == 202
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "stopped"
+
+        resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "keep going"})
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "awaiting_command"  # resumed to the held gate
+        assert "human_message" in [e["kind"] for e in state["events"]]
+
+
+def test_message_to_a_busy_session_does_not_re_run_the_agent() -> None:
+    """While a command awaits approval a message only queues + gets the Q&A reply (#163).
+
+    The waking rule is scoped to *parked* states; a session mid-gate must not be
+    re-driven behind the operator's back, or the pending command would be lost.
+    """
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        before = client.get(f"/api/retest-sessions/{sid}").json()
+        assert before["status"] == "awaiting_command"
+        proposals = [e for e in before["events"] if e["kind"] == "command_proposed"]
+
+        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "what are we retesting?"})
+
+        after = client.get(f"/api/retest-sessions/{sid}").json()
+        assert after["status"] == "awaiting_command"  # undisturbed
+        # No *new* proposal: the agent was not re-run, only messaged.
+        assert len([e for e in after["events"] if e["kind"] == "command_proposed"]) == len(
+            proposals
+        )
+
+
+def test_conclude_from_awaiting_command_records_operator_verdict() -> None:
+    """Conclude-anytime (#150): the operator concludes while a command is pending."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+        resp = client.post(
+            f"/api/retest-sessions/{sid}/conclude",
+            json={"status": "still_open", "rationale": "confirmed by hand"},
+        )
+        assert resp.status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "concluded"
+        assert state["verdict_status"] == "still_open"
+
+
 def test_message_gets_immediate_agent_reply() -> None:
     """A chat message triggers an immediate agent_message reply from the Q&A agent (FR-17).
 
@@ -571,15 +704,19 @@ def test_pause_then_operator_conclude_writes_a_verdict() -> None:
         assert [v["status"] for v in verdicts] == ["fixed"]
 
 
-def test_pause_then_continue_with_guidance_reaches_a_verdict() -> None:
-    """Keep going after a message resumes the agent to a determination (ADR-0034)."""
+def test_guidance_message_alone_resumes_the_agent_to_a_verdict() -> None:
+    """A reply at a guidance pause *is* "keep going" (#163) — no `/continue` needed.
+
+    ADR-0034 paused the session when the agent handed back; the operator's reply
+    now both steers and resumes it, so the determination lands off the message
+    alone. This is what retires the "Keep going" button.
+    """
     with _paused_client(script_inconclusive_then_conclude_on_message) as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
         assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "needs_guidance"
 
-        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
-        resp = client.post(f"/api/retest-sessions/{sid}/continue")
+        resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
         assert resp.status_code == 202
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "concluded"

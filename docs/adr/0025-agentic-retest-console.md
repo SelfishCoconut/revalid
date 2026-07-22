@@ -287,3 +287,17 @@ Slice 1 issue: [#90](https://github.com/SelfishCoconut/revalid/issues/90).
 - Epic: [#87](https://github.com/SelfishCoconut/revalid/issues/87); Slice 0 issue: [#88](https://github.com/SelfishCoconut/revalid/issues/88)
 - SRS: FR-17 (`docs/requirements/srs.md`)
 - Superseded-over-time: ADR-0011 (retest-plan generation), ADR-0012 (server-side plan approval gate), ADR-0014 (execution sanity checker), ADR-0019 (retest-technique registry) — all stay accepted and operational until Slice 6
+
+## Update — 2026-07-21: agent-chosen per-command timeout (issue #150)
+
+Slice 0's `DockerSandbox.exec` accepted a `timeout` but never applied it
+(`exec_run` has no native timeout), so a long or hanging command (an nmap sweep,
+or one blocked on stdin) could wedge a session at `running_command` indefinitely.
+Fixed, and made the limit **the agent's choice**: `run_command` takes a
+`timeout_seconds` the model sets to fit each command (short for a `curl`, longer
+for a scan), clamped to a hard ceiling (`MAX_COMMAND_TIMEOUT`) so it can never ask
+for an unbounded wait. The sandbox enforces it in-container by wrapping the
+command with `timeout` (present on both the alpine/busybox default image and a
+coreutils Kali image); on overrun the command is killed and the model observes it
+timed out (a note on the tool return) so it can retry with a narrower scope. The
+operator's manual `!` commands are bounded the same way, defaulting to the ceiling.

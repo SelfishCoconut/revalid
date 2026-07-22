@@ -330,7 +330,7 @@ describe("RetestSession", () => {
     expect(client.submitHumanCommand).not.toHaveBeenCalled();
   });
 
-  it("restarts: ends this session and opens a fresh one seeded with the goal", async () => {
+  it("restarts: ends this session and opens a fresh deferred one seeded with the goal", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [{ seq: 1, kind: "plan_updated", payload: { steps: ["Check /admin"] } }],
       status: "awaiting_command",
@@ -359,8 +359,13 @@ describe("RetestSession", () => {
     await userEvent.click(restart);
 
     expect(client.endRetestSession).toHaveBeenCalledWith(1);
+    // Restart now opens the fresh session `deferred` (issue #150): it lands idle and
+    // waits for Start rather than auto-running.
     await waitFor(() => {
-      expect(client.startRetestSession).toHaveBeenCalledWith(1, { initial_goal: ["Check /admin"] });
+      expect(client.startRetestSession).toHaveBeenCalledWith(1, {
+        deferred: true,
+        initial_goal: ["Check /admin"],
+      });
     });
   });
 
@@ -582,15 +587,18 @@ describe("RetestSession", () => {
     renderAt(1);
     expect(screen.getByLabelText(/needs guidance/i)).toBeInTheDocument();
     expect(screen.getByText(/exhausted my options/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /keep going/i })).toBeInTheDocument();
   });
 
-  it("Keep going resumes the paused session", async () => {
+  it("offers no Keep going button — replying is what resumes it (#163)", async () => {
     mockPaused();
-    vi.mocked(client.continueSession).mockResolvedValue({ status: "accepted" });
+    vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
     renderAt(1);
-    await userEvent.click(screen.getByRole("button", { name: /keep going/i }));
-    expect(client.continueSession).toHaveBeenCalledWith(1);
+
+    expect(screen.queryByRole("button", { name: /keep going/i })).not.toBeInTheDocument();
+    // The composer is the resume path: the server continues the session on receipt.
+    await userEvent.type(screen.getByLabelText(/message the agent/i), "try the basket endpoint");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(client.submitMessage).toHaveBeenCalledWith(1, "try the basket endpoint");
   });
 
   it("Conclude records the operator's own verdict", async () => {
@@ -613,6 +621,116 @@ describe("RetestSession", () => {
     expect(screen.getByLabelText(/terminal command input/i)).not.toBeDisabled();
   });
 
+  it("wakes an idle (deferred) session by messaging it (#163)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "plan_updated", payload: { steps: ["Re-check login"] } }],
+      status: "idle",
+      verdict: null,
+      connected: true,
+    });
+    mockRecord({ status: "idle" });
+    vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+
+    // Idle: nothing has run — the goal shows and the thread says the agent is
+    // asleep. There is no wake *button* (#163) and no Stop; the composer is live
+    // even though there is no sandbox yet, because messaging is what provisions it.
+    expect(screen.getByLabelText(/asleep/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /wake the agent/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).not.toBeInTheDocument();
+    const composer = screen.getByLabelText(/message the agent/i);
+    expect(composer).not.toBeDisabled();
+    await userEvent.type(composer, "start the retest");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(client.submitMessage).toHaveBeenCalledWith(1, "start the retest");
+  });
+
+  it("shows Stop while running and pauses the session (#150)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "command_proposed",
+          payload: { command: "curl http://lab", rationale: "probe", tool_call_id: "abc" },
+        },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.stopSession).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+    await userEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+    expect(client.stopSession).toHaveBeenCalledWith(1);
+  });
+
+  it("offers no Resume on a stopped session — a message picks it back up (#163)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "plan_updated", payload: { steps: ["step"] } }],
+      status: "stopped",
+      verdict: null,
+      connected: true,
+    });
+    mockRecord({ status: "stopped" });
+    vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+
+    expect(screen.getByLabelText(/stopped/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
+    // The message input stays usable while stopped (the sandbox is alive), and
+    // sending is what resumes the run — the server wakes it on receipt.
+    const composer = screen.getByLabelText(/message the agent/i);
+    expect(composer).not.toBeDisabled();
+    await userEvent.type(composer, "keep going");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(client.submitMessage).toHaveBeenCalledWith(1, "keep going");
+  });
+
+  it("concludes manually mid-session, not only when paused for guidance (#150)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "command_proposed",
+          payload: { command: "curl http://lab", rationale: "probe", tool_call_id: "abc" },
+        },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    vi.mocked(client.concludeSession).mockResolvedValue({ status: "accepted" });
+    renderAt(1);
+
+    await userEvent.click(screen.getByRole("button", { name: /conclude/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/conclude status/i), "still_open");
+    await userEvent.type(screen.getByLabelText(/conclude rationale/i), "seen enough");
+    await userEvent.click(screen.getByRole("button", { name: /record verdict/i }));
+    expect(client.concludeSession).toHaveBeenCalledWith(1, "still_open", "seen enough");
+  });
+
+  it("shows the agent-chosen timeout on a proposed command (#150)", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [
+        {
+          seq: 1,
+          kind: "command_proposed",
+          payload: {
+            command: "nmap -Pn --top-ports 100 lab",
+            rationale: "scan",
+            tool_call_id: "abc",
+            timeout_seconds: 120,
+          },
+        },
+      ],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+    renderAt(1);
+    expect(screen.getByText(/runs up to 120s/i)).toBeInTheDocument();
+  });
+
   it("lays out the goal panel and the chat log side by side, not dropping either", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [
@@ -633,5 +751,45 @@ describe("RetestSession", () => {
     expect(screen.getByRole("log", { name: /agent conversation/i })).toBeInTheDocument();
     expect(screen.getByText("Retry the payload")).toBeInTheDocument();
     expect(screen.getByText(/checking the login flow first/)).toBeInTheDocument();
+  });
+
+  it("keeps the conversation and its composer inside one chat panel (#157)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "agent_message", payload: { text: "probing the endpoint" } }],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    // The composer is welded to the transcript's bottom edge inside the same
+    // panel, so the thread and the box you type into read as one chat rather
+    // than two stacked boxes. Assert the DOM relationship, not the styling:
+    // the log and the input must share a single <section> (Panel) ancestor.
+    const log = screen.getByRole("log", { name: /agent conversation/i });
+    const composer = await screen.findByLabelText(/message the agent/i);
+    const panel = log.closest("section");
+
+    expect(panel).not.toBeNull();
+    expect(panel).toContainElement(composer);
+  });
+
+  it("renders the conclude form in-thread rather than as a detached panel (#157)", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [{ seq: 1, kind: "agent_message", payload: { text: "probing" } }],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+    });
+
+    renderAt(1);
+
+    await userEvent.click(screen.getByRole("button", { name: /conclude/i }));
+
+    // The form appears where the conversation left off — inside the scrolling
+    // log — instead of above the whole console as its own panel.
+    const log = screen.getByRole("log", { name: /agent conversation/i });
+    expect(log).toContainElement(screen.getByLabelText(/conclude rationale/i));
   });
 });

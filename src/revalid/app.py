@@ -14,7 +14,7 @@ import hashlib
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, NoReturn, cast
 
 from fastapi import (
     APIRouter,
@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, DeferredToolRequests
 from sqlalchemy import Engine, delete, select
@@ -112,9 +113,14 @@ from revalid.retest_session import (
     end_session,
     is_terminal,
     load_events_after,
+    resume_session,
+    session_goal,
+    session_scope,
     set_free_launch,
     set_goal,
+    set_status,
     start_and_step,
+    stop_session,
     submit_human_command,
     submit_message,
 )
@@ -363,6 +369,10 @@ class StartSessionRequest(BaseModel):
     # live-edit path; changing scope means a fresh session. Defaults to the finding's
     # affected endpoints when omitted.
     target_endpoints: list[str] | None = None
+    # Open the session `idle` (created but not started) instead of auto-running —
+    # the Restart path (issue #150). The goal + scope are recorded so the idle
+    # console shows them; the operator presses Start to provision and begin.
+    deferred: bool = False
 
 
 class FreeLaunchRequest(BaseModel):
@@ -880,14 +890,30 @@ def run_message(
     text: str,
     qa_agent: Agent[None, str],
     finding: Finding | None,
+    agent: RetestAgent,
+    make_sandbox: SandboxFactory,
 ) -> None:
-    """Queue an operator chat message and answer it immediately (FR-17 background task).
+    """Deliver an operator chat message, waking the agent if it is parked (#163).
 
-    Two things happen, both additive: the message is buffered for the main agent's
-    next turn (steering, as before), AND the operator gets an immediate chat reply
-    from a read-only Q&A over the transcript. The reply is decoupled from the
-    deferred-command loop, so asking a question never disturbs a pending command.
-    Best-effort — a Q&A failure never strands the (already-recorded) message.
+    The chat *is* the lifecycle control (issue #163): talking to a parked agent is
+    how you start or continue it, so there is no Resume/Wake/Keep-going button.
+    What the message does depends on where the session is parked:
+
+    * ``idle`` — provision the sandbox and run the first turn, with the message
+      folded into the opening prompt.
+    * ``stopped`` / ``needs_guidance`` — buffer the message and resume/continue;
+      :func:`~revalid.retest_session._resume_prompt` delivers it as that turn's
+      user message.
+    * anything else (the agent is mid-run, or a command awaits approval) — buffer
+      it for the next turn boundary as before, and answer it *now* with the
+      read-only Q&A so the operator is not left hanging.
+
+    Whether the message is a question or an instruction is the **agent's** call,
+    not ours: it answers with the ungated ``respond`` tool and acts with the
+    approval-gated ``run_command``, so waking it can never execute anything the
+    operator has not approved. The Q&A stand-in is therefore skipped whenever the
+    message woke the agent — the real agent replies itself, with the full message
+    history, and two voices answering one message is noise.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -896,12 +922,30 @@ def run_message(
         text: The exact operator message.
         qa_agent: The prose Q&A agent (a stand-in model in tests).
         finding: The session's finding, for Q&A context; ``None`` skips the reply.
+        agent: The built retest agent, to wake an ``idle`` session.
+        make_sandbox: The session-scoped sandbox factory, likewise.
     """
     with sessions() as session:
+        record = session.get(RetestSessionRecord, session_id)
+        if record is None:
+            return
+        status = RetestSessionStatus(record.status)
+        if status is RetestSessionStatus.IDLE:
+            # No live session yet, so the message cannot be buffered on one: record
+            # it here and hand it to the opening prompt instead.
+            append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
+            _start_idle(session, registry, session_id, agent, make_sandbox, steer=text)
+            return
         submit_message(session, registry, session_id, text)
-        # Only reply when the message was actually recorded (session live) and we
-        # have finding context; answer_operator_question reads events + finding and
-        # appends an agent_message that the transcript stream surfaces.
+        if status is RetestSessionStatus.STOPPED:
+            resume_session(session, registry, session_id)
+            return
+        if status is RetestSessionStatus.NEEDS_GUIDANCE:
+            continue_session(session, registry, session_id)
+            return
+        # Busy: the message is queued for the next turn boundary, so answer it now.
+        # answer_operator_question reads events + finding and appends an
+        # agent_message that the transcript stream surfaces.
         if finding is not None and registry.get(session_id) is not None:
             with contextlib.suppress(Exception):
                 answer = answer_operator_question(qa_agent, session, session_id, finding, text)
@@ -969,6 +1013,133 @@ def run_conclude(
     """
     with sessions() as session:
         conclude_session(session, registry, session_id, status, rationale)
+
+
+def run_start(
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    session_id: int,
+    agent: RetestAgent,
+    make_sandbox: SandboxFactory,
+) -> None:
+    """Provision the sandbox and run the first step of an ``idle`` session (issue #150).
+
+    The deferred-start counterpart of :func:`run_first_step`: a ``Restart`` opened
+    the session ``idle`` with its goal + scope already recorded, so this reads them
+    back from the transcript (never re-recording — the ``target_set`` invariant is
+    "emitted once") and drives the first agent turn. A no-op unless the session is
+    still ``idle``, so a double-click Start cannot double-provision. Lets no
+    exception escape: on any failure the sandbox is torn down and the session
+    settles to ``error``.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        registry: The process-local live-session registry.
+        session_id: The ``idle`` session to start.
+        agent: The built retest agent (a stand-in model in tests).
+        make_sandbox: The session-scoped sandbox factory.
+    """
+    with sessions() as session:
+        _start_idle(session, registry, session_id, agent, make_sandbox)
+
+
+def _start_idle(
+    session: Session,
+    registry: SessionRegistry,
+    session_id: int,
+    agent: RetestAgent,
+    make_sandbox: SandboxFactory,
+    steer: str | None = None,
+) -> None:
+    """Provision and run the first turn of an ``idle`` session, on an open session.
+
+    Split from :func:`run_start` so the wake-by-message path (issue #163) can share
+    it without nesting a second DB session inside the first.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The process-local live-session registry.
+        session_id: The ``idle`` session to start.
+        agent: The built retest agent (a stand-in model in tests).
+        make_sandbox: The session-scoped sandbox factory.
+        steer: An operator message that woke this session, appended to the first
+            prompt so the agent's opening turn already answers/obeys it.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or RetestSessionStatus(record.status) is not RetestSessionStatus.IDLE:
+        return  # already started, or not a deferred session
+    finding = _current_or_404(session, record.finding_id).to_domain()
+    endpoints = session_scope(session, session_id) or finding.affected_endpoints
+    goal = session_goal(session, session_id)
+    prompt = _target_preamble(endpoints) + _goal_prompt(goal, finding)
+    if steer:
+        prompt += f"\n\nThe operator says:\n{steer}"
+    sandbox: Sandbox | None = None
+    try:
+        sandbox = make_sandbox(session_id)
+        start_and_step(
+            session,
+            registry,
+            session_id,
+            agent,
+            sandbox,
+            prompt,
+            free_launch=record.free_launch,
+        )
+    except Exception as exc:  # broad on purpose: no failure may strand the session
+        if sandbox is not None:
+            with contextlib.suppress(Exception):
+                sandbox.stop()
+        _fail(session, registry, session_id, str(exc))
+
+
+def _opt_tuple(values: list[str] | None) -> tuple[str, ...] | None:
+    """Return a tuple of ``values``, or ``None`` when empty/absent (launch options)."""
+    return tuple(values) if values else None
+
+
+def _seed_deferred_session(
+    session: Session,
+    session_id: int,
+    finding: Finding,
+    goal: tuple[str, ...] | None,
+    endpoints: tuple[str, ...] | None,
+) -> None:
+    """Record an idle (deferred) session's scope + goal so the console shows them.
+
+    The Restart path (issue #150) and now every launch (#157) open the session
+    ``idle`` and record its scope and goal up front — no sandbox, no agent step —
+    so the console displays them while it waits to be woken, which reads them back
+    from the transcript.
+
+    The ``idle`` state itself is recorded too. The console derives a session's
+    status from the latest ``state_change`` event and falls back to ``starting``
+    when the transcript holds none — so without this an idle session read as
+    "Working", complete with a thinking indicator, and never offered its wake
+    action. The transcript is the source of truth for state (ADR-0025), so the
+    starting state belongs in it rather than being inferred.
+    """
+    set_status(session, session_id, RetestSessionStatus.IDLE)
+    scope = endpoints if endpoints is not None else finding.affected_endpoints
+    if scope:
+        append_event(session, session_id, SessionEventKind.TARGET_SET, {"endpoints": list(scope)})
+    if goal:
+        append_event(session, session_id, SessionEventKind.PLAN_UPDATED, {"steps": list(goal)})
+
+
+def run_stop(sessions: sessionmaker[Session], registry: SessionRegistry, session_id: int) -> None:
+    """Pause a running session — Stop (issue #150, background task)."""
+    with sessions() as session:
+        stop_session(session, registry, session_id)
+
+
+def run_resume(sessions: sessionmaker[Session], registry: SessionRegistry, session_id: int) -> None:
+    """Resume a stopped session — Resume (issue #150, background task).
+
+    Runs in the background because resuming may drive further agent turns.
+    """
+    with sessions() as session:
+        resume_session(session, registry, session_id)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1369,47 +1540,6 @@ def _register_session_routes(
 
     SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
 
-    @router.post(
-        "/findings/{finding_id}/retest-session", response_model=RetestSessionOut, status_code=202
-    )
-    def start_retest_session(
-        finding_id: int,
-        background: BackgroundTasks,
-        session: SessionDep,
-        agent: RetestAgentDep,
-        make_sandbox: SandboxFactoryDep,
-        goal_agent: GoalAgentDep,
-        body: StartSessionRequest | None = None,
-    ) -> RetestSessionOut:
-        """Open an agentic retest session and schedule its first agent step (FR-17).
-
-        An optional body sets the free-launch mode, a seed goal and the target
-        scope (FR-17); with no body the session runs gated, requiring per-command
-        operator approval.
-        """
-        cfg = body or StartSessionRequest()
-        version = _current_or_404(session, finding_id)
-        finding = version.to_domain()
-        record = create_session(
-            session,
-            finding_id=finding_id,
-            model=agent_model_name(agent),
-            free_launch=cfg.free_launch,
-        )
-        background.add_task(
-            run_first_step,
-            sessions,
-            registry,
-            record.id,
-            agent,
-            make_sandbox,
-            finding,
-            goal_agent,
-            tuple(cfg.initial_goal) if cfg.initial_goal else None,
-            tuple(cfg.target_endpoints) if cfg.target_endpoints else None,
-        )
-        return RetestSessionOut.from_record(record, [])
-
     @router.get("/retest-sessions/{session_id}", response_model=RetestSessionOut)
     def get_retest_session(session_id: int, session: SessionDep) -> RetestSessionOut:
         """Return one session's status + full transcript (the SPA's poll target, FR-17)."""
@@ -1456,13 +1586,16 @@ def _register_session_routes(
         background: BackgroundTasks,
         session: SessionDep,
         qa_agent: QaAgentDep,
+        agent: RetestAgentDep,
+        make_sandbox: SandboxFactoryDep,
     ) -> dict[str, str]:
-        """Queue an operator chat message and trigger an immediate agent reply (FR-17).
+        """Deliver an operator chat message, waking the agent if parked (#163).
 
-        The message is recorded and buffered for the agent's next turn (steering) and,
-        additively, answered right away by a read-only Q&A over the transcript — so a
-        question ("what are we retesting?") gets a reply without an approve/reject. A
-        no-op if the session is no longer live.
+        The chat is the lifecycle control: a message to an ``idle``, ``stopped`` or
+        ``needs_guidance`` session starts/resumes/continues it with that message as
+        the steer. While the agent is busy the message is queued for its next turn
+        and answered immediately by the read-only Q&A instead. See
+        :func:`run_message`. A no-op if the session no longer exists.
         """
         background.add_task(
             run_message,
@@ -1472,6 +1605,8 @@ def _register_session_routes(
             body.text,
             qa_agent,
             _session_finding(session, session_id),
+            agent,
+            make_sandbox,
         )
         return {"status": "accepted"}
 
@@ -1533,12 +1668,122 @@ def _register_guidance_routes(
     ) -> dict[str, str]:
         """Manually conclude a session with the operator's determination (ADR-0034).
 
-        Records the operator's verdict (the only path that writes ``inconclusive``)
-        and tears down. Runs in the background; a no-op if the session is terminal.
+        Available at any live point in the retest (issue #150), not only at a
+        ``needs_guidance`` pause. Records the operator's verdict (the only path that
+        writes ``inconclusive``) and tears down. Runs in the background; a no-op if
+        the session is already terminal.
         """
         background.add_task(
             run_conclude, sessions, registry, session_id, body.status, body.rationale
         )
+        return {"status": "accepted"}
+
+
+def _register_launch_route(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the FR-17 session-launch route (Restart-aware, issue #150).
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`: launching now branches on ``deferred``
+    (immediate start vs an idle session awaiting Start), which pushed the parent
+    over the gate.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post(
+        "/findings/{finding_id}/retest-session", response_model=RetestSessionOut, status_code=202
+    )
+    def start_retest_session(
+        finding_id: int,
+        background: BackgroundTasks,
+        session: SessionDep,
+        agent: RetestAgentDep,
+        make_sandbox: SandboxFactoryDep,
+        goal_agent: GoalAgentDep,
+        body: StartSessionRequest | None = None,
+    ) -> RetestSessionOut:
+        """Open an agentic retest session (FR-17).
+
+        An optional body sets the free-launch mode, a seed goal and the target
+        scope (FR-17); with no body the session runs gated, requiring per-command
+        operator approval. With ``deferred`` (the Restart path, issue #150) the
+        session opens ``idle`` — goal + scope recorded, but not started — and waits
+        for a ``Start``; otherwise its first agent step is scheduled immediately.
+        """
+        cfg = body or StartSessionRequest()
+        version = _current_or_404(session, finding_id)
+        finding = version.to_domain()
+        record = create_session(
+            session,
+            finding_id=finding_id,
+            model=agent_model_name(agent),
+            free_launch=cfg.free_launch,
+            deferred=cfg.deferred,
+        )
+        goal = _opt_tuple(cfg.initial_goal)
+        endpoints = _opt_tuple(cfg.target_endpoints)
+        if cfg.deferred:
+            _seed_deferred_session(session, record.id, finding, goal, endpoints)
+        else:
+            background.add_task(
+                run_first_step,
+                sessions,
+                registry,
+                record.id,
+                agent,
+                make_sandbox,
+                finding,
+                goal_agent,
+                goal,
+                endpoints,
+            )
+        return RetestSessionOut.from_record(
+            record, load_events_after(session, record.id, 0) if cfg.deferred else []
+        )
+
+
+def _register_lifecycle_routes(
+    router: APIRouter, sessions: sessionmaker[Session], registry: SessionRegistry
+) -> None:
+    """Register the operator lifecycle routes: Start / Stop / Resume (issue #150).
+
+    Split from :func:`_register_session_routes` for the same mccabe-budget reason
+    as :func:`_register_free_launch_route`. Together with Restart (a deferred
+    launch, handled by ``start_retest_session``) and Conclude/End these give the
+    operator full control of a session's lifecycle.
+    """
+
+    @router.post("/retest-sessions/{session_id}/start", status_code=202)
+    def start_session_route(
+        session_id: int,
+        background: BackgroundTasks,
+        agent: RetestAgentDep,
+        make_sandbox: SandboxFactoryDep,
+    ) -> dict[str, str]:
+        """Start an ``idle`` (deferred) session — the operator's Start (issue #150).
+
+        Provisions the sandbox and runs the first agent step in the background; a
+        no-op unless the session is still ``idle``.
+        """
+        background.add_task(run_start, sessions, registry, session_id, agent, make_sandbox)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/stop", status_code=202)
+    def stop_session_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
+        """Pause a running session, keeping its sandbox alive — Stop (issue #150)."""
+        background.add_task(run_stop, sessions, registry, session_id)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/resume", status_code=202)
+    def resume_session_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
+        """Resume a stopped session — Resume (issue #150). May drive further agent turns."""
+        background.add_task(run_resume, sessions, registry, session_id)
         return {"status": "accepted"}
 
 
@@ -1816,6 +2061,46 @@ def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Sessi
         return ChatDetailOut.of(chat, list_messages(session, chat_id))
 
 
+def _register_api_fallback(app: FastAPI) -> None:
+    """Answer any unmatched ``/api`` path with a 404, for every method (#157).
+
+    Registered *after* the ``/api`` router (so real routes win) and *before* the
+    SPA catch-all. Without it the SPA's ``@app.get("/{full_path:path}")`` is the
+    only route matching an unknown ``/api`` path, so a non-GET request to one —
+    a POST to a renamed or not-yet-deployed endpoint — matched the path but not
+    the method and came back as a bewildering ``405 Method Not Allowed``. A
+    missing endpoint should say so.
+    """
+    fallback_path = "/api/{rest:path}"
+
+    @app.api_route(
+        fallback_path,
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        include_in_schema=False,
+        # The handler only ever raises, and FastAPI cannot build a response model
+        # from `NoReturn` — it raises `FastAPIError` at registration, i.e. the app
+        # would not start at all. Opt out of response-model inference explicitly.
+        response_model=None,
+    )
+    def api_not_found(request: Request, rest: str) -> NoReturn:
+        # Because this route matches *every* method, it also swallows the honest
+        # 405 a real endpoint would have raised for a wrong method. Re-derive it:
+        # if some other API route matches this path, the path exists and only the
+        # method is wrong. Anything else genuinely has no such endpoint.
+        # Only *real* ``/api`` routes count: this fallback matches everything by
+        # design, and so does the SPA's ``/{full_path:path}`` catch-all.
+        known = any(
+            isinstance(route, APIRoute)
+            and route.path.startswith("/api/")
+            and route.path != fallback_path
+            and route.path_regex.match(request.url.path)
+            for route in app.routes
+        )
+        if known:
+            raise HTTPException(status_code=405, detail="Method Not Allowed")
+        raise HTTPException(status_code=404, detail=f"No such API endpoint: /api/{rest}")
+
+
 def _mount_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
     """Serve the built SPA at ``/`` with a client-routing catch-all (FR-11).
 
@@ -1956,8 +2241,10 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_report_admin_routes(api, sessions)
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
+    _register_launch_route(api, sessions, registry)
     _register_free_launch_route(api, sessions, registry)
     _register_guidance_routes(api, sessions, registry)
+    _register_lifecycle_routes(api, sessions, registry)
     _register_goal_routes(api, sessions, registry)
     _register_adjudicate_route(api, sessions)
     _register_session_stream_route(api, sessions)
@@ -1966,6 +2253,7 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     _register_chat_routes(api, sessions)
     _register_chat_message_route(api, sessions)
     app.include_router(api)
+    _register_api_fallback(app)
     _mount_spa(app)
 
     return app
