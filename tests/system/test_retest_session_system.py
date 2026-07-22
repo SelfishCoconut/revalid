@@ -15,7 +15,12 @@ import time
 import httpx
 import pytest
 
-from revalid.sandbox import DockerSandbox, egress_probe_command, lab_base_url
+from revalid.sandbox import (
+    DockerSandbox,
+    SandboxUnavailableError,
+    egress_probe_command,
+    lab_base_url,
+)
 
 pytestmark = pytest.mark.system
 
@@ -67,3 +72,42 @@ def test_sandbox_can_reach_lab_but_not_the_internet() -> None:
         assert egress.exit_code != 0  # internet is NOT reachable (egress lock, NFR-03)
     finally:
         box.stop()
+
+
+#: Tools the retest agent is entitled to assume are present (issue #105). Each
+#: must answer `-h`/`--version` *offline*, since the sandbox has no egress.
+EXPECTED_TOOLS = ("curl", "nmap", "sqlmap", "nikto", "hydra", "jq", "nc", "python3")
+
+
+def test_sandbox_image_carries_the_pentest_toolbox() -> None:
+    """The sandbox ships the tools the agent may propose commands for (#105).
+
+    Worth asserting rather than trusting the Dockerfile: the container cannot
+    install anything at runtime (it is egress-locked), so a tool missing from the
+    image is a command that fails at retest time — and an agent that concludes
+    from a failed probe is exactly the confidently-wrong verdict NFR-01 forbids.
+    """
+    if not _docker_available():
+        pytest.skip("docker not available; run with the sandbox extra + a running daemon")
+
+    box = DockerSandbox(session_id=9998)
+    try:
+        box.start()
+        missing = [
+            tool
+            for tool in EXPECTED_TOOLS
+            if box.exec(f"command -v {tool}", timeout=15).exit_code != 0
+        ]
+        assert not missing, f"sandbox image is missing: {', '.join(missing)}"
+    finally:
+        box.stop()
+
+
+def test_missing_sandbox_image_says_how_to_build_it() -> None:
+    """An unbuilt image fails with the fix, not a raw Docker error (#105)."""
+    if not _docker_available():
+        pytest.skip("docker not available; run with the sandbox extra + a running daemon")
+
+    box = DockerSandbox(session_id=9997, image="revalid-sandbox:definitely-not-built")
+    with pytest.raises(SandboxUnavailableError, match="make sandbox-image"):
+        box.start()

@@ -141,7 +141,9 @@ production `DockerSandbox`:
 1. creates a per-session Docker network named `revalid-retest-{session_id}` with
    `internal=True` — **no route to the host and no route to the internet**;
 2. connects the allowlisted lab container (`revalid-juice-shop`) to it;
-3. launches a pinned, minimal container (`curlimages/curl`) on that network,
+3. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
+   base carrying the pentest toolbox (nmap, sqlmap, nikto, hydra, …) — on that
+   network,
    idling on `sleep infinity` so it persists for the whole session.
 
 This is what FR-06 means in the current design: **the allowlist is network

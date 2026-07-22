@@ -17,6 +17,10 @@ jobs:
       - run: uv sync --locked --extra browser --extra sandbox
       - name: Install Playwright browser (FR-14)
         run: uv run playwright install --with-deps chromium
+      - name: Build the sandbox toolbox image (issue #105)
+        # The agent's container is egress-locked, so its tools must be baked in;
+        # the image is built locally rather than pulled from a registry.
+        run: make sandbox-image
       - name: Start lab targets
         run: |
           if [ -f lab/docker-compose.yml ]; then

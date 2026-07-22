@@ -139,10 +139,15 @@ flowchart LR
 
 ```bash
 uv sync --extra sandbox        # the app + Docker sandbox support
+make sandbox-image             # build the agent's pentest toolbox image (once)
 make lab-up                    # start the authorised target (OWASP Juice Shop, pinned)
 make build-ui                  # compile the React SPA
 make run                       # serve everything on http://127.0.0.1:8000
 ```
+
+> The sandbox image is **built, not pulled**: the agent's container is
+> egress-locked, so every tool it can use has to be in the image already. See
+> [`lab/sandbox/Dockerfile`](lab/sandbox/Dockerfile).
 
 Open the app, load a report, set a retest goal for a finding, start the session, and approve your way
 to a verdict. `make lab-down` tears the target down; `make reset-db` drops the local SQLite file.
