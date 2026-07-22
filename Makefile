@@ -85,6 +85,13 @@ demo-retest-session:
 demo-settings:
 	uv run python scripts/demo/settings.py
 
+# FR-17 sandbox toolbox image (issue #105). Built locally, never pulled: the
+# agent's container is egress-locked, so every tool it can use must already be in
+# the image. Rebuild after editing lab/sandbox/Dockerfile.
+sandbox-image:
+	docker build -t revalid-sandbox:1.0 -f lab/sandbox/Dockerfile lab/sandbox/
+	@echo "built revalid-sandbox:1.0 — override with REVALID_SANDBOX_IMAGE"
+
 # Retest lab (retest-lab skill) — intentionally vulnerable targets, localhost only
 lab-up:
 	docker compose -f lab/docker-compose.yml up -d

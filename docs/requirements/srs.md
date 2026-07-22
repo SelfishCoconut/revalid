@@ -182,7 +182,7 @@ non-lab targets, destructive exploitation.
     steering, and adjudication intact and an in-progress session surviving reload.
 - **Acceptance criteria — Slice 8 (pause-and-ask)** (met — issue #117, ADR-0034 proposed, 2026-07-19):
   - [x] **AC23**: the session never *gives up*. Reaching the `max_steps` budget, or the agent concluding `inconclusive` (reinterpreted as "exhausted my options"), **pauses** the session in the non-terminal `needs_guidance` state with the sandbox kept alive and no verdict written; there is **no wall-clock budget**. The operator **keeps going** (`POST …/continue {extra_steps?}` — raises the budget and resumes, re-opening a held command's gate or re-running the agent with queued guidance) or **concludes** (`POST …/conclude {status, rationale}` — the only path that records `inconclusive`, `actor="operator"`); chat and terminal commands stay usable while paused, and the SPA shows a pause banner instead of a give-up one.
-- **Remaining**: **none for the core**; the Kali-tooling sandbox image is tracked separately (#105) and does not gate FR-17.
+- **Remaining**: **none**; the Kali-tooling sandbox image landed (#105) — the agent runs on `revalid-sandbox`, built from `lab/sandbox/Dockerfile`.
 - **Traces to**: epic #87, issue #88, ADR-0025 (accepted), milestone M6. **Supersedes FR-04/FR-05/FR-07/FR-08 and drops FR-14** — the batch path was deleted in Slice 6b-iii-a (ADR-0033), leaving the agentic console the single retest implementation; FR-09 stays satisfied by agentic verdicts and FR-06 is now enforced by sandbox network isolation. NFR-02's reproducibility claim is a replayable transcript for agentic sessions (stated in ADR-0025).
 
 ### FR-18 — Reports chat assistant (corpus Q&A)

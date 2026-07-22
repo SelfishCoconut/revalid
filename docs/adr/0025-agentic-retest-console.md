@@ -301,3 +301,40 @@ command with `timeout` (present on both the alpine/busybox default image and a
 coreutils Kali image); on overrun the command is killed and the model observes it
 timed out (a note on the tool return) so it can retry with a narrower scope. The
 operator's manual `!` commands are bounded the same way, defaulting to the ceiling.
+
+---
+
+## Update — 2026-07-22: the sandbox carries a pentest toolbox (issue #105)
+
+Slice 0 pinned `curlimages/curl:8.11.1` — deliberately minimal, because the
+skeleton only needed to prove the egress lock. That left the agent able to
+*propose* `nmap` or `sqlmap` and unable to *run* them, so a genuine retest was
+limited to what `curl` can express.
+
+The sandbox now runs `revalid-sandbox`, built from `lab/sandbox/Dockerfile`: a
+Kali base with a curated toolbox (nmap, sqlmap, nikto, hydra, whatweb, netcat,
+jq, openssl, python3, dig).
+
+Three consequences worth stating.
+
+**The toolbox must be baked in.** The container has no route to the internet by
+construction, so it can neither `apt install` nor `pip install` at runtime. What
+ships in the image is what the agent has — which is why the Dockerfile lists
+packages explicitly and is meant to be edited rather than swapped for a
+metapackage.
+
+**The image is built, not pulled.** `make sandbox-image` builds it locally and
+the tag is pinned, so a rebuild is a deliberate act. A missing image fails at
+`start()` with the command that fixes it rather than a raw Docker error, and it
+deliberately does **not** fall back to a smaller image: the agent would silently
+lose its tools, and a retest that concludes `fixed` because its tool was missing
+is precisely the confidently-wrong verdict NFR-01 forbids.
+
+**Containment is unchanged.** The egress lock is a property of the per-session
+`--internal` network, not of the image, so a larger toolbox does not widen what
+the sandbox can reach. Re-verified against the new image: DNS resolution fails
+(`curl` exits 6) and `nmap` finds no route off-network, while the lab container
+stays reachable. `REVALID_SANDBOX_IMAGE` overrides the image for an operator who
+wants their own, and changes nothing about containment.
+
+The decision above is otherwise unchanged.

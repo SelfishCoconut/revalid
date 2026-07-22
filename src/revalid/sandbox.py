@@ -19,8 +19,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     import docker
     from docker.models.containers import Container
 
-#: Pinned sandbox image (pentest CLIs: curl, etc.). Kept minimal for Slice 0.
-DEFAULT_SANDBOX_IMAGE = "curlimages/curl:8.11.1"
+#: Pinned sandbox image: the Kali-based pentest toolbox built from
+#: ``lab/sandbox/Dockerfile`` by ``make sandbox-image`` (issue #105). It is built
+#: locally rather than pulled because the toolbox is curated here; the tag is
+#: pinned so a rebuild is a deliberate act.
+DEFAULT_SANDBOX_IMAGE = "revalid-sandbox:1.0"
+#: Env var overriding the sandbox image — point the agent at your own toolbox.
+SANDBOX_IMAGE_ENV = "REVALID_SANDBOX_IMAGE"
 #: The lab container name to attach to the internal network (lab/docker-compose.yml).
 DEFAULT_LAB_CONTAINER = "revalid-juice-shop"
 #: Env var overriding the lab target base URL (host-side polling in system tests).
@@ -81,6 +86,17 @@ def lab_base_url() -> str:
     return os.environ.get(LAB_BASE_URL_ENV, DEFAULT_LAB_BASE_URL)
 
 
+def sandbox_image() -> str:
+    """Return the sandbox image to run (``$REVALID_SANDBOX_IMAGE`` or the default).
+
+    The default is the locally-built Kali toolbox (issue #105); the override
+    exists so an operator can point the agent at their own image without a code
+    change — the egress lock is enforced by the network, not by the image, so
+    swapping it changes the tools available and nothing about containment.
+    """
+    return os.environ.get(SANDBOX_IMAGE_ENV, DEFAULT_SANDBOX_IMAGE)
+
+
 class FakeSandbox:
     """A scripted in-memory sandbox for unit/integration tests (no Docker)."""
 
@@ -120,12 +136,12 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         self,
         session_id: int,
         *,
-        image: str = DEFAULT_SANDBOX_IMAGE,
+        image: str | None = None,
         lab_container: str = DEFAULT_LAB_CONTAINER,
     ) -> None:
         """Bind this sandbox to ``session_id`` (scopes its egress-locked network name)."""
         self._session_id = session_id
-        self._image = image
+        self._image = image if image is not None else sandbox_image()
         self._lab_container = lab_container
         self._container: Container | None = None
         self._network_name = internal_network_name(session_id)
@@ -139,6 +155,7 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
                 "the sandbox extra is required: `uv sync --extra sandbox`"
             ) from exc
         client = docker.from_env()
+        self._require_image(client)
         self._clear_stale_network(client)
         network = client.networks.create(self._network_name, driver="bridge", internal=True)
         network.connect(self._lab_container)  # allowlist == network membership (FR-06)
@@ -150,6 +167,29 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             auto_remove=False,
             network_disabled=False,
         )
+
+    def _require_image(self, client: docker.DockerClient) -> None:
+        """Fail early and actionably when the toolbox image has not been built.
+
+        The sandbox image is built locally (``make sandbox-image``), not pulled,
+        so a fresh clone has no copy of it. Checking here turns a Docker
+        ``ImageNotFound`` raised mid-launch into a message naming the command
+        that fixes it.
+
+        Deliberately not falling back to a smaller image: the agent would then
+        silently lose nmap, sqlmap and the rest, and a retest that concludes
+        ``fixed`` because its tool was missing is precisely the confidently-wrong
+        verdict this project is built to avoid.
+        """
+        import docker.errors
+
+        try:
+            client.images.get(self._image)
+        except docker.errors.ImageNotFound as exc:
+            raise SandboxUnavailableError(
+                f"sandbox image {self._image!r} is not built — run `make sandbox-image` "
+                f"(or set ${SANDBOX_IMAGE_ENV} to an image you already have)"
+            ) from exc
 
     def _clear_stale_network(self, client: docker.DockerClient) -> None:
         """Remove a same-named network left over from a crashed prior session, if any.
