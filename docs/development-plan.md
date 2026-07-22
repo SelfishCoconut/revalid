@@ -132,13 +132,16 @@ Scheduled workflows: `system-tests.yml` (nightly, lab), `sanity.yml` (metrics),
 Anything derivable from code is **generated at build time**, so it cannot drift:
 
 - **API reference** — mkdocstrings from Google-style docstrings and type hints.
-- **UML class & package diagrams** — `pyreverse`, regenerated on every
-  `make docs` into `docs/reference/generated/` (never hand-edited).
+- **UML class & package diagrams** — `pyreverse` via `scripts/gen_uml.py`,
+  regenerated on every `make docs` into `docs/reference/generated/` (never
+  hand-edited). One diagram per group of modules rather than one unreadable
+  whole-package dump; a module missing from the script's `LAYERS` fails the build.
 - **Authored** — the C4 model, sequence diagrams and narrative pages, written as
   Mermaid inside markdown so GitHub renders them and PRs diff them. A change to
   code they describe must update them in the same PR (`doc-curator` checks).
 
 ```bash
+make uml          # regenerate the UML diagrams only
 make docs         # regenerate UML, then mkdocs build --strict
 make docs-serve   # live preview
 ```

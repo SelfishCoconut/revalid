@@ -3,18 +3,23 @@
 Regenerated from the actual code by `pyreverse` on every docs build (`make docs`,
 CI). Never edit by hand — they cannot be stale.
 
-One diagram per architectural layer rather than one for the whole package. A
-single dump of `revalid` is 96 classes joined by 18 relations, which is a wall of
-disconnected boxes and says nothing about how the system fits together. The
-groups below are the ones used by the [API reference](api.md), so the two pages
-can be read side by side: this page gives the shape, that one gives the
-docstrings.
+Several diagrams, one per group of modules, rather than one for the whole
+package. A single dump of `revalid` is 96 classes joined by 31 relations, which
+is a wall of disconnected boxes and says nothing about how the system fits
+together. The groups follow the same lines as the [API reference](api.md) — with
+`app` split out, because its 35 request and response models earn a diagram of
+their own — so the two pages can be read side by side: this page gives the shape,
+that one gives the docstrings.
 
-Each layer pulls in one level of ancestors and associations from outside its own
+These groups are a reading order, not a second architecture. The layered view of
+the system is the [C4 model](../architecture/c4.md), which is the authority on
+where a module belongs.
+
+Each group pulls in one level of ancestors and associations from outside its own
 modules, so an edge that crosses a boundary — `FindingExport` pointing at the
 domain `Finding`, `AdjudicateRequest` at `VerdictStatus` — stays visible instead
 of being cut at the group edge. That is why a class such as `Severity` appears in
-more than one diagram: it is the same class, seen from each layer that depends on
+more than one diagram: it is the same class, seen from each group that depends on
 it. Only classes revalid itself defines are drawn; library base types
 (`pydantic.BaseModel` and friends) are pruned, since their boxes are larger than
 anything in this codebase and describe the dependency rather than the system.
@@ -45,7 +50,9 @@ nothing from the other layers, which is the point.
 The three doors into the corpus and the enrichment they share: `pdf` and
 `extract` for the LLM-assisted PDF path, `ingest` for DefectDojo JSON and manual
 entry, `findings` for versioning, notes and CVSS/MITRE enrichment, `llm` for the
-model plumbing underneath.
+model plumbing underneath. `findings` and `llm` contribute no boxes — they are
+function-only modules, documented in the [API reference](api.md); their work
+shows up here as the classes the other three exchange.
 
 ```mermaid
 --8<-- "docs/reference/generated/classes_ingestion.mmd"

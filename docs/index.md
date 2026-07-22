@@ -23,7 +23,7 @@ without a human saying yes. What comes out is a verdict — `fixed` or
 | [Requirements (SRS)](requirements/srs.md) | The FR/NFR catalogue driving the Kanban board, with per-requirement acceptance criteria. |
 | [ADRs](adr/README.md) | The decision log (MADR). A decision without an ADR doesn't exist. |
 | [API reference](reference/api.md) | Generated from docstrings by mkdocstrings — edit the code, not the page. |
-| [UML](reference/uml.md) | Package dependencies plus one class diagram per architectural layer, regenerated from the code by `pyreverse` on every build. |
+| [UML](reference/uml.md) | Package dependencies plus a class diagram per group of modules, regenerated from the code by `pyreverse` on every build. |
 | [Roadmap](roadmap.md) | Current state, milestone plan and next action — the durable resume point. |
 | [Working on revalid](development-plan.md) | Environment, commands, test pyramid and the contribution workflow. |
 | [AI usage](ai-usage/AI_USAGE_LOG.md) | Public audit trail (Reglamento TFG 2026 §6). |

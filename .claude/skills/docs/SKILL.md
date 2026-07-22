@@ -9,13 +9,14 @@ Principle: anything derivable from code is **generated at build time** — never
 
 ## Build
 
-- `make docs` → regenerates pyreverse UML (class + package diagrams, Mermaid format) into `docs/reference/generated/`, then `mkdocs build --strict`.
+- `make uml` → regenerates the pyreverse diagrams (Mermaid) into `docs/reference/generated/` via `scripts/gen_uml.py`: the package dependency graph plus one class diagram per group of modules. **Adding a module to `src/revalid/` means adding it to `LAYERS` in that script** — the build fails and names the module if you don't, because a module no group claims would silently vanish from the page.
+- `make docs` → `make uml`, then `mkdocs build --strict`. The Pages workflow runs the same two steps, so local and CI cannot drift.
 - `make docs-serve` → live preview.
 - CI deploys to GitHub Pages on every push to `main` (`docs.yml`).
 
 ## What goes where
 
-- **Generated (do not touch)**: `docs/reference/generated/` (pyreverse UML, pydeps graph), API pages via mkdocstrings `::: revalid.<module>` directives.
+- **Generated (do not touch)**: `docs/reference/generated/` (pyreverse UML), API pages via mkdocstrings `::: revalid.<module>` directives.
 - **Authored**: `docs/architecture/` — C4 model (context/container/component) and sequence diagrams as Mermaid blocks in markdown. Diffable in PRs; GitHub renders them natively.
 - **Authored**: how-to/usage pages under `docs/`.
 
