@@ -34,6 +34,8 @@ function makeFinding(id: number, severity: Severity): Finding {
     attack_vector: "",
     affected_endpoints: [],
     reproduction_steps: [],
+    cvss: { vector: "", base_score: null, inferred: false },
+    mitre: { techniques: [], inferred: false },
     raw: {},
   };
 }

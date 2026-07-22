@@ -42,6 +42,32 @@ export interface DuplicateReport {
 
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
+/**
+ * CVSS severity code attached to a finding at ingestion (FR-19).
+ *
+ * `inferred` is provenance, not confidence: `false` means the code was read from
+ * the report verbatim, `true` means the model derived it because the report
+ * stated none. An empty `vector` with `inferred: false` means the report had no
+ * CVSS code and none was derived — render it as absent, never as a zero score.
+ */
+export interface CvssCode {
+  /** CVSS base vector, e.g. `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`. */
+  vector: string;
+  base_score: number | null;
+  inferred: boolean;
+}
+
+/**
+ * MITRE ATT&CK technique mapping for a finding (FR-19). Same `inferred`
+ * provenance rule as {@link CvssCode}; empty `techniques` means none stated and
+ * none derived.
+ */
+export interface MitreMapping {
+  /** ATT&CK technique IDs, e.g. `T1190`. */
+  techniques: string[];
+  inferred: boolean;
+}
+
 export interface Finding {
   id: number;
   report_id: number | null;
@@ -54,6 +80,8 @@ export interface Finding {
   attack_vector: string;
   affected_endpoints: string[];
   reproduction_steps: string[];
+  cvss: CvssCode;
+  mitre: MitreMapping;
   raw: Record<string, unknown>;
 }
 
@@ -80,6 +108,8 @@ export interface FindingVersion {
   attack_vector: string;
   affected_endpoints: string[];
   reproduction_steps: string[];
+  cvss: CvssCode;
+  mitre: MitreMapping;
   raw: Record<string, unknown>;
 }
 

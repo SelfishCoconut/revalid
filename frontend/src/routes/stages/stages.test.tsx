@@ -121,6 +121,23 @@ describe("ExtractStage", () => {
       expect(client.editFinding).toHaveBeenCalledWith(7, expect.objectContaining({ title: "SQLi login" }));
     });
   });
+
+  it("shows the finding's CVSS and ATT&CK taxonomy (FR-19)", () => {
+    renderStage(
+      <ExtractStage />,
+      stageContext({
+        finding: {
+          ...stageContext().finding,
+          cvss: { vector: "CVSS:3.1/AV:N/AC:L", base_score: 9.8, inferred: true },
+          mitre: { techniques: ["T1190"], inferred: false },
+        },
+      }),
+    );
+    expect(screen.getByText("9.8")).toBeInTheDocument();
+    expect(screen.getByText("T1190")).toBeInTheDocument();
+    // The CVSS was derived, the ATT&CK mapping was stated — exactly one badge.
+    expect(screen.getAllByText("inferred")).toHaveLength(1);
+  });
 });
 
 describe("StageRedirect", () => {

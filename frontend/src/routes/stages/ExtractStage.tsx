@@ -7,6 +7,7 @@ import { useFindingStage } from "../../hooks/useFindingStage";
 import { NotesThread } from "../../components/NotesThread";
 import { Spinner } from "../../components/Spinner";
 import { Button } from "../../components/ui/Button";
+import { FindingTaxonomy } from "../../components/FindingTaxonomy";
 import { Panel, PanelHeader } from "../../components/ui/Panel";
 import { useEditFinding, useFindingVersions } from "../../hooks/useFindingRevision";
 import { formatDate, useDateFormat } from "../../lib/dateFormat";
@@ -176,6 +177,9 @@ function FindingEditor({ finding }: { finding: Finding }) {
             className={`${inputClass} resize-y`}
           />
         </label>
+        <div className="rounded-lg border border-line bg-panel-2/40 p-3">
+          <FindingTaxonomy cvss={finding.cvss} mitre={finding.mitre} />
+        </div>
         <label className={fieldLabel}>
           Reason for this edit (optional)
           <input
