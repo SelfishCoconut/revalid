@@ -6,11 +6,22 @@
 \setlength{\emergencystretch}{3em}
 
 The problem addressed by this dissertation --- deciding, after a remediation
-cycle, whether a previously reported vulnerability is still exploitable --- sits
-at the intersection of two mature but largely disconnected bodies of work: the
-practice of penetration testing and vulnerability management, and the automation
-of security assessment, increasingly driven by artificial intelligence. This
-chapter reviews both. It first frames the manual, repetitive nature of the
+cycle, whether a previously reported vulnerability is still exploitable --- sits at
+the meeting point of two bodies of work that have grown steadily closer over the
+past few years: the practice of penetration testing and vulnerability management,
+and the automation of security assessment, increasingly driven by artificial
+intelligence. These are not separate worlds. A sustained research and industry
+effort has been pushing automation ever deeper into the security lifecycle, and the
+line between a manual audit and an automated one is dissolving quickly: the very
+period that produced autonomous offensive agents also produced defensive
+counterparts such as Google DeepMind's \emph{CodeMender}, an AI agent that patches
+newly discovered vulnerabilities and proactively rewrites existing source code to
+remove whole classes of weakness, with every patch reviewed by a human before it is
+upstreamed \cite{codemender}. Against this fast-moving and increasingly crowded
+backdrop, the report-driven revalidation of a specific reported finding --- re-running
+its own documented reproduction steps rather than a generic attack library --- is one of
+the tasks this wave of automation has so far largely passed over, and it is that
+omission this chapter builds toward. It first frames the manual, repetitive nature of the
 \emph{revalidation} (retest) phase within the vulnerability management lifecycle
 (Section~\ref{sec:pentest-lifecycle}). It then surveys the successive waves of
 automation applied to security testing, from signature-based scanners to
@@ -20,7 +31,7 @@ language models (LLMs) and the tool-using agents built on top of them
 (Section~\ref{sec:llm-agents}), and the extraction of structured information from
 the unstructured prose of security reports (Section~\ref{sec:ie}). The chapter
 closes with a synthesis that positions the proposed system against related work
-and states the research gap it fills (Section~\ref{sec:gap}).
+and identifies the narrow gap it targets (Section~\ref{sec:gap}).
 
 \section{Penetration testing and the vulnerability management lifecycle}
 \label{sec:pentest-lifecycle}
@@ -98,8 +109,12 @@ deciding that a finding is fixed requires distinguishing a genuine remediation
 from an incidental change --- a moved endpoint, an altered response, a disabled
 feature --- that merely hides the symptom. Third, it is \emph{poorly supported by
 tooling}: the report is prose, the reproduction steps are written for a human, and
-no artefact links a finding to a machine-checkable verification procedure.
-Compliance regimes compound the pressure. The Payment Card Industry Data Security
+no artefact links a finding to a machine-checkable verification procedure. That such
+verification is necessary rather than a formality is borne out by remediation data:
+across the more than five thousand penetration tests Cobalt runs each year, only
+48\% of findings --- and 69\% of the most serious ones --- are ever resolved, at a
+median of 67 days \cite{cobalt_pentesting_2025}; a reported fix cannot be assumed to
+hold, it must be checked. Compliance regimes compound the pressure. The Payment Card Industry Data Security
 Standard, for example, requires that exploitable vulnerabilities found during
 penetration testing be corrected and the correction verified by repeat testing
 \cite{pcidss}, turning revalidation into a recurring, deadline-bound obligation
@@ -369,7 +384,7 @@ every downstream verdict.
 \section{Synthesis and research gap}
 \label{sec:gap}
 
-The preceding sections reveal a landscape rich in adjacent capabilities but with a
+The preceding sections describe a field with many adjacent capabilities but a
 gap at its centre. Standards mandate revalidation without automating it
 (Section~\ref{subsec:revalidation}). Scanners automate detection but reason about
 patterns, not about a specific reported finding, and their false positives are
@@ -383,68 +398,58 @@ offensive literature pursues \emph{exploitation}, unsupervised, whereas safety
 considerations demand the opposite (Section~\ref{subsec:llm-safety}).
 
 Table~\ref{tab:comparison} contrasts these families along the dimensions that
-matter for revalidation: whether the approach is driven by the content of a
-specific report, its execution model, the granularity of human oversight, and
-whether it yields an evidence-backed verdict. Figure~\ref{fig:gap} shows the same
-families as a map, with every prior approach clustering away from the corner that
-revalidation requires. No existing family occupies the combination the problem
-requires. The gap, and the contribution of this
-dissertation, is \emph{revalid}: the report-driven, human-gated and
-verdict-oriented system proposed in Section~\ref{sec:solution}. It is the one
-combination the families above never provide --- re-executing the reproduction steps
-of an individual reported finding, gating every command on a human decision, and
-returning a conservative, evidence-linked verdict. The chapters that follow develop
-this system in detail.
+matter \emph{for revalidation specifically}: whether the approach is driven by the
+content of an individual report, its execution model, the granularity of human
+oversight, and whether it produces a per-finding remediation verdict. These are not
+axes of general merit --- each family is engineered for a different goal, and most
+were never meant to answer the revalidation question at all. Read that way, the
+table reports \emph{fit} rather than quality: no existing family is aimed at
+report-driven, human-gated revalidation, which is the narrow slot this work
+occupies.
 
-\begin{figure}[htb]
-\centering
-\begin{tikzpicture}[
-  >={Stealth[length=2mm]},
-  dot/.style={circle, fill=gris50, inner sep=1.8pt},
-  lbl/.style={font=\scriptsize, align=center, text=gris25},
-  rev/.style={circle, fill=rojo, inner sep=2.4pt},
-]
-\draw[->, thick, gris50] (0,0) -- (9.4,0);
-\draw[->, thick, gris50] (0,0) -- (0,5.7);
-\node[font=\scriptsize\itshape, text=gris25, anchor=north] at (4.7,-0.75) {human control per action $\longrightarrow$};
-\node[font=\scriptsize\itshape, text=gris25, rotate=90, anchor=south] at (-0.5,2.85) {report-driven revalidation $\longrightarrow$};
-\node[font=\scriptsize, text=gris50, anchor=north] at (1.0,-0.1) {none};
-\node[font=\scriptsize, text=gris50, anchor=north] at (8.2,-0.1) {per-command gate};
-\node[dot] (bas) at (1.4,0.7) {};   \node[lbl, below=1pt of bas] {BAS};
-\node[dot] (auto) at (0.9,1.9) {};  \node[lbl, right=2pt of auto] {autonomous\\pentesting};
-\node[dot] (scan) at (3.2,0.9) {};  \node[lbl, below=1pt of scan] {scanners /\\DAST};
-\node[dot] (llm) at (4.1,2.2) {};   \node[lbl, above=1pt of llm] {offensive LLM agents\\(XBOW, \emph{Mythos})};
-\draw[rojo, dashed, rounded corners] (6.1,3.8) rectangle (9.0,5.4);
-\node[rev] (rev) at (7.5,4.6) {}; \node[font=\scriptsize, text=rojo, below=1pt of rev] {\bft{revalid}};
-\end{tikzpicture}
-\caption[The revalidation gap, mapped]{The families of automated security testing
-placed by their orientation (finding new vulnerabilities versus revalidating a
-reported finding) and the granularity of human control. Prior approaches cluster in
-the lower-left; only \emph{revalid} occupies the upper-right corner --- report-driven
-and gated on every command --- which is the gap this work fills.}
-\label{fig:gap}
-\end{figure}
+That slot is a deliberate specialisation, and it is bought at a real price.
+\emph{revalid} does none of what places the offensive systems of
+Section~\ref{subsec:llm-offensive} at the frontier: it does not discover new
+vulnerabilities, it does not synthesise exploits, and, because it stops for a human
+decision before every command, it neither runs unattended nor scales like a scanner.
+On raw autonomous capability it is far behind tools such as XBOW or \emph{Mythos},
+and it does not set out to compete with them. Its contribution is narrower and more
+concrete: to treat the \emph{revalidation} of an already-reported finding as a
+first-class task --- re-executing that finding's reproduction steps, gating every
+command on a human decision, and returning a conservative, evidence-linked verdict,
+which is the combination the surveyed families are not built to provide. The closest
+prior discipline is XBOW's, which already pairs its exploration with deterministic
+per-finding validation and human review; it differs in the two respects that define
+this niche --- that review is post-hoc, applied before disclosure rather than before
+each command, and its object is a newly discovered finding rather than the
+reproduction steps of one already reported. The report-driven, human-gated system
+that realises this is proposed in Section~\ref{sec:solution}. Whether the
+specialisation is worth the autonomy it gives up is a design bet this dissertation
+makes deliberately, and the chapters that follow develop and evaluate it.
 
 \begin{table}[htb]
 \scriptsize
 \renewcommand{\arraystretch}{1.4}
 \begin{center}
-\begin{tabular}{|L{2.5cm}|L{2.2cm}|L{2.7cm}|L{2.4cm}|L{2.6cm}|}
+\begin{tabular}{|L{2.4cm}|L{2.7cm}|L{2.2cm}|L{2.2cm}|L{2.6cm}|}
 \hline
 \rowcolor{tema!10}
-\bft{Approach} & \bft{Report-driven} & \bft{Execution model} & \bft{Human oversight} & \bft{Evidence-backed verdict} \\ \hline
-Vulnerability scanners / DAST & No (pattern-based) & Automated payload injection & Review of results & No (per-finding); false positives \\ \hline
-Breach \& attack simulation & No (fixed library) & Executes pre-authored techniques & Configuration-time & Pass/fail of a technique \\ \hline
-Autonomous / RL pentesting & No (formal model) & Planned action sequence & None (autonomous) & No (targets compromise) \\ \hline
-Offensive LLM agents & Partially & Agent proposes and runs actions & None to minimal & No (targets exploitation) \\ \hline
-\bft{This work (\emph{revalid})} & \bft{Yes} & \bft{Agent proposes, human approves each command} & \bft{Per-command gate} & \bft{Yes: still-open / fixed / inconclusive} \\ \hline
+\bft{Approach} & \bft{Primary goal} & \bft{Driven by a specific report?} & \bft{Human oversight} & \bft{Per-finding remediation verdict?} \\ \hline
+Vulnerability scanners / DAST & Find issue classes across a target & No (pattern-based) & Review of results & Not its aim (flags issue classes) \\ \hline
+Breach \& attack simulation & Test whether known techniques succeed & No (fixed library) & Configuration-time & Pass/fail of a technique \\ \hline
+Autonomous / RL pentesting & Find a path to compromise & No (formal model) & None (autonomous) & Not its aim (targets compromise) \\ \hline
+Offensive LLM agents & Discover and exploit vulnerabilities & Partially & Post-hoc review, not per action & Not its aim (targets exploitation) \\ \hline
+\emph{revalid} (this work) & Re-verify a reported fix & Yes & Per-command gate & Yes: open / fixed / inconclusive \\ \hline
 \end{tabular}
 \end{center}
-\caption[Comparison of automated security-testing approaches for revalidation]{The
-proposed system contrasted with related families of automated security testing,
-along the dimensions that matter for finding revalidation. No prior family combines
-report-driven operation, per-command human oversight and an evidence-backed
-verdict.}
+\caption[Automated security-testing families, contrasted on the axes revalidation
+needs]{The families surveyed in this chapter, compared only along the axes a
+revalidation tool must satisfy. Each pursues a different primary goal, so the table
+measures \emph{fit} to the revalidation task, not general capability:
+\emph{revalid} is the only entry built for report-driven, human-gated
+re-verification because that is the only thing it does. In exchange it forgoes the
+discovery, exploitation and unattended scale that place the other families --- the
+offensive LLM agents above all --- well ahead of it on raw capability.}
 \label{tab:comparison}
 \renewcommand{\arraystretch}{1}
 \end{table}

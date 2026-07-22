@@ -1,0 +1,131 @@
+\chapter{Conclusions}
+\label{ch:conclusions}
+
+% Allow a little extra line stretch so long technical compounds rebreak
+% cleanly instead of spilling into the margin (no template packages added).
+\setlength{\emergencystretch}{3em}
+
+This dissertation set out to automate the most repetitive and least-supported phase
+of a security audit --- the revalidation of reported findings --- without
+surrendering the human judgement that a compliance-grade verdict demands. The result,
+\emph{revalid}, is a deliberately narrow tool: it does not discover or exploit
+vulnerabilities, but re-executes the reproduction steps of an already-reported finding
+under a per-command human gate and returns a conservative, evidence-linked verdict.
+Whether that specialisation earns its keep is ultimately an empirical question --- one
+this work frames and equips but leaves open. The first three objectives are realised in
+the artefact: penetration-test reports are analysed into findings and their reproduction
+steps, those steps are interpreted into gated verification commands, and a
+human-supervised retest turns them into an evidence-backed verdict. The fourth --- a
+quantitative evaluation of verdict reliability against ground truth and of the effort
+saved over manual retesting --- is defined, together with its harness and ground-truth
+basis, as the immediate next step rather than a completed result. This closing chapter
+steps back from the artefact to set down what the work \emph{taught}, and how the degree
+made it possible.
+
+\section{Lessons learned}
+\label{sec:lessons}
+
+The largest single thing I take from this project is a working command of
+\emph{AI-assisted software development} --- not merely prompting a model, but
+engineering an environment in which a capable, fast-moving assistant can be directed
+reliably. Over the course of the work, Claude~Code moved from a code generator to the
+medium through which the entire lifecycle was managed: requirements captured as
+tracked issues, significant decisions recorded as architecture decision records,
+recurring procedures encoded as project-specific \emph{skills}, quality checks
+delegated to review \emph{agents}, and governance enforced automatically by
+\emph{hooks} in the editing loop. Learning to build and tune that apparatus --- and,
+just as importantly, learning to recognise when it had grown heavier than the task
+justified, and to cut it back (Section~\ref{subsec:process-evolution}) --- is a
+competence I did not have at the outset. These tools are moving quickly from novelty
+to professional expectation, and having driven one end to end, across every layer of
+a real project, is the learning I expect to carry furthest.
+
+A second lesson concerned discipline over autonomy. The very reliability failures that
+shape \emph{revalid}'s design --- hallucination, over-confident conclusions --- apply
+equally to the assistant that builds it. What made AI assistance trustworthy here was
+ordinary engineering rigour: a strict typing and test gate that no generated code
+could bypass, a continuous-integration barrier before every merge, and a human review
+on every change. The assistant accelerated the work; it never got to decide whether
+the work was correct. I also came away with a far deeper understanding of the domain
+the tool serves --- the vulnerability-management lifecycle, the safety pitfalls of
+language-model agents, and the genuinely hard problem of turning a human-written
+report into something a machine can act on.
+
+\section{Relation to the degree}
+\label{sec:competencies}
+
+It would be easy to read a project this AI-assisted as a story about the tool. It is
+not. What made it possible to \emph{direct} the assistant, rather than be led by it,
+was the judgement built over the degree --- and that judgement showed up as concrete
+demands I placed on the work.
+
+Requirements engineering supplied the vocabulary to specify each feature as a testable
+requirement before a single line was generated. Because the degree had taught me that
+a system trusted to gate a compliance decision cannot rest on untested code, I
+required a full test pyramid rather than accepting whatever the assistant first
+produced: fast \emph{unit} tests isolating individual logic with the language model
+stubbed, \emph{integration} tests wiring the real components together, and dockerised
+\emph{system} tests exercising the whole pipeline against live lab targets. The
+assistant wrote much of that suite --- but it wrote it because I asked for it, to a
+shape I had learned to specify.
+
+Version control was the other decisive competence. A working command of Git let me
+carry several features forward in parallel on isolated branches and integrate each
+cleanly through the continuous-integration gate, so that an AI-accelerated pace never
+became an unreviewable tangle --- the most recent example being the conversational
+chat feature, developed on its own branch and merged once it was green. The wider
+software-engineering process --- iterative delivery, the testing layers above, and
+architectural decision records --- gave the structure that kept a large, fast-moving,
+AI-authored codebase coherent and reviewable. Without that criterion the same tools
+would have produced volume without direction; with it, the assistant became an
+instrument for realising a design I owned, not a substitute for having one. Relying
+heavily on AI was a deliberate choice --- it is what contemporary software practice
+increasingly demands, and it would be perverse to ignore it --- but using it
+\emph{well}, rather than merely using it, is the part the degree prepared me for.
+
+\section{Future work}
+\label{sec:future}
+
+Several directions remain open. The most immediate is the evaluation itself: running
+the harness over the ground-truth report set to quantify verdict accuracy against
+ground truth and the time saved against manual retesting --- the measurement this work
+sets up but does not yet report. Beyond it, the quality of a verdict depends on the
+panel of assessors behind it, and broadening that panel is the most direct lever on
+verdict reliability; the system would also benefit from a wider range of lab targets
+and report formats. Further out, the tightest opportunity is to close the loop between
+remediation and revalidation: as automated code-fixing agents such as
+CodeMender~\cite{codemender} begin
+to \emph{apply} fixes, an automated, human-gated tool to \emph{confirm} those fixes
+becomes a natural complement rather than a curiosity.
+
+\section{Growing the application}
+\label{sec:scaling}
+
+\emph{revalid} was deliberately scoped as a local, single-operator application, a
+decision that traded reach for the focus a thesis needs
+(Section~\ref{subsec:prior-attempts}). The most natural line of future development is
+to lift that restriction and grow it from a single-operator tool into a multi-user,
+client--server platform --- this time on the disciplined foundation the project
+established, rather than the over-broad one it set out from.
+
+Several upgrades follow from that goal. The single process that today serves one
+operator would separate into a hosted backend and thin clients, with authentication
+and role-based access control so that auditors, developers and reviewers can share an
+engagement with appropriately different permissions. The single-file SQLite store
+would move to a full relational database --- a migration the data-access layer was
+deliberately designed to absorb without a rewrite (Section~\ref{subsec:stack}) --- and
+the agent's sandboxed executions would be dispatched to a pool of workers through a
+job queue, so that many findings, or many engagements, can be revalidated concurrently
+rather than one at a time. On top of that would sit the team-oriented features a
+production tool needs: shared dashboards of open and closed findings, a cross-user
+audit trail, and integration with the issue trackers and continuous-integration
+pipelines where remediation actually happens, so that a revalidation can be triggered
+automatically the moment a fix is deployed. Each of these is an increment on the
+existing architecture rather than a rewrite --- which is exactly the property the
+disciplined, single-operator core was built to preserve.
+
+\medskip
+Beyond the artefact itself, what I value most from this work is the confidence that I
+can take a technology as new and as powerful as an agentic coding assistant and still
+hold it to the engineering standards the degree instilled --- to use it fully, but on
+my own terms. That, more than the tool, is what I carry forward.

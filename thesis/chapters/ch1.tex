@@ -105,13 +105,22 @@ findings. A
 security audit ends with a report that lists each discovered vulnerability and the
 steps needed to reproduce it. Once the development team applies fixes, someone must
 confirm that those fixes actually work --- that each reported finding is genuinely
-closed and not merely hidden by an incidental change. This re-testing is performed
-by hand, one finding at a time, on every remediation cycle, and it demands careful
-judgement to avoid declaring a still-exploitable weakness ``fixed''. It is exactly
-the kind of high-volume, judgement-laden, evidence-driven task at which a
-well-supervised AI assistant could excel, yet it has been largely untouched by the
-wave of automation described above. The manual nature of revalidation is examined in
-detail in Section~\ref{subsec:revalidation}.
+closed and not merely hidden by an incidental change. The stakes are not academic:
+known, previously identified vulnerabilities that are never properly closed remain a
+leading cause of breaches --- in a survey of nearly 3{,}000 practitioners, 60\% of
+breach victims traced their compromise to a known vulnerability whose patch was
+available but had not been applied \cite{ponemon_vulnerability_2019}. This re-testing
+is still performed largely by hand, one finding at a time, on every remediation cycle,
+and it demands careful judgement to avoid declaring a still-exploitable weakness
+``fixed''. It is exactly the kind of high-volume, judgement-laden, evidence-driven task
+at which a well-supervised AI assistant is well suited to help. Retesting is not wholly
+unautomated --- breach-and-attack-simulation and continuous-validation platforms
+already re-run a tester's \emph{own} checks (Section~\ref{subsec:bas}) --- but the
+recent surge of AI agents has concentrated on discovering, exploiting or patching
+vulnerabilities rather than on re-verifying that a specific reported one is closed, so
+the report-driven re-verification of an externally reported finding remains a largely
+manual exercise. The manual nature of revalidation is examined in detail in
+Section~\ref{subsec:revalidation}.
 
 \section{Goal and objectives}
 \label{sec:objectives}
@@ -215,9 +224,10 @@ security, and the extraction of structured information from reports; it closes b
 identifying the research gap that \emph{revalid} fills. Chapter~\ref{ch:methodology}
 then sets out the methodology followed to build the system: the design-led,
 AI-assisted development model, the software process adopted, the technologies used,
-and the declaration of AI-tool use required by the regulation. The subsequent
-chapters present the analysis and design of the system, the details of its
-implementation,
-the experimental evaluation of its verdict reliability against a real
-penetration-test report, and, finally, the conclusions drawn from the work together
-with the directions it opens for the future.
+and the declaration of AI-tool use required by the regulation.
+Chapter~\ref{ch:conclusions}, finally, draws together what the work achieved and what
+it taught, and sets out the directions it opens --- chief among them the quantitative
+evaluation of the system's verdict reliability against a real penetration-test report
+and of the effort it saves over manual retesting, which this work frames and equips
+but leaves as its immediate next step. Finally, Appendix~\ref{ch:annex-install}
+provides a step-by-step guide to installing and operating the system.

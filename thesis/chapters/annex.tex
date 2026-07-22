@@ -1,0 +1,112 @@
+\chapter{Installation and operation guide}
+\label{ch:annex-install}
+
+This appendix documents how to deploy and operate \emph{revalid} on a single
+workstation, from the prerequisites to a complete revalidation run. It complements
+the methodology of Chapter~\ref{ch:methodology} with the concrete, reproducible
+steps an operator follows; every command is issued from the repository root. The
+application binds only to the loopback interface and is never exposed to the network
+(NFR-03).
+
+\section{Prerequisites}
+\label{sec:annex-prereq}
+
+The tool is a single Python service that also serves a compiled web interface, plus
+an isolated lab target it retests against. The following are required:
+
+\begin{itemize}
+\item \textbf{Python 3.12 or newer}, managed with the \texttt{uv} package manager,
+  which pins and installs the exact dependency set.
+\item \textbf{Node.js}, used once to build the React single-page interface into the
+  static bundle the service serves.
+\item \textbf{Docker}, used to bring up the intentionally vulnerable lab target the
+  retest agent exercises.
+\item \textbf{A language-model backend.} Either a hosted model, selected with an API
+  key, or a locally hosted \texttt{Ollama} server --- the shipped default is
+  local-first, so no external service is required to run the tool.
+\end{itemize}
+
+\section{Installation}
+\label{sec:annex-install}
+
+The Python dependencies are installed with a single command; a second command
+compiles the web interface into the bundle the service serves at its root.
+
+\begin{lstlisting}[language=bash]
+uv sync         # install the pinned Python dependencies
+make build-ui   # compile the React single-page interface
+\end{lstlisting}
+
+\section{Running the application}
+\label{sec:annex-run}
+
+A single process serves both the JSON API (under \texttt{/api}) and the web
+interface (at the root), on the loopback interface only:
+
+\begin{lstlisting}[language=bash]
+make run
+\end{lstlisting}
+
+The interface is then available at \texttt{http://127.0.0.1:8000}. A health check
+confirms the service is up:
+
+\begin{lstlisting}[language=bash]
+curl -s http://127.0.0.1:8000/api/health
+\end{lstlisting}
+
+The active model backend is seeded on first run and can afterwards be changed at any
+time --- provider, model and, where relevant, the API key --- from the
+\emph{Settings} view of the interface, with no restart required.
+
+\section{Bringing up the lab target}
+\label{sec:annex-lab}
+
+Retests only ever reach allow-listed lab systems (FR-06); the agent's commands run
+inside an egress-locked sandbox that can reach the lab container and nothing else.
+The reference target, OWASP Juice Shop, is provisioned with:
+
+\begin{lstlisting}[language=bash]
+make lab-up     # start the OWASP Juice Shop lab target
+make lab-down   # stop it when finished
+\end{lstlisting}
+
+\section{A complete revalidation run}
+\label{sec:annex-flow}
+
+With the service and the lab running, a full revalidation is carried out from the
+browser:
+
+\begin{enumerate}
+\item Upload a penetration-test report (PDF), or enter one manually; the language
+  model extracts each finding together with its reproduction steps.
+\item Open a finding and review or edit its retest \emph{goal} --- the objective the
+  agent will pursue.
+\item Start the agentic retest and \emph{approve each command} the agent proposes
+  before it runs; the transcript records every step.
+\item Read the resulting verdict --- \emph{still-open}, \emph{fixed} or
+  \emph{inconclusive} --- together with the evidence that supports it.
+\end{enumerate}
+
+\section{Offline demonstrations}
+\label{sec:annex-demos}
+
+Each stage of the pipeline can also be exercised headlessly, without the browser,
+which is how the individual requirements are demonstrated and verified:
+
+\begin{lstlisting}[language=bash]
+make demo-ingest-pdf      # FR-01  PDF parsing into finding candidates
+make demo-extract         # FR-03  language-model extraction
+make demo-retest-session  # FR-17  gated agentic retest to a verdict
+make demo-export          # FR-12  versioned run export
+make demo-eval            # FR-15  evaluation harness over a run
+\end{lstlisting}
+
+\section{Resetting the state}
+\label{sec:annex-reset}
+
+All persistent state lives in a single local database file. It can be cleared to
+start from a clean slate:
+
+\begin{lstlisting}[language=bash]
+make reset-db
+\end{lstlisting}

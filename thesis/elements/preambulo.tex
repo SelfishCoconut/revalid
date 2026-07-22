@@ -54,9 +54,9 @@
 \begin{flushleft}\doublespacing
 {\fontsize{14pt}{4pt}\selectfont \bft{Author:} \autor}
 
-{\fontsize{14pt}{4pt}\selectfont \bft{Supervisor:} \director}
+{\fontsize{14pt}{4pt}\selectfont \bft{Academic tutor (UCLM):} \director}
 
-{\fontsize{14pt}{4pt}\selectfont \bft{Co-supervisor:} \codirector}
+{\fontsize{14pt}{4pt}\selectfont \bft{Company tutor (Airbus Helicopters):} \codirector}
 \end{flushleft}
 \end{textblock*}
 
@@ -69,20 +69,6 @@
 
 
 % -------------------------------
-% Dedicatoria
-% -------------------------------
-\cleardoublepage
-\thispagestyle{empty}
-
-\vspace*{9cm}
-\begin{flushright} \em
-Aquí va la dedicatoria que cada cual \\
-quiera escribir. El ancho se controla \\
-manualmente
-\end{flushright}
-
-
-% -------------------------------
 % Declaración de autoría
 % -------------------------------
 \cleardoublepage
@@ -92,11 +78,11 @@ manualmente
 \end{center}
 \vskip1cm
 
-I, the undersigned, \quad \ldots \quad, with ID number \quad \ldots \quad, declare that I am the sole author of the Undergraduate Dissertation titled ``\quad \ldots \quad '', that this work does not break the current intellectual property law. and that all the non-original material contained in this work is properly attributed to their legitimate authors.
+I, the undersigned, Álvaro Navarro Quijada, with ID number 48259815L, declare that I am the sole author of the Undergraduate Dissertation titled ``AI-Driven System for the Revalidation of Pentest Findings'', that this work does not break the current intellectual property law, and that all the non-original material contained in this work is properly attributed to their legitimate authors.
 
 \vspace*{2cm}
 \begin{center}
-Albacete, (date)
+Albacete, 20 July 2026
 
 \vskip3cm
 
@@ -114,7 +100,29 @@ Signed by: \autor
 \end{center}
 \vskip1cm
 
-\lipsum[1]
+Penetration testing ends with a report that lists each discovered vulnerability and
+the steps needed to reproduce it. Once the development team applies fixes, someone
+must confirm that every reported weakness is genuinely closed --- the
+\emph{revalidation}, or retest, phase. In practice this is done by hand, one finding
+at a time, on every remediation cycle: it is repetitive, judgement-laden and poorly
+supported by tooling, even as the offensive side of security automates rapidly with
+artificial intelligence.
+
+This dissertation presents \emph{revalid}, a local, single-operator system that
+automates the revalidation of penetration-test findings while keeping a human in
+control of every action that reaches a target. A large language model extracts each
+finding and its reproduction steps from the report; a tool-using agent then
+re-executes those steps against an authorised target inside an egress-locked sandbox,
+proposing each command for the operator's approval before it runs, and returns a
+conservative, evidence-linked verdict --- \emph{still-open}, \emph{fixed} or
+\emph{inconclusive}. The design is deliberately narrow: rather than discovering or
+exploiting new vulnerabilities, it specialises in re-verifying reported ones under
+per-command human oversight, defaulting to an inconclusive verdict whenever the
+evidence is ambiguous. Built on a model-agnostic language-model layer that runs
+against either a hosted or a locally hosted model, the system is exercised end-to-end
+on a real penetration-test report; a quantitative evaluation of its verdict
+reliability and of the effort it saves over manual retesting is defined, together
+with its harness and ground-truth basis, as the immediate next step this work opens.
 
 % -------------------------------
 % Agradecimientos
@@ -126,4 +134,19 @@ Signed by: \autor
 \end{center}
 \vskip1cm
 
-\lipsum[1]
+This work would not have taken the shape it did without the people who guided and
+inspired it along the way.
+
+I am grateful to José Luis Martínez Martínez, my tutor at the University of
+Castilla-La Mancha, whose guidance shaped this dissertation from within the School,
+and to José Manuel García Aparicio, my tutor and guide at Airbus Helicopters, for the
+direction and support that grounded the work in practice.
+
+I owe a particular debt to Álvaro Moreno, who first introduced me to artificial
+intelligence applied to cybersecurity and whose advice set this project on its
+course. I am no less thankful to Matthias Vaytet and Dr.~Tim Winkler, both of whom
+were a genuine source of inspiration throughout --- and to Matthias in particular,
+for the motivation.
+
+Finally, I thank my family and friends for their patience and support over the months
+this work demanded.
