@@ -13,6 +13,7 @@ import { queryKeys } from "../../hooks/queryKeys";
 import { useFindingStage } from "../../hooks/useFindingStage";
 import { useGoalDraft } from "../../hooks/useGoalDraft";
 import { errorMessage } from "../../lib/format";
+import { goalStepsToText, parseGoalSteps } from "../../lib/goal";
 
 /** Stage 2 — draft + edit the retest goal, then launch a seeded agentic session (FR-17). */
 export function GoalStage() {
@@ -37,7 +38,7 @@ export function GoalStage() {
   // initial edit box from newly arrived query data.
   if (draft.data && draft.data.steps !== seededSteps) {
     setSeededSteps(draft.data.steps);
-    setText(draft.data.steps.join("\n"));
+    setText(goalStepsToText(draft.data.steps));
   }
 
   // Opened **deferred** (#157): the session lands `idle` — scope and goal
@@ -48,7 +49,7 @@ export function GoalStage() {
     mutationFn: () =>
       startRetestSession(findingId, {
         deferred: true,
-        initial_goal: text.split("\n").map((s) => s.trim()).filter(Boolean),
+        initial_goal: parseGoalSteps(text),
         target_endpoints: endpoints.map((s) => s.trim()).filter(Boolean),
       }),
     onSuccess: (created) => {
@@ -173,7 +174,7 @@ export function GoalStage() {
           )}
         </div>
       </Panel>
-      <NotesThread findingId={findingId} stage="plan" scope="stage" />
+      <NotesThread findingId={findingId} stage="goal" scope="stage" />
     </div>
   );
 }

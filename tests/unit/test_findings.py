@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from revalid.db import IN_MEMORY, create_db_engine, session_factory
+from revalid.db import IN_MEMORY, _backfill_note_stages, create_db_engine, session_factory
 from revalid.domain import CvssCode, Finding, FindingStage, MitreMapping, Severity
 from revalid.findings import (
     add_note,
@@ -87,14 +87,41 @@ def test_notes_are_appended_and_listed_newest_first() -> None:
     record = create_finding(session, _finding())
     session.commit()
 
-    add_note(session, record.id, FindingStage.PLAN, "first note")
+    add_note(session, record.id, FindingStage.GOAL, "first note")
     add_note(session, record.id, FindingStage.VERDICT, "second note", author="reviewer")
 
     notes = list_notes(session, record.id)
     assert [n.body for n in notes] == ["second note", "first note"]
     assert notes[0].stage == "verdict"
     assert notes[0].author == "reviewer"
-    assert notes[1].stage == "plan"
+    assert notes[1].stage == "goal"
+
+
+def test_legacy_plan_notes_are_renamed_to_the_goal_stage() -> None:
+    """Notes written on the goal stage under the retired `plan` tag survive (#113 F1).
+
+    The goal stage tagged its notes `plan` to avoid a backend enum change, so
+    without the startup backfill every note an operator already wrote there would
+    silently stop appearing once the stage started asking for `goal`.
+    """
+    engine = create_db_engine(IN_MEMORY)
+    session = session_factory(engine)()
+    record = create_finding(session, _finding())
+    session.commit()
+    # Write one the way the pre-#113 SPA did, and one on a stage that must not move.
+    add_note(session, record.id, FindingStage.PLAN, "legacy goal note")
+    add_note(session, record.id, FindingStage.VERDICT, "verdict note")
+    session.commit()
+
+    _backfill_note_stages(engine)  # what create_db_engine runs on every open
+    session.expire_all()
+
+    stages = {n.body: n.stage for n in list_notes(session, record.id)}
+    assert stages == {"legacy goal note": "goal", "verdict note": "verdict"}
+
+    _backfill_note_stages(engine)  # idempotent: a second open changes nothing
+    session.expire_all()
+    assert {n.body: n.stage for n in list_notes(session, record.id)} == stages
 
 
 def test_notes_empty_for_finding_without_notes() -> None:

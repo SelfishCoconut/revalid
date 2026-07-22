@@ -19,13 +19,13 @@ describe("NotesThread", () => {
     vi.mocked(client.addNote).mockReset();
     vi.mocked(client.listNotes).mockResolvedValue([
       note(2, "verdict", "still open"),
-      note(1, "plan", "check /admin"),
+      note(1, "goal", "check /admin"),
     ]);
-    vi.mocked(client.addNote).mockResolvedValue(note(3, "plan", "new note"));
+    vi.mocked(client.addNote).mockResolvedValue(note(3, "goal", "new note"));
   });
 
   it("shows only this stage's notes when scoped to a stage", async () => {
-    renderWithProviders(<NotesThread findingId={7} stage="plan" scope="stage" />);
+    renderWithProviders(<NotesThread findingId={7} stage="goal" scope="stage" />);
     expect(await screen.findByText("check /admin")).toBeInTheDocument();
     expect(screen.queryByText("still open")).not.toBeInTheDocument();
   });
@@ -37,12 +37,12 @@ describe("NotesThread", () => {
   });
 
   it("adds a note tagged with the stage", async () => {
-    renderWithProviders(<NotesThread findingId={7} stage="plan" scope="stage" />);
+    renderWithProviders(<NotesThread findingId={7} stage="goal" scope="stage" />);
     await screen.findByText("check /admin");
-    await userEvent.type(screen.getByLabelText(/add a note on the plan stage/i), "hi");
+    await userEvent.type(screen.getByLabelText(/add a note on the goal stage/i), "hi");
     await userEvent.click(screen.getByRole("button", { name: /add note/i }));
     await waitFor(() => {
-      expect(client.addNote).toHaveBeenCalledWith(7, "plan", "hi");
+      expect(client.addNote).toHaveBeenCalledWith(7, "goal", "hi");
     });
   });
 });
