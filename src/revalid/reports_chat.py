@@ -16,6 +16,7 @@ without an LLM — that the agent's tools wrap thinly.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from pydantic import BaseModel
@@ -457,3 +458,50 @@ def answer_question(
     session.commit()
     session.refresh(reply)
     return reply
+
+
+async def stream_answer(
+    agent: Agent[ReportsChatDeps, str],
+    session: Session,
+    chat: ChatSessionRecord,
+    question: str,
+) -> AsyncIterator[str]:
+    """Answer like :func:`answer_question` but yield the reply's text as it's generated.
+
+    Same contract — record the user turn (title on the first), run the read-only
+    agent over ``session``, append the completed reply — but the reply's tokens are
+    yielded as they stream from the model so a streaming transport can show the
+    answer live. Persistence and title-setting happen after the stream drains, so
+    the stored thread is identical to the blocking path.
+
+    This is an **async** generator so it runs in the request's own event loop: the
+    sync ``run_stream_sync`` binds its worker to the calling thread, which breaks
+    when a streaming response iterates the generator across threadpool threads, so
+    the async :meth:`~pydantic_ai.Agent.run_stream` is used instead.
+
+    Args:
+        agent: The FR-18 reports agent (a stand-in model in tests).
+        session: The active DB session (shared by persistence and the tools).
+        chat: The thread to append to.
+        question: The operator's new message.
+
+    Yields:
+        Successive text deltas of the assistant's reply, in order.
+    """
+    prior = list_messages(session, chat.id)
+    session.add(ChatMessageRecord(chat_id=chat.id, role=USER, content=question))
+    if not prior:
+        chat.title = _title_from(question)
+    session.commit()
+
+    async with agent.run_stream(
+        question, deps=ReportsChatDeps(session=session), message_history=_history(prior)
+    ) as result:
+        async for delta in result.stream_text(delta=True):
+            if delta:
+                yield delta
+        answer = (await result.get_output()).strip() or "(no answer)"
+
+    chat.model = agent_model_name(agent)
+    session.add(ChatMessageRecord(chat_id=chat.id, role=ASSISTANT, content=answer))
+    session.commit()
