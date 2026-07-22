@@ -80,9 +80,15 @@ upload → approve plan → retest → verdicts flow, operable from the browser 
 
 ## Backend-only / offline demos
 
-Individual feature slices run without the UI (see `Makefile`): `demo-ingest`
-(FR-02), `demo-ingest-pdf` (FR-01), `demo-extract` (FR-03), `demo-plan`
-(FR-04), `demo-approval` (FR-05), `demo-walking-skeleton` (M1, needs the lab).
+Individual feature slices run without the UI, and all of them are fully offline —
+no Docker, no lab, no LLM, no network (see `Makefile`): `demo-ingest` (FR-02),
+`demo-ingest-pdf` (FR-01), `demo-extract` (FR-03, falls back to a deterministic
+stand-in model when no backend is configured), `demo-audit` (FR-10),
+`demo-export` (FR-12), `demo-eval` (FR-15), `demo-retest-session` (FR-17),
+`demo-settings` (FR-13). `make test-demos` runs the lot.
+
+`demo-plan`, `demo-approval` and `demo-walking-skeleton` no longer exist — the
+batch plan/approve/probe path they demonstrated was deleted in ADR-0033.
 
 ## State / cleanup
 
