@@ -50,6 +50,7 @@ from revalid.db import (
     create_db_engine,
     session_factory,
 )
+from revalid.deltas import DELTAS
 from revalid.domain import (
     AgenticEvidence,
     Finding,
@@ -1908,6 +1909,7 @@ def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Ses
         """
         await websocket.accept()
         last_seq = 0
+        delta_cursor = 0
         try:
             while True:
                 with sessions() as session:
@@ -1919,6 +1921,13 @@ def _register_session_stream_route(router: APIRouter, sessions: sessionmaker[Ses
                 for event in events:
                     await websocket.send_json(event)
                     last_seq = event["seq"]
+                # Live reasoning tokens (issue #140) ride the same socket but are
+                # not transcript events: they carry no `seq`, are not persisted,
+                # and are sent after the real events so a landed turn always wins
+                # over the thinking that produced it.
+                text, delta_cursor = DELTAS.read_after(session_id, delta_cursor)
+                if text:
+                    await websocket.send_json({"kind": "agent_delta", "payload": {"text": text}})
                 if terminal and not events:
                     await websocket.close()
                     return

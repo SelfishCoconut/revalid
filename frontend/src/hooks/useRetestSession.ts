@@ -4,6 +4,16 @@ import { retestSocketUrl, type SessionEvent } from "../api/client";
 
 export type SocketFactory = (url: string) => WebSocket;
 
+/**
+ * A live reasoning frame (issue #140) — the same socket as the transcript, but
+ * not a transcript event: no `seq`, never persisted, superseded by the real
+ * event once the turn lands.
+ */
+interface AgentDeltaFrame {
+  kind: "agent_delta";
+  payload: { text: string };
+}
+
 /** The session's terminal determination, once the agent has reached one. */
 export interface Verdict {
   status: string;
@@ -32,6 +42,11 @@ const defaultSocketFactory: SocketFactory = (url) => new WebSocket(url);
 export function useRetestSession(id: number, makeSocket: SocketFactory = defaultSocketFactory) {
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  // The model's live reasoning for the turn in flight (issue #140). Transient by
+  // design: it is not a transcript event, it has no `seq`, and it is cleared the
+  // moment the turn lands so a finished turn is never described by the thinking
+  // that produced it.
+  const [thinking, setThinking] = useState("");
   const seen = useRef<Set<number>>(new Set());
 
   // Reset accumulated state when `id` changes, using React's documented
@@ -49,6 +64,7 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
     setSessionId(id);
     setEvents([]);
     setConnected(false);
+    setThinking("");
   }
 
   useEffect(() => {
@@ -64,10 +80,17 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
       setConnected(false);
     };
     socket.onmessage = (e: MessageEvent<string>) => {
-      const event = JSON.parse(e.data) as SessionEvent;
-      if (seen.current.has(event.seq)) return;
-      seen.current.add(event.seq);
-      setEvents((prev) => [...prev, event]);
+      const event = JSON.parse(e.data) as SessionEvent | AgentDeltaFrame;
+      if (event.kind === "agent_delta") {
+        setThinking((prev) => prev + (event as AgentDeltaFrame).payload.text);
+        return;
+      }
+      const transcript = event as SessionEvent;
+      if (seen.current.has(transcript.seq)) return;
+      seen.current.add(transcript.seq);
+      // A real event supersedes the reasoning that produced it.
+      setThinking("");
+      setEvents((prev) => [...prev, transcript]);
     };
 
     return () => {
@@ -81,6 +104,7 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
   return {
     events,
     connected,
+    thinking,
     status: (stateEvent?.payload.to as string | undefined) ?? "starting",
     verdict: verdictEvent ? (verdictEvent.payload as unknown as Verdict) : null,
   };

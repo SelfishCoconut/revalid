@@ -51,6 +51,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.approveCommand).mockResolvedValue({ status: "approved" });
 
@@ -75,6 +76,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.rejectCommand).mockResolvedValue({ status: "rejected" });
 
@@ -96,6 +98,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     let rejectApproval!: (reason: unknown) => void;
     vi.mocked(client.approveCommand).mockReturnValue(
@@ -135,6 +138,7 @@ describe("RetestSession", () => {
       status: "running_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -148,6 +152,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: { status: "still_open", rationale: "bypassable" },
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -162,6 +167,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: { status: "still_open", rationale: "bypassable" },
       connected: true,
+      thinking: "",
     });
   }
 
@@ -171,6 +177,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     renderAt(1);
     expect(screen.queryByText(/adjudication/i)).not.toBeInTheDocument();
@@ -206,6 +213,7 @@ describe("RetestSession", () => {
       status: "starting",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.endRetestSession).mockResolvedValue({ status: "ended" });
 
@@ -221,6 +229,7 @@ describe("RetestSession", () => {
       status: "starting",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.endRetestSession).mockRejectedValue(new Error("boom"));
 
@@ -238,6 +247,7 @@ describe("RetestSession", () => {
       status: "thinking",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -258,6 +268,7 @@ describe("RetestSession", () => {
       status: "thinking",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -279,6 +290,7 @@ describe("RetestSession", () => {
       status: "thinking",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -299,6 +311,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.submitHumanCommand).mockResolvedValue({ status: "accepted" });
 
@@ -318,6 +331,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
 
@@ -336,6 +350,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.endRetestSession).mockResolvedValue({ status: "ended" });
     vi.mocked(client.startRetestSession).mockResolvedValue({
@@ -375,6 +390,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -388,6 +404,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -407,6 +424,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -421,6 +439,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: { status: "still_open", rationale: "bypassable" },
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -436,6 +455,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -451,6 +471,7 @@ describe("RetestSession", () => {
       status: "starting",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -464,6 +485,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
   }
 
@@ -497,6 +519,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: { status: "fixed", rationale: "patched" },
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -510,6 +533,7 @@ describe("RetestSession", () => {
       status: "thinking",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -523,6 +547,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.setFreeLaunch).mockResolvedValue({ status: "accepted" });
 
@@ -542,6 +567,7 @@ describe("RetestSession", () => {
       status: "concluded",
       verdict: { status: "still_open", rationale: "bypassable" },
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -563,6 +589,7 @@ describe("RetestSession", () => {
       status: "given_up",
       verdict: { status: "inconclusive", rationale: "no exploit path found" },
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -579,6 +606,7 @@ describe("RetestSession", () => {
       status: "needs_guidance",
       verdict: null,
       connected: true,
+      thinking: "",
     });
   }
 
@@ -627,6 +655,7 @@ describe("RetestSession", () => {
       status: "idle",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     mockRecord({ status: "idle" });
     vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
@@ -657,6 +686,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.stopSession).mockResolvedValue({ status: "accepted" });
     renderAt(1);
@@ -670,6 +700,7 @@ describe("RetestSession", () => {
       status: "stopped",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     mockRecord({ status: "stopped" });
     vi.mocked(client.submitMessage).mockResolvedValue({ status: "accepted" });
@@ -698,6 +729,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     vi.mocked(client.concludeSession).mockResolvedValue({ status: "accepted" });
     renderAt(1);
@@ -726,6 +758,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
     renderAt(1);
     expect(screen.getByText(/runs up to 120s/i)).toBeInTheDocument();
@@ -740,6 +773,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -759,6 +793,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);
@@ -781,6 +816,7 @@ describe("RetestSession", () => {
       status: "awaiting_command",
       verdict: null,
       connected: true,
+      thinking: "",
     });
 
     renderAt(1);

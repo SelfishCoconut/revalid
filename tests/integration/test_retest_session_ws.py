@@ -16,9 +16,8 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic_ai.models.function import FunctionModel
 from starlette.websockets import WebSocketDisconnect
-from tests._retest_helpers import script_run_then_conclude
+from tests._retest_helpers import script_run_then_conclude, streaming
 
 from revalid.app import create_app, get_retest_agent, get_sandbox_factory
 from revalid.db import IN_MEMORY, create_db_engine
@@ -43,7 +42,7 @@ _IMPORT: dict[str, Any] = {
 def _client() -> TestClient:
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        FunctionModel(script_run_then_conclude)
+        streaming(script_run_then_conclude)
     )
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
