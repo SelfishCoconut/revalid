@@ -15,9 +15,8 @@ verdict — all persisted as an append-only transcript. A real run against the l
 
 from __future__ import annotations
 
-from pydantic_ai.models.function import FunctionModel
 from sqlalchemy.orm import Session
-from tests._retest_helpers import script_run_then_conclude
+from tests._retest_helpers import script_run_then_conclude, streaming
 
 from revalid.db import IN_MEMORY, RetestSessionRecord, create_db_engine, session_factory
 from revalid.domain import Finding, Severity
@@ -58,7 +57,12 @@ def _run_scripted_session(
             CommandResult(stdout='{"status":"ok"}', stderr="", exit_code=0, elapsed_ms=42),
         ]
     )
-    agent = build_retest_agent(FunctionModel(script_run_then_conclude))
+    # `streaming(...)`, not a bare FunctionModel: since issue #140 every step site
+    # goes through `run_agent_step`, which drives `agent.run_stream_events` so the
+    # console can show the model's reasoning as it arrives. A FunctionModel without
+    # a `stream_function` cannot serve a streamed request, and the orchestration
+    # boundary would record the failure as a session `error` rather than raising.
+    agent = build_retest_agent(streaming(script_run_then_conclude))
 
     record = create_session(session, finding_id=finding_id, model="function-model:demo")
     start_and_step(

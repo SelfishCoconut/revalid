@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from revalid.db import FindingRecord, create_db_engine, session_factory
+from revalid.findings import create_finding, current_version
 from revalid.ingest import IngestError, load_defectdojo_export
 
 DEFAULT_EXPORT = Path(__file__).parents[2] / "tests" / "data" / "defectdojo_sample.json"
@@ -41,13 +42,19 @@ def main() -> int:
     engine = create_db_engine(str(db_path))
     factory = session_factory(engine)
     with factory() as session:
-        session.add_all(FindingRecord.from_domain(f) for f in findings)
+        # A finding is a stable identity row plus an append-only version history
+        # (FR-16, ADR-0024); ingestion lands version 1 via the findings service.
+        for imported in findings:
+            create_finding(session, imported)
         session.commit()
 
     # Read back from the database — what you see below survived persistence.
     with factory() as session:
         for record in session.scalars(select(FindingRecord).order_by(FindingRecord.id)):
-            finding = record.to_domain()
+            version = current_version(session, record.id)
+            if version is None:  # pragma: no cover - a finding always has version 1
+                continue
+            finding = version.to_domain()
             unmapped = sorted(
                 set(finding.raw)
                 - {"title", "severity", "description", "steps_to_reproduce", "endpoints"}

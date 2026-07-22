@@ -19,8 +19,11 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
+      # `scripts` included since #182: scripts/demo/* is the PR template's
+      # mandatory "How to validate" artifact, so it is process infrastructure.
+      # Ungated, it rotted silently — two demos were broken on main.
+      - run: uv run ruff check src tests scripts
+      - run: uv run ruff format --check src tests scripts
       - run: uv run mypy
       - name: Complexity gate
         run: uv run xenon --max-absolute C --max-modules B --max-average A src
@@ -50,6 +53,36 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest -m integration --no-cov
+
+  demos:
+    name: Offline demos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      # Every `make demo-*` that needs no Docker, no lab and no network. These
+      # are what a reviewer is told to run to validate a PR, so a broken one
+      # voids the Definition of Done. `demo-extract` falls back to a
+      # deterministic stand-in model when no backend is configured, which is
+      # exactly the case here.
+      - run: make test-demos
+
+  docs:
+    name: Docs build (UML + mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      # Mirrors docs.yml, which only ran on `push: main` — so a PR adding a
+      # module the UML layer map did not cover merged green and broke Pages
+      # after the fact (deltas.py, PR #178). Same target, run before merge.
+      - run: make docs
 
   frontend:
     name: Frontend (lint, types, build, tests)
