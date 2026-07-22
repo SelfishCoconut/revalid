@@ -16,6 +16,14 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # typescript-eslint 8.65.0 (latest stable) still caps its peer at
+      # `typescript >=4.8.4 <6.1.0`, so a TS 7 bump fails `npm ci` with ERESOLVE
+      # and takes the whole dev-dependencies group down with it (#185, #195).
+      # Version-scoped on purpose: delete this entry — don't widen it — once
+      # typescript-eslint ships TS 7 support.
+      - dependency-name: typescript
+        versions: ["7.x"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
