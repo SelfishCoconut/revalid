@@ -1,44 +1,299 @@
-# revalid
+<div align="center">
 
-**AI-Driven System for the Revalidation of Pentest Findings** — Bachelor's Thesis (TFG), Grado en Ingeniería Informática, Escuela Superior de Ingeniería Informática (ESII), Universidad de Castilla-La Mancha.
+<img src="assets/logo.svg" alt="revalid" width="760">
 
-`revalid` parses penetration-testing reports, extracts the findings and their reproduction steps, and autonomously re-executes those steps against the audited systems to determine whether the applied fixes are effective — cutting the manual effort of post-audit revalidation.
+### Does the finding still hold?
 
-> **Status**: environment setup / requirements phase. The walking skeleton is the first milestone.
+`revalid` reads an old penetration-test report, extracts every finding, and **re-verifies each one**
+against an authorised lab — driving an LLM agent that cannot run a single command without your
+approval, inside a sandbox that can reach nothing but the target.
 
-## Project layout
+<br/>
 
-| Path | Purpose |
-|---|---|
-| `src/revalid/` | The tool itself (Python 3.12+, managed with [uv](https://docs.astral.sh/uv/)) |
-| `tests/` | `unit/`, `integration/`, `system/` test levels + `data/` synthetic sample reports |
-| `thesis/` | The thesis memoir (English, ESII XeLaTeX template) |
-| `docs/` | Project documentation: requirements (SRS), ADRs, AI-usage log, MkDocs sources |
-| `scripts/demo/` | Runnable validation demos referenced by PRs ("How to validate") |
+[![CI](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/ci.yml?branch=main&style=flat-square&label=CI&color=8c7bff)](https://github.com/SelfishCoconut/revalid/actions/workflows/ci.yml)
+[![Security](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/security.yml?branch=main&style=flat-square&label=security&color=8c7bff)](https://github.com/SelfishCoconut/revalid/actions/workflows/security.yml)
+[![Docs](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/docs.yml?branch=main&style=flat-square&label=docs&color=8c7bff)](https://selfishcoconut.github.io/revalid/)
+[![Last commit](https://img.shields.io/github/last-commit/SelfishCoconut/revalid?style=flat-square&color=8c7bff)](https://github.com/SelfishCoconut/revalid/commits)
+[![Version](https://img.shields.io/badge/version-0.4.0-8c7bff?style=flat-square)](https://github.com/SelfishCoconut/revalid/releases)
+[![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-d97757?style=flat-square&logo=anthropic&logoColor=white)](#-use-of-ai--transparency-notice)
 
-## Development
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](#)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?style=flat-square&logo=fastapi&logoColor=white)](#)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](#)
+[![mypy](https://img.shields.io/badge/mypy-strict-2A6DB2?style=flat-square)](#)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A580%25-33d19a?style=flat-square)](#)
+[![Pydantic AI](https://img.shields.io/badge/Pydantic_AI-agents-e92063?style=flat-square)](#)
+[![Ollama](https://img.shields.io/badge/Ollama-local--first-000000?style=flat-square&logo=ollama&logoColor=white)](#)
 
-```sh
-uv sync                 # install environment
-make lint typecheck     # ruff + mypy
-make test               # all test levels (unit / integration / system)
-make docs               # build documentation site (auto-generated UML included)
-make thesis             # build the thesis PDF (XeLaTeX)
+[⚡ What it does](#-what-it-does) • [💻 The console](#-the-console) • [🧩 How it works](#-how-it-works) • [🚀 Getting started](#-getting-started) • [🧭 Roadmap](#-roadmap) • [🔒 Safety](#-safety-and-scope)
+
+<sub>Bachelor's Thesis (Trabajo Fin de Grado) · Grado en Ingeniería Informática<br/>
+Escuela Superior de Ingeniería Informática (ESII) · Universidad de Castilla-La Mancha</sub>
+
+</div>
+
+---
+
+> [!NOTE]
+> A research prototype and a thesis artefact, not a product. It **revalidates findings from an
+> authorised audit** — it is never an attack tool. See [Safety and scope](#-safety-and-scope).
+
+## ⚡ What it does
+
+Retesting an audit is the unglamorous half of the job: months later, someone has to open the PDF and
+prove, finding by finding, whether the thing is still broken. `revalid` turns that into a gated,
+evidence-backed workflow — **report in → verdict out**, with the proof attached.
+
+<div align="center">
+
+<b>report</b> &nbsp;→&nbsp; extract &nbsp;→&nbsp; goal &nbsp;→&nbsp; <b>gated agentic retest</b> &nbsp;→&nbsp; verdict &nbsp;→&nbsp; audit / export
+
+</div>
+
+| | |
+| --- | --- |
+| **📥 Ingest anything** | PDF reports parsed with `pdfplumber` (FR-01), DefectDojo-style JSON, or a manual-entry escape hatch (FR-02) — all landing on one internal model. |
+| **🧠 Extract & enrich** | An LLM pulls out structured findings and reproduction steps (FR-03), each enriched with an inferred **CVSS** score and **MITRE ATT&CK** mapping when the report omits them — stated values verbatim, derived ones flagged `inferred` (FR-19). |
+| **🛑 Human-in-the-loop retest** | The agent proposes **one command at a time**; you approve or reject *every* one before it runs (FR-17). It owns exactly two tools — a gated shell and a prose channel — and you can steer it mid-session or take the shell yourself with `!<command>`. |
+| **🐳 Contained by construction** | Each session gets an ephemeral Docker container on a per-session `--internal` network with only the allowlisted target attached. Egress control **is** network membership: there is no route to the host, the internet, or anything else (FR-06). |
+| **⚖️ Verdicts with proof** | `still open` / `fixed`, pinned to the real output of the deciding command (FR-09). An honest `needs guidance` hands the session back to you instead of guessing — and *you* adjudicate the final call. |
+| **🔗 Audit & export** | A read-only re-derivation proves every verdict still follows from its append-only transcript (FR-10); a schema-versioned JSON export feeds the evaluation harness (FR-12, FR-15). |
+| **💬 Ask the corpus** | A read-only chat agent over every loaded report, with typed DB query tools and persisted threads (FR-18). |
+| **🔌 Local-first LLM** | Ships defaulting to a **local Ollama** model; swap to the Claude API (or any Pydantic AI backend) from the Settings page — no code change, no restart (FR-13). |
+
+## 💻 The console
+
+Everything runs from **one process on `127.0.0.1`** — single-user, local, nothing leaves the machine.
+Every screen below is a real capture of the running tool.
+
+<div align="center">
+<img src="assets/screen-overview.png" alt="Overview — the determination ledger" width="880">
+<br/><sub><b>Overview</b> — the determination ledger: one current verdict per finding, worst first.</sub>
+</div>
+
+<br/>
+
+<div align="center">
+<img src="assets/screen-cockpit.png" alt="Retest cockpit — gated agentic console" width="880">
+<br/><sub><b>The cockpit</b> — the agent reasons, proposes a command, and waits. Goal on top, gated
+commands and the verdict in the conversation, a read-only terminal below.</sub>
+</div>
+
+<br/>
+
+<table align="center">
+<tr>
+<td width="50%"><img src="assets/screen-report.png" alt="Report detail" width="100%" /></td>
+<td width="50%"><img src="assets/screen-verdict.png" alt="Verdict and adjudication" width="100%" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Report</b> — provenance, risk profile, extracted findings.</sub></td>
+<td align="center"><sub><b>Verdict</b> — the operator's adjudication supersedes the agent's, append-only.</sub></td>
+</tr>
+</table>
+
+## 🧩 How it works
+
+One `uvicorn` process serves the compiled React SPA at `/` and the JSON API under `/api`. There is no
+broker and no second service: long-running work (extraction, each agent turn) is a background task,
+and durable state is SQLite through SQLAlchemy.
+
+```mermaid
+flowchart LR
+    A["📄 PDF · DefectDojo · manual"] --> B["🔎 Findings<br/>+ CVSS / MITRE"]
+    B --> C["🎯 Operator sets the goal"]
+    C --> D{"🤖 Agentic retest loop"}
+    D -->|"proposes one command"| G["🛑 Human approval gate"]
+    G -->|"approved"| S["🐳 Egress-locked sandbox<br/>per-session --internal network"]
+    S -->|"only reachable host"| L[("🎯 Authorised lab target")]
+    S -->|"output"| D
+    D -->|"still open / fixed"| V["⚖️ Verdict + pinned evidence"]
+    V --> X["🔗 Audit re-derivation<br/>📦 Versioned export"]
+
+    classDef step fill:#10151e,stroke:#8c7bff,stroke-width:1.5px,color:#e8edf4;
+    classDef gate fill:#2a1216,stroke:#ff5d6e,stroke-width:1.5px,color:#ffe0e4;
+    classDef data fill:#0a1722,stroke:#4fb8e8,stroke-width:1.5px,color:#dff1ff;
+    class A,B,C,D,S,V,X step;
+    class G gate;
+    class L data;
 ```
 
-## Use of AI — transparency notice
+> **Why a `--internal` network instead of a URL allowlist?** Because an allowlist is a promise and a
+> network is a fact. The sandbox container is attached to a network with exactly one other member —
+> the authorised target — so "don't touch anything else" is not enforced by checking strings, it is
+> enforced by there being nothing else to touch. The gate then makes it *deliberate*: a human
+> approves every command the agent runs. See [ADR-0025](docs/adr/0025-agentic-retest-console.md).
 
-This project is developed with the assistance of **Claude Code** (Anthropic), in compliance with the ESII TFG regulation (Reglamento de Trabajos Fin de Grado, ESII, Feb 2026, Section 6):
+> [!TIP]
+> The full narrative — lifecycles, the session state machine, the sandbox model, and every operator
+> action — is in **[docs/architecture/workflow.md](docs/architecture/workflow.md)**, with wire-level
+> sequence diagrams in [docs/architecture/c4.md](docs/architecture/c4.md) and generated API/UML
+> reference on the [docs site](https://selfishcoconut.github.io/revalid/).
 
-- Every AI-assisted work session is recorded in [`docs/ai-usage/`](docs/ai-usage/); AI-assisted commits carry a `Co-Authored-By` trailer.
-- All design decisions are made and all AI output is reviewed and validated by the author; decisions are recorded as ADRs in [`docs/adr/`](docs/adr/).
-- No personal data or protected third-party information is ever provided to AI tools; all pentest data in this repository is synthetic or comes from intentionally vulnerable lab targets.
-- The thesis includes the mandatory declaration of AI tools used, type of use, and affected sections.
+## 🚀 Getting started
 
-## Safety & ethics
+> **Prerequisites:** [uv](https://docs.astral.sh/uv/) · Docker (sandbox + lab target) · Node 22+
+> (to build the SPA) · an LLM backend — a local [Ollama](https://ollama.com/) server (default) or an
+> `ANTHROPIC_API_KEY`.
 
-`revalid` only ever executes retests against **explicitly authorized targets** (by default, local lab containers such as OWASP Juice Shop / DVWA). It is a *revalidation* tool for findings already reported in an authorized audit — not an attack tool.
+```bash
+uv sync --extra sandbox        # the app + Docker sandbox support
+make lab-up                    # start the authorised target (OWASP Juice Shop, pinned)
+make build-ui                  # compile the React SPA
+make run                       # serve everything on http://127.0.0.1:8000
+```
 
-## License
+Open the app, load a report, set a retest goal for a finding, start the session, and approve your way
+to a verdict. `make lab-down` tears the target down; `make reset-db` drops the local SQLite file.
 
-[Beerware (Revision 42)](LICENSE) — not OSI-certified, intentionally so. 🍺
+```bash
+make demo-retest-session       # headless end-to-end walkthrough, no browser needed
+make dev-ui                    # SPA dev server with hot reload (proxies /api to :8000)
+```
+
+<details>
+<summary><b>🌱 Seeding data without an LLM (the fastest way to a demo)</b></summary>
+
+<br/>
+
+Manual ingestion bypasses extraction entirely, so seeding is deterministic and instant — and the
+result is indistinguishable downstream from an extracted report:
+
+```bash
+curl -X POST localhost:8000/api/reports/manual \
+  -H 'content-type: application/json' -d '{
+    "label": "Seed report",
+    "findings": [{
+      "title": "SQL Injection in Login (auth bypass)",
+      "severity": "critical",
+      "endpoints": ["http://revalid-juice-shop:3000/rest/user/login"],
+      "steps_to_reproduce": "POST a tautology in the email field; observe a JWT is returned."
+    }]
+  }'
+```
+
+Only `title` is required per finding. Note the sandbox reaches the lab by its **container name**
+(`revalid-juice-shop:3000`), not `localhost` — it has no route to your host.
+
+</details>
+
+<details>
+<summary><b>🔌 Choosing the LLM backend</b></summary>
+
+<br/>
+
+The shipped default is local-first (`ollama:qwen3.5:9b` against `http://localhost:11434/v1`). The
+persisted setting is authoritative — change it in **Settings** in the UI, or seed a fresh database
+from the environment:
+
+```bash
+export REVALID_LLM_MODEL="anthropic:claude-sonnet-5"   # or ollama:<model>
+export ANTHROPIC_API_KEY="sk-ant-..."                  # only for the Claude backend
+```
+
+Any [Pydantic AI](https://ai.pydantic.dev/) model string works; no code change is needed (FR-13,
+[ADR-0010](docs/adr/0010-model-agnostic-llm-config.md) /
+[ADR-0021](docs/adr/0021-user-configurable-model-provider-setting.md)).
+
+</details>
+
+## 🛠️ Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| **Runtime** | One `uvicorn` process bound to `127.0.0.1` — SPA + `/api` in the same app, no broker, no second service |
+| **Backend** | Python 3.12 · FastAPI · SQLAlchemy 2.x · Pydantic v2 · [uv](https://docs.astral.sh/uv/) |
+| **Agents** | [Pydantic AI](https://ai.pydantic.dev/) — deferred-tool approval gate, typed tools, structured verdicts |
+| **LLM** | Ollama (local-first default) · Claude API · anything Pydantic AI speaks, selected at runtime |
+| **Frontend** | Vite · React 19 · TypeScript (strict) · TanStack Query · Tailwind 4 · xterm.js |
+| **Storage** | SQLite — reports, finding versions, append-only session transcripts, verdicts, chats |
+| **Sandbox** | Docker SDK · ephemeral container on a per-session `--internal` network |
+| **Ingestion** | `pdfplumber` for PDFs; DefectDojo-style JSON and manual entry for everything else |
+| **Quality** | `mypy --strict` · ruff · xenon (complexity ≤ C) · pytest pyramid ≥ 80% · Vitest · CodeQL · Bandit · pip-audit · Gitleaks |
+| **Docs** | MkDocs Material · mkdocstrings (from docstrings) · pyreverse UML · Mermaid C4 |
+
+## 📂 Repository layout
+
+```
+src/revalid/     — the tool: FastAPI app, retest orchestrator, agents, sandbox, audit, export
+frontend/        — React 19 + Vite + TS single-page application (FR-11)
+tests/           — unit/ · integration/ · system/ (+ data/ synthetic sample reports)
+lab/             — docker compose for the authorised lab targets
+scripts/demo/    — runnable validation demos, one per feature ("How to validate" in every PR)
+docs/
+  requirements/  — the SRS (FR/NFR by ID, the contract everything traces to)
+  adr/           — Architecture Decision Records (MADR)
+  architecture/  — C4 + workflow, authored Mermaid
+  reference/     — generated API + UML (never hand-edited)
+  roadmap.md     — current state, milestones, next action
+thesis/          — the memoir (English, ESII XeLaTeX template)
+.github/workflows/ — CI, security, docs, sanity, nightly system tests, board automation
+```
+
+## 🧭 Roadmap
+
+Milestones are GitHub milestones; each closes with a release. Current state, the plan, and the
+resume point live in **[`docs/roadmap.md`](docs/roadmap.md)**.
+
+| Milestone | Theme | Status |
+| --- | --- | --- |
+| **M1** | Walking skeleton — deterministic end-to-end slice | ✅ `v0.1.0` |
+| **M2** | Report understanding — PDF → LLM extraction → pluggable backends | ✅ `v0.2.0` |
+| **M3** | Plan & approve — the human gate and the SPA | ✅ `v0.3.0` |
+| **M4** | Trust & audit — re-derivation, versioned export | ✅ `v0.4.0` |
+| **M6** | **Agentic interactive retest** — sandbox, gated console, adjudication | ✅ merged, tag pending |
+| **M5** | Evaluation — ground truth, harness, the Results-chapter numbers | 🚧 in progress → `v1.0.0` |
+
+M6 landed after M4 and **superseded** the batch retest path M1/M3 shipped: the one-shot structured
+plan is gone, replaced by the interactive console
+([ADR-0033](docs/adr/0033-retire-batch-execution-path.md)). The roadmap records what
+was retired and why, rather than pretending the design arrived finished.
+
+## 🧪 Development
+
+```bash
+uv sync                 # Python environment
+make lint typecheck     # ruff (lint + format) · mypy --strict
+make test               # the whole pyramid: unit / integration / system
+make ui-test            # frontend lint + types + Vitest
+make sanity             # complexity, duplication and dead-code metrics
+make docs               # documentation site (UML regenerated from the code)
+make thesis             # the thesis PDF (XeLaTeX)
+```
+
+Nothing merges without CI: lint, strict types, a complexity ceiling, the test pyramid at ≥ 80%
+coverage, and a layered security scan (pip-audit, Bandit, CodeQL, Gitleaks). Work starts from a
+GitHub issue on the Kanban board, ships as one PR with a **"How to validate"** section, and every
+significant decision is written down as an [ADR](docs/adr/) before it becomes code.
+
+## 🤖 Use of AI — transparency notice
+
+Developed with the assistance of **Claude Code** (Anthropic), in compliance with the ESII TFG
+regulation (*Reglamento de Trabajos Fin de Grado*, ESII, Feb 2026, §6):
+
+- Every AI-assisted work session is logged under [`docs/ai-usage/`](docs/ai-usage/); AI-assisted commits carry a `Co-Authored-By: Claude` trailer.
+- **All** design, architecture and scope decisions are the author's, and all AI output is reviewed and validated before acceptance; decisions are recorded as ADRs.
+- No personal or protected third-party data is ever given to AI tools; every pentest artefact in this repository is synthetic or derived from intentionally vulnerable lab targets.
+- The thesis carries the mandatory declaration of the AI tools used, the type of use, and the affected sections.
+
+## 🔒 Safety and scope
+
+> [!WARNING]
+> `revalid` retests **only explicitly authorised targets** — by default, local lab containers such as
+> OWASP Juice Shop. Authorisation is enforced in code, not in policy: the sandbox sits on an isolated
+> Docker `--internal` network with only the allowlisted target attached, so it is *physically unable*
+> to reach the host, the internet, or any other system. Every agent command additionally passes a
+> human approval gate. This is a revalidation tool for findings from an authorised audit — never an
+> attack tool.
+
+## 📜 License
+
+[![License](https://img.shields.io/badge/license-Beer--ware_(rev._42)-f2b44e?style=flat-square)](LICENSE)
+
+[The Beer-Ware License (Revision 42)](LICENSE) — not OSI-certified, intentionally so.
+
+<div align="center">
+<br/>
+<sub>Álvaro Navarro · ESII — UCLM · built with <a href="https://claude.com/claude-code">Claude Code</a>, one reviewed decision at a time.</sub>
+</div>

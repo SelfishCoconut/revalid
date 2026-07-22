@@ -70,3 +70,6 @@ thesis/*.pdf
 # Glob covers the db plus SQLite sidecars (-journal/-wal/-shm) so a WAL-mode run
 # can't leave an untracked file that `git add -A` would sweep in.
 /revalid.db*
+
+# --- Session scratch space (screenshots, probe scripts) ---
+/scratchpad/
