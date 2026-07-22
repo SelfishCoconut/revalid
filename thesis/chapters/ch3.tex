@@ -273,17 +273,47 @@ Anthropic's Claude family, used for its instruction-following and tool-use
 reliability across the multi-step retest loop; the local alternative is Ollama
 serving open-weight models of the \texttt{qwen} family through an OpenAI-compatible
 API, included both as a privacy-preserving deployment option and as a comparison
-condition.
+condition. The switch is made from the interface at runtime, and \texttt{httpx}, a
+modern asynchronous HTTP client, backs it: before a provider is committed to, it
+queries that provider's model list, so an unreachable backend or a bad key surfaces
+as an error in the settings view rather than as a failed extraction later.
 
 \paragraph{Sandboxed execution.} Every command the retest agent is approved to run
-executes inside an egress-locked Docker container, driven from the backend through
-the \texttt{docker} SDK. Containerisation is how the safety argument is
-\emph{enforced} rather than merely stated: the agent is confined to the authorised
-target and cannot reach the wider network. HTTP-level probes use \texttt{httpx}, a
-modern asynchronous HTTP client; findings that can only be reproduced in a real
-browser --- a DOM-based cross-site-scripting flaw, for instance --- are handled by
-Playwright, a browser-automation library kept as an optional extra so that HTTP-only
-retests carry no browser dependency.
+executes inside an ephemeral Docker container, driven from the backend through the
+\texttt{docker} SDK. Containerisation is how the safety argument is \emph{enforced}
+rather than merely stated, and the mechanism is worth being precise about, because
+it is easy to overclaim. Each retest session creates its own Docker network in
+\texttt{internal} mode --- a network for which the daemon installs no gateway ---
+and attaches exactly two members to it: the authorised target and the container the
+agent works in. Because the sandbox has no route off that network, anything the
+agent may need must already be present, so the image it runs is a curated
+penetration-testing toolbox built locally rather than pulled.
+
+Authorisation is therefore \emph{network membership} rather than a list of
+permitted addresses checked before each command, and the distinction is the point.
+An earlier version of this project did enforce such a list; a check of that kind is
+a promise some code path must remember to keep, and it can be defeated by any
+address its author did not anticipate. The route the check was meant to forbid is
+now simply absent. The agent may compose any command it likes --- a request to an
+arbitrary address, a port scan of a private range, a proxy --- and no connection it
+opens has anywhere to go.
+
+Three limits of that boundary are stated here rather than left implicit, because a
+guarantee a reader cannot check is worth little. First, the lock confines \emph{the
+agent}; it does not confine code the agent successfully executes \emph{on the
+target}, which retains its own connectivity, since attaching the internal network
+does not detach the target from the one it was started on --- a distinction that
+matters exactly when a retest of a remote-code-execution finding succeeds. Second,
+\texttt{internal} mode blocks routed traffic but not name resolution: where the host
+uses a loopback DNS stub --- the default on Debian and Ubuntu --- the daemon's
+embedded resolver still forwards external queries from its own namespace, leaving a
+low-bandwidth covert channel out of an otherwise TCP-isolated container. Third, the
+automated test that asserts the lock proves less than it appears to: it checks only
+that a request to an external name fails, which a failed lookup alone satisfies, and
+never attempts a bare address. That third limit is an instance of the lesson
+Section~\ref{sec:ci} closes on --- a check verifies only what it is aimed at --- here
+applied to the safety claim itself. All three are recorded in ADR-0025 alongside the
+guarantee.
 
 \paragraph{Front end.} The interface is a single-page application built with
 React~19, a component-based UI library, and written in TypeScript, so the type
@@ -400,29 +430,33 @@ code.
 \hline
 \rowcolor{tema!10}
 \bft{Workflow} & \bft{Trigger} & \bft{Checks performed} & \bft{Blocks merge} \\ \hline
-CI & every pull request, push to \texttt{main} & \emph{Lint \& types}: ruff lint and format check, mypy \texttt{-{}-strict}, xenon complexity ceiling. \emph{Unit tests + coverage}: pytest with coverage $\geq$~80\%. \emph{Integration tests}: pytest, marker \texttt{integration}. \emph{Front end}: ESLint, TypeScript type check, production build, Vitest with coverage & yes (4 jobs) \\ \hline
-Security & every pull request, push to \texttt{main}, weekly & \texttt{pip-audit} (known vulnerabilities in the locked dependency set), Bandit (SAST over \texttt{src}, medium severity and above), CodeQL (semantic data-flow analysis, Python sources), Gitleaks (secret scan over the full git history) & yes (4 jobs) \\ \hline
+CI & every pull request, push to \texttt{main} & \emph{Lint \& types}: ruff lint and format check, mypy \texttt{-{}-strict}, xenon complexity ceiling. \emph{Unit tests + coverage}: pytest with coverage $\geq$~80\%. \emph{Integration tests}: pytest, marker \texttt{integration}. \emph{Front end}: ESLint, TypeScript type check, production build, Vitest with coverage. \emph{Offline demos}: every \texttt{make demo-*} target run headlessly. \emph{Docs build}: UML regenerated, \texttt{mkdocs build -{}-strict} & 4 of 6 jobs \\ \hline
+Security & every pull request, push to \texttt{main}, weekly & \texttt{pip-audit} (known vulnerabilities in the locked dependency set, extras included), Bandit (SAST over \texttt{src} and \texttt{scripts}, medium severity and above), CodeQL (semantic data-flow analysis, Python and TypeScript sources), Gitleaks (secret scan over the full git history) & yes (4 jobs) \\ \hline
 System tests & nightly, on demand & Dockerised lab targets brought up, \texttt{pytest -m system} end-to-end, teardown always & no \\ \hline
 Sanity metrics & weekly, on demand & radon complexity, vulture dead code, pylint duplication; published as a report artefact & no \\ \hline
-Docs & push to \texttt{main}, on demand & UML regenerated with pyreverse, \texttt{mkdocs build -{}-strict}, deploy to GitHub~Pages & n/a \\ \hline
+Docs & push to \texttt{main}, on demand & Publishes the documentation: UML regenerated with pyreverse, \texttt{mkdocs build -{}-strict}, deploy to GitHub~Pages & n/a \\ \hline
 Thesis PDF & any push touching \texttt{thesis/}, on demand & XeLaTeX build of the memoir, PDF artefact & n/a \\ \hline
 Kanban board & issue and pull-request events, CI completion & Moves the board card: Backlog $\rightarrow$ In~Progress $\rightarrow$ Verify $\rightarrow$ Done & n/a \\ \hline
 \end{tabular}
 \end{center}
 \caption[The seven continuous-integration workflows]{The seven GitHub~Actions
-workflows and what each enforces. All eight jobs of the two per-change workflows ---
-CI and Security --- are required checks and therefore block the merge. The slow and
-longitudinal checks run on a schedule instead, so that a flaky lab container or a
-weekly metrics run never stops an unrelated change; the last three workflows perform
-no verification (``n/a'') but keep the project's published artefacts and its board in
-step with the code.}
+workflows and what each enforces. Ten jobs run on every change. ADR-0003 requires
+the \emph{complete} per-change suite to gate the merge; at the time of writing the
+two jobs added last --- the offline demonstrations and the documentation build ---
+report but do not yet block, because branch protection still lists the eight
+earlier contexts. That is a configuration gap left by the change that added them,
+recorded here rather than presented as a design choice. The slow and longitudinal checks run on a
+schedule instead, so that a flaky lab container or a weekly metrics run never stops
+an unrelated change; the last three workflows perform no verification (``n/a'') but
+keep the project's published artefacts and its board in step with the code.}
 \label{tab:workflows}
 \end{table}
 
-\paragraph{The per-change gate.} The CI workflow runs four independent jobs: static
+\paragraph{The per-change gate.} The CI workflow runs six independent jobs: static
 quality (style, strict types, the complexity ceiling), unit tests with the coverage
-floor, integration tests, and the complete front-end pipeline of lint, type check,
-production build and component tests. Because the jobs are separate, a failure is
+floor, integration tests, the complete front-end pipeline of lint, type check,
+production build and component tests, a headless run of every offline demonstration,
+and the documentation build. Because the jobs are separate, a failure is
 attributed to a specific concern rather than to ``the build''; because they run in
 parallel, the whole gate completes in about the time of its slowest job. Two further
 details make the result trustworthy. The environment is reproducible --- dependencies
@@ -437,12 +471,12 @@ superseded by a new push is cancelled automatically, keeping feedback fast enoug
 stay inside the developer's working loop.
 
 The gate is not a formality, and it is cheap. At the time of writing it had executed
-202~CI runs and 208~security runs over the 84~pull requests merged into
-\texttt{main}, with a median wall-clock time of 34~seconds and a worst case under six
-minutes. Eleven CI runs and ten security runs ended red. Thirteen of those were on a
-pull request --- a change stopped before it reached the main branch --- and the rest
-on a push to \texttt{main} or on the weekly schedule, catching what had already landed
-or what a newly published advisory had just made unsafe.
+251~CI runs and 257~security runs over the 105~pull requests merged into
+\texttt{main}, with a median wall-clock time of 37~seconds and a worst case under
+seven minutes. Sixteen CI runs and ten security runs ended red. Fifteen of those were
+on a pull request --- a change stopped before it reached the main branch --- and the
+rest on a push to \texttt{main} or on the weekly schedule, catching what had already
+landed or what a newly published advisory had just made unsafe.
 
 \paragraph{Security scanning in depth.} A tool that runs commands against live
 systems, handles API credentials and parses untrusted files must hold itself to the
@@ -451,17 +485,21 @@ occasional exercise, and it is deliberately layered: each of its four jobs sees 
 class of defect the others are blind to. \texttt{pip-audit} resolves the project's
 locked dependency set and matches it against published advisories, covering the
 supply chain --- the code the project did not write but does ship --- while
-Dependabot proposes the corresponding upgrade weekly. Bandit performs pattern-based
-static application-security testing over \texttt{src}, reporting findings of medium
+Dependabot proposes the corresponding upgrade weekly for the Python, front-end and
+workflow dependency sets. Bandit performs pattern-based
+static application-security testing over the application and its supporting
+scripts, reporting findings of medium
 severity and above: insecure temporary files, disabled certificate verification, weak
 cryptographic primitives. The severity floor is deliberate, since a tool that must
 legitimately spawn processes would otherwise drown in low-severity notices about the
 very behaviour it exists to perform. CodeQL \cite{codeql} goes further by querying a
 semantic model of the program, tracing whether data from an untrusted source reaches a
-sensitive sink --- reasoning that pattern matching cannot perform; it is configured
-for the Python sources only, the TypeScript front end being covered by its type
-checker and linter rather than by data-flow analysis, a gap acknowledged rather than
-closed. Gitleaks scans the \emph{entire history} rather than the current tree, because
+sensitive sink --- reasoning that pattern matching cannot perform. It analyses the
+Python sources and the TypeScript front end alike; that second language was added
+late, after the audit discussed at the end of this section observed that the browser
+code was covered by its type checker and linter but by no data-flow analysis, and
+that its twenty-eight dependencies were reaching no scanner at all. Gitleaks scans
+the \emph{entire history} rather than the current tree, because
 deleting a leaked key in a later commit does not remove it: the secret remains
 retrievable from any clone, and the correct response is to find it and revoke it.
 
@@ -486,10 +524,9 @@ construction no review of a single diff can see them.
 
 \paragraph{Publication and traceability.} The remaining three workflows keep the
 project's artefacts, and its record of work, from falling behind the code. The
-documentation workflow
-regenerates the UML diagrams from the source and rebuilds the site in strict mode,
-which fails on any broken cross-reference, before publishing to GitHub~Pages on every
-merge; the thesis workflow builds this memoir with XeLaTeX whenever
+documentation workflow publishes to GitHub~Pages on every merge, the strict build
+that fails on any broken cross-reference having already run before the merge as part
+of the gate; the thesis workflow builds this memoir with XeLaTeX whenever
 \texttt{thesis/} changes, so the document is known to compile continuously rather than
 on the eve of deposit; and the board workflow moves the Kanban card in response to
 repository events --- an issue opened lands in Backlog, a pull request that declares
@@ -524,6 +561,35 @@ happens, but the improvement was incidental to the alert. The policy adopted is 
 treat every finding as blocking and to resolve it either by changing the code or by
 recording an explicit, justified dismissal, never by lowering the threshold, which
 would quietly hollow out the gate while leaving it green.
+
+A subtler failure mode emerged late in the project and deserves recording, because
+it is invisible from inside the practice that produces it. A gate verifies only what
+it is aimed at, and the boundary of what it is aimed at is itself a decision that
+nobody revisits once made. An audit the author ran across the whole repository found
+that \texttt{scripts/} --- 1{,}076 lines, of which 641 are the demonstration
+programs --- sat outside every check: outside the type checker, the linter and the
+security scanner, and outside the test suite. That directory is not incidental. The
+project's own Definition of Done makes a runnable demonstration the mandatory
+evidence that a change works, so those programs are the mechanism by which every
+other claim is validated. Two of them had stopped working and the author had not
+noticed, and one had stopped for an instructive reason: a change to how the agent
+executes a turn altered a contract the demonstration depended on, the failure was
+absorbed by an error-handling boundary that recorded it as a session state rather
+than raising it, and no gate was watching that file. The verification apparatus was,
+in that narrow sense, verifying itself less rigorously than it verified the
+application.
+
+The general lesson is that a coverage figure measures how much of the code a gate
+exercises, not how much of the repository the gate is aimed at. A green build says
+nothing about the code the build never compiles, and the natural place for such a
+blind spot to open is exactly where a project keeps its supporting machinery ---
+scripts, hooks, generators, fixtures --- which feels peripheral while being
+load-bearing. The response was to widen the perimeter rather than to add another
+check inside it: the scripts were brought under the type checker, the linter and the
+security scanner, and a job was added that executes every offline demonstration on
+every change, so that the evidence a reviewer is told to trust is itself
+continuously verified. In this project, then, the measure of the gate turned out to
+be not only its strictness but its reach.
 
 \section{Use of Artificial Intelligence Tools}
 \label{sec:ai-declaration}
