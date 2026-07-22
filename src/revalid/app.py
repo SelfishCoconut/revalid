@@ -778,8 +778,10 @@ def run_first_step(
         make_sandbox: The session-scoped sandbox factory.
         finding: The finding to retest — the agent's goal is derived from it.
         goal_agent: The FR-17 goal agent (a stand-in model in tests).
-        initial_goal: A pre-start goal drafted by the user (FR-17 6b-iii-b); when
-            non-empty it is seeded verbatim and generation is skipped.
+        initial_goal: A pre-start goal drafted by the user (FR-17 6b-iii-b).
+            ``None`` means none was supplied, so one is generated; a supplied
+            goal — **including an empty one** — is seeded verbatim and
+            generation is skipped (#113 F3).
         target_endpoints: The launch-time retest scope (FR-17) — the exact URL(s)
             the agent may hit; defaults to the finding's endpoints when omitted.
     """
@@ -797,8 +799,11 @@ def run_first_step(
                 append_event(
                     session, session_id, SessionEventKind.TARGET_SET, {"endpoints": list(endpoints)}
                 )
-            goal: tuple[str, ...] = tuple(initial_goal) if initial_goal else ()
-            if not goal:  # no pre-start draft → generate (best-effort; never blocks)
+            # `None` = no goal supplied, so draft one (best-effort; never blocks).
+            # An explicitly empty goal is the operator's choice to start goal-less
+            # and steer by message, and is left alone (#113 F3).
+            goal: tuple[str, ...] = () if initial_goal is None else tuple(initial_goal)
+            if initial_goal is None:
                 with contextlib.suppress(Exception):
                     goal = generate_goal(goal_agent, finding)
             if goal:
@@ -1098,6 +1103,19 @@ def _start_idle(
 def _opt_tuple(values: list[str] | None) -> tuple[str, ...] | None:
     """Return a tuple of ``values``, or ``None`` when empty/absent (launch options)."""
     return tuple(values) if values else None
+
+
+def _goal_tuple(values: list[str] | None) -> tuple[str, ...] | None:
+    """Normalise a launch goal, preserving "explicitly empty" (issue #113 F3).
+
+    ``None`` — the field omitted — means *no goal was supplied*, so the launcher
+    drafts one. An empty list is a different thing: the operator cleared the goal
+    box on purpose and wants to start goal-less, steering the agent by message
+    (#163). Collapsing the two the way :func:`_opt_tuple` does for optional
+    scopes silently overrode that choice and generated a goal anyway, which is
+    the mismatch the spec flagged.
+    """
+    return None if values is None else tuple(values)
 
 
 def _seed_deferred_session(
@@ -1728,7 +1746,7 @@ def _register_launch_route(
             free_launch=cfg.free_launch,
             deferred=cfg.deferred,
         )
-        goal = _opt_tuple(cfg.initial_goal)
+        goal = _goal_tuple(cfg.initial_goal)
         endpoints = _opt_tuple(cfg.target_endpoints)
         if cfg.deferred:
             _seed_deferred_session(session, record.id, finding, goal, endpoints)

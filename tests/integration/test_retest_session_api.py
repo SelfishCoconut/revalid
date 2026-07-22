@@ -88,6 +88,21 @@ def test_session_start_seeds_a_goal() -> None:
         assert goal["payload"]["steps"] == _GOAL_STEPS
 
 
+def test_explicitly_empty_initial_goal_starts_goal_less() -> None:
+    """An empty `initial_goal` means *no goal*, not "generate one" (#113 F3).
+
+    Omitting the field still generates (see the test above). Sending `[]` is the
+    operator clearing the goal box on purpose to steer by message (#163), and it
+    used to be overridden because an empty list is falsy.
+    """
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post("/api/findings/1/retest-session", json={"initial_goal": []})
+        assert started.status_code == 202
+        state = client.get(f"/api/retest-sessions/{started.json()['id']}").json()
+        assert not [e for e in state["events"] if e["kind"] == "plan_updated"]
+
+
 def test_start_session_seeds_supplied_initial_goal() -> None:
     """A start body with initial_goal seeds that goal verbatim — no generation (6b-iii-b)."""
     with _client() as client:

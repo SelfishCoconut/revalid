@@ -57,14 +57,25 @@ export interface Finding {
   raw: Record<string, unknown>;
 }
 
-/** The five pipeline stages a note can be tagged with, plus `general` (FR-16). */
+/**
+ * The pipeline stages a note can be tagged with (FR-16): extract → goal →
+ * retest → verdict, plus `general` for a note left from the finding overview.
+ *
+ * `plan` and `approve` are the retired batch flow's stages (ADR-0033). Nothing
+ * produces them — the goal stage tagged its notes `plan` until #113, and those
+ * rows are renamed on startup — but they stay in the union so a note read back
+ * from an older database still types.
+ */
 export type FindingStage =
   | "extract"
-  | "plan"
-  | "approve"
+  | "goal"
   | "retest"
   | "verdict"
-  | "general";
+  | "general"
+  /** @deprecated legacy, read-only (ADR-0033). */
+  | "plan"
+  /** @deprecated legacy, read-only (ADR-0033). */
+  | "approve";
 
 /** One immutable version of a finding's content (FR-16 revision history). */
 export interface FindingVersion {

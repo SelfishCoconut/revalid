@@ -41,6 +41,7 @@ import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { queryKeys } from "../hooks/queryKeys";
 import { useRetestSession } from "../hooks/useRetestSession";
+import { goalStepsToText, parseGoalSteps } from "../lib/goal";
 import { errorMessage } from "../lib/format";
 import {
   autoApprovedSeqs,
@@ -631,10 +632,7 @@ export function RetestSession({
                     variant="accent"
                     disabled={goalMutation.isPending}
                     onClick={() => {
-                      const steps = goalDraft
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean);
+                      const steps = parseGoalSteps(goalDraft);
                       goalMutation.mutate(steps);
                       setEditingGoal(false);
                     }}
@@ -663,7 +661,7 @@ export function RetestSession({
                     <Button
                       variant="ghost"
                       onClick={() => {
-                        setGoalDraft(planSteps.join("\n"));
+                        setGoalDraft(goalStepsToText(planSteps));
                         setEditingGoal(true);
                       }}
                     >

@@ -135,7 +135,7 @@ def test_export_carries_finding_versions_and_notes() -> None:
         edited_by="user",
         reason="raise severity",
     )
-    add_note(session, record.id, FindingStage.PLAN, "check /admin too")
+    add_note(session, record.id, FindingStage.GOAL, "check /admin too")
 
     export = build_export(session, generated_at=datetime(2026, 7, 15, tzinfo=UTC))
     finding = export.findings[0]
@@ -147,7 +147,7 @@ def test_export_carries_finding_versions_and_notes() -> None:
     assert finding.versions[1].origin == "edit"
     assert finding.versions[1].reason == "raise severity"
     assert [n.body for n in finding.notes] == ["check /admin too"]
-    assert finding.notes[0].stage == "plan"
+    assert finding.notes[0].stage == "goal"
     validate(instance=export.model_dump(mode="json"), schema=export_schema())
 
 

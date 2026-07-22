@@ -122,19 +122,26 @@ class FindingOrigin(enum.StrEnum):
 class FindingStage(enum.StrEnum):
     """The pipeline stage a note was written on (FR-16, ADR-0024).
 
-    The stages mirror the finding's lifecycle track
-    (extract → goal → retest → verdict); the ``PLAN`` and ``APPROVE`` values are
-    retained for backward compatibility (the goal stage tags its notes ``plan``),
-    while ``GENERAL`` tags a note left from the finding overview rather than a
-    specific stage.
+    The stages mirror the finding's lifecycle track — extract → goal → retest →
+    verdict — while ``GENERAL`` tags a note left from the finding overview
+    rather than any one stage.
+
+    ``PLAN`` and ``APPROVE`` are the retired batch flow's stages (ADR-0033).
+    They are kept **readable** so a database written before the reshape still
+    loads, but nothing produces them any more: the goal stage tagged its notes
+    ``plan`` until issue #113, and existing rows are renamed to ``goal`` by the
+    lightweight backfill in :func:`revalid.db.create_db_engine`. Do not use them
+    for new notes.
     """
 
     EXTRACT = "extract"
-    PLAN = "plan"
-    APPROVE = "approve"
+    GOAL = "goal"
     RETEST = "retest"
     VERDICT = "verdict"
     GENERAL = "general"
+    #: Legacy, read-only: the retired batch flow's stages (ADR-0033, #113).
+    PLAN = "plan"
+    APPROVE = "approve"
 
 
 class ReportStatus(enum.StrEnum):

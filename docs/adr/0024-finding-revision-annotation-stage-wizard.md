@@ -153,3 +153,34 @@ labelled button press on the stage that owns it, not a click-through on a dialog
 - **Follow-up (deferred).** Plans/verdicts could additionally stamp the
   `finding_version` they were derived from for even tighter audit; not needed now
   because `plan.raw` already snapshots the source finding.
+
+---
+
+## Update — 2026-07-22: the note-stage vocabulary follows the goal flow (issue #113)
+
+The stage vocabulary this ADR introduced (`extract → plan → approve → retest →
+verdict`) described the batch flow. FR-17 reshaped the finding track to
+`extract → goal → retest → verdict` and deleted the plan/approve stages
+(ADR-0033), but the note taxonomy was left alone: the Goal stage tagged its
+notes `plan` — the retired stage's value — to avoid a backend enum change during
+the reshape, and `approve` was left with no producer at all.
+
+That was a deliberate short-term choice, and it aged badly: the enum's docstring
+described the *new* pipeline while its values encoded the *old* one, so the code
+contradicted itself for any reader.
+
+`FindingStage` now has a real `GOAL`. `PLAN` and `APPROVE` remain as **legacy,
+read-only** members so a database written before the reshape still loads, but
+nothing produces them.
+
+Existing rows are renamed by `_backfill_note_stages`, an idempotent
+`UPDATE finding_notes SET stage='goal' WHERE stage='plan'` run on every engine
+open, alongside the `_ensure_columns` lightweight migration this project already
+uses in place of a migration framework. Without it, every note an operator had
+already written on the goal stage would silently stop appearing there — a data
+loss in effect if not in storage. The rename is total rather than conditional
+because the batch plan stage that originally owned `plan` no longer exists and
+the goal stage is its successor, so every surviving `plan` note belongs to the
+goal stage either way.
+
+The decision above is otherwise unchanged.

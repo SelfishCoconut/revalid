@@ -9,7 +9,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Engine, ForeignKey, String, create_engine, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Engine,
+    ForeignKey,
+    String,
+    create_engine,
+    func,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -17,6 +26,7 @@ from revalid.domain import (
     CvssCode,
     Finding,
     FindingOrigin,
+    FindingStage,
     MitreMapping,
     Settings,
     Severity,
@@ -366,6 +376,7 @@ def create_db_engine(path: str = "revalid.db") -> Engine:
         engine = create_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine)
     _ensure_columns(engine)
+    _backfill_note_stages(engine)
     return engine
 
 
@@ -390,6 +401,27 @@ def _ensure_columns(engine: Engine) -> None:
             for name, ddl in columns.items():
                 if name not in existing:
                     conn.exec_driver_sql(ddl)
+
+
+def _backfill_note_stages(engine: Engine) -> None:
+    """Rename goal-stage notes written under the retired ``plan`` tag (issue #113).
+
+    The goal stage tagged its notes ``plan`` — the retired batch stage's value —
+    to avoid a backend enum change when FR-17 reshaped the flow (ADR-0033). Now
+    that :class:`~revalid.domain.FindingStage` has a real ``GOAL``, the stored
+    rows are renamed to match; without this, every note an operator already
+    wrote on the goal stage would silently stop appearing there.
+
+    The rename is safe and total: the batch plan stage that originally owned
+    ``plan`` no longer exists, and the goal stage is its successor, so every
+    surviving ``plan`` note belongs to the goal stage either way. Idempotent —
+    a second run matches nothing — in the same spirit as :func:`_ensure_columns`.
+    """
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE finding_notes SET stage = :goal WHERE stage = :legacy"),
+            {"goal": FindingStage.GOAL.value, "legacy": FindingStage.PLAN.value},
+        )
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
