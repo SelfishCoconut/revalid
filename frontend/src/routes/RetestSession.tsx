@@ -250,20 +250,13 @@ function lastDecisionSeq(events: SessionEvent[]): number {
  * docked, collapsible terminal that shows only executed-command output. The
  * `/api` + WebSocket contract is unchanged from Slice 0; this is presentation.
  */
-export function RetestSession({
-  sessionId,
-  embedded = false,
-}: {
-  sessionId: number;
-  /** True when rendered inside the finding-stage wizard (its header + pipeline sit
-   * above), so the cockpit reserves more height than on the standalone route. */
-  embedded?: boolean;
-}) {
+export function RetestSession({ sessionId }: { sessionId: number }) {
   const id = sessionId;
   const { events, status, verdict, thinking } = useRetestSession(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [terminalOpen, setTerminalOpen] = useState(true);
+  const [goalOpen, setGoalOpen] = useState(true);
   const [input, setInput] = useState("");
   const [command, setCommand] = useState("");
   const chatRef = useRef<HTMLDivElement>(null);
@@ -497,16 +490,13 @@ export function RetestSession({
   });
 
   return (
-    // A *fixed* height, not a floor (#163): with `min-h` the console grew with the
-    // transcript, so the page scrolled, the conversation's own `overflow-y-auto`
-    // never engaged and the composer walked off the bottom of the viewport. Pinning
-    // the height makes the thread scroll inside its panel with the composer welded
-    // to its edge, the way a chat app behaves.
-    <div
-      className={`flex flex-col gap-3 ${
-        embedded ? "h-[calc(100dvh-16rem)]" : "h-[calc(100dvh-8rem)]"
-      }`}
-    >
+    // Fills the height its parent hands down (App's cockpit `main` → FindingLayout
+    // → here), never a guessed `calc(100dvh-…)`: the guess overflowed when the
+    // finding chrome was taller than the reservation and squeezed the chat to a
+    // sliver (#202). `min-h-0` lets this box be shorter than its content so the
+    // panels inside scroll internally — the composer stays welded to the chat's
+    // bottom edge and the page itself never scrolls (#163 stays fixed).
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           {/* Live status dot: pulses while the agent works, steady otherwise. */}
@@ -609,22 +599,31 @@ export function RetestSession({
         </div>
       </div>
 
-      {/* main: the goal (capped) then the boxed chat. This column and the docked
-          terminal below share the vertical space ~3:2 (grow-[3] vs grow-[2]) so the
-          conversation is the dominant panel instead of being squeezed to its floor
-          by a tall goal + an open terminal (#202). */}
-      <div className="flex min-h-0 grow-[3] basis-0 flex-col gap-3">
-        {/* Current goal — the user-owned checklist, full width below the stages bar (FR-17 6b-ii). */}
-        <Panel className="shrink-0">
-          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-            <span className="flex items-center gap-2 text-faint">
-              <GoalIcon />
-              <Eyebrow>Current goal</Eyebrow>
-            </span>
-          </div>
-          {/* Capped + scrollable (#202): the goal is set-once reference, so a long
-              goal/scope scrolls here instead of starving the conversation below. */}
-          <div className="max-h-40 space-y-3 overflow-y-auto p-4">
+      {/* Current goal — set-once reference (FR-17 6b-ii). It sits as a sibling of the
+          chat, not nested in the chat's growth column where a tall goal starved it
+          (#202), and is collapsible: capped with internal scroll when open, collapsed
+          to hand every pixel to the conversation. */}
+      <Panel className="shrink-0 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            setGoalOpen((open) => !open);
+          }}
+          aria-expanded={goalOpen}
+          className={`flex w-full items-center justify-between px-4 py-2.5 text-left ${
+            goalOpen ? "border-b border-line" : ""
+          }`}
+        >
+          <span className="flex items-center gap-2 text-faint">
+            <GoalIcon />
+            <Eyebrow>Current goal</Eyebrow>
+          </span>
+          <span className="font-mono text-[11px] text-faint">
+            {planSteps.length} {planSteps.length === 1 ? "step" : "steps"} {goalOpen ? "▾" : "▸"}
+          </span>
+        </button>
+        {goalOpen && (
+          <div className="max-h-36 space-y-3 overflow-y-auto p-4">
             {targetEndpoints.length > 0 && (
               <div className="rounded-lg border border-line bg-panel-2/40 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
@@ -716,357 +715,353 @@ export function RetestSession({
               </>
             )}
           </div>
-        </Panel>
+        )}
+      </Panel>
 
-        {/* Conversation — one chat panel (#157): the scrolling transcript with the
-            composer welded to its bottom edge, so the agent's turns, the operator's
-            turns, the gate, and the box you type into all read as a single thread
-            rather than a stack of disconnected boxes. A min-height keeps it usable
-            so the docked terminal can never squeeze the approval gate to nothing on
-            a short viewport (the page scrolls instead). */}
-        {/* A modest floor, not 20rem: the root is now a fixed height (#163), so an
-            over-tall floor here would push the composer out of the console when the
-            terminal is expanded. The thread scrolls internally instead. */}
-        <Panel className="flex min-h-[9rem] flex-1 flex-col overflow-hidden">
-          <PanelHeader eyebrow="Conversation" />
-          <div
-            ref={chatRef}
-            role="log"
-            aria-label="Agent conversation"
-            className="min-h-0 flex-1 overflow-y-auto p-4"
-          >
-            <div className="flex w-full flex-col gap-3 pb-1">
-            {/* An idle session has run nothing — no sandbox, no LLM call. It wakes
-                when you talk to it (#163): the first message provisions the
-                egress-locked sandbox and becomes the opening turn's steer, so the
-                agent never starts unbidden and there is nothing extra to press. */}
-            {isIdle && (
-              <div
-                aria-label="asleep"
-                className="flex flex-col items-center gap-2 rounded-lg border border-line bg-panel-2/40 px-4 py-8 text-center"
-              >
-                <span className="flex items-center gap-2 text-faint">
-                  <PowerIcon />
-                  <Eyebrow>Agent asleep</Eyebrow>
-                </span>
-                <p className="max-w-sm text-sm text-dim">
-                  The goal and scope are set, but nothing has run yet. Send a message below to wake
-                  it — that provisions the sandbox and becomes its first instruction.
-                </p>
-              </div>
-            )}
-            {chatItems.length === 0 && !verdict && !isThinking(status) && !isIdle && (
-              <p className="text-sm text-dim">Starting the sandboxed retest…</p>
-            )}
-            {chatItems}
-            {isThinking(status) && !awaitingApproval && !verdict && (
-              <ThinkingBubble reasoning={thinking} />
-            )}
-            {isStopped && (
-              <div
-                aria-label="stopped"
-                className="rounded-lg border border-line bg-panel-2/50 p-4 text-sm text-dim"
-              >
-                <span className="flex items-center gap-2 text-faint">
-                  <PauseIcon />
-                  <Eyebrow>Paused by you</Eyebrow>
-                </span>
-                <p className="mt-1">
-                  The sandbox is kept alive. Message the agent to pick up where it left off, or
-                  conclude the retest yourself.
-                </p>
-              </div>
-            )}
-            {status === "needs_guidance" ? (
-              // Paused for guidance (ADR-0034): the agent handed back after
-              // exhausting its options. The operator steers (chat/commands below)
-              // and keeps going, or concludes the retest themselves. Sandbox alive.
-              <div
-                aria-label="needs guidance"
-                className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
-              >
-                <div>
-                  <span className="flex items-center gap-2 text-iris-fg">
-                    <AlertIcon />
-                    <Eyebrow>Over to you</Eyebrow>
-                  </span>
-                  <p className="mt-1 text-sm text-fg">
-                    {guidanceReason(events) ?? "The agent handed back — your move."}
-                  </p>
-                  <p className="mt-1 text-xs text-dim">
-                    Reply below to keep it going — your message is the steer. Or conclude the retest
-                    yourself.
-                  </p>
-                </div>
-                {/* No "Keep going" button: replying *is* keeping going (#163). The
-                    Conclude form renders further down the thread (#157). */}
-                {!concluding && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setConcluding(true);
-                      }}
-                    >
-                      <FlagIcon />
-                      Conclude…
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ) : status === "given_up" ? (
-              // Legacy: sessions from before ADR-0034 could reach a terminal
-              // give-up. New sessions pause for guidance instead.
-              <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
-                <span className="flex items-center gap-2 text-warn-fg">
+      {/* Conversation (#157): the scrolling transcript with the composer welded to its
+          bottom edge — the agent's turns, the operator's turns, the approval gate and
+          the box you type into read as one thread. It's the dominant panel and a direct
+          sibling of the goal and terminal now (grow-[3] vs the terminal's grow-[2]), so
+          a tall goal can no longer starve it; a modest min-height floor keeps the gate
+          visible and the thread scrolls internally (#163, #202). */}
+      <Panel className="flex min-h-[8rem] grow-[3] basis-0 flex-col overflow-hidden">
+        <PanelHeader eyebrow="Conversation" />
+        <div
+          ref={chatRef}
+          role="log"
+          aria-label="Agent conversation"
+          className="min-h-0 flex-1 overflow-y-auto p-4"
+        >
+          <div className="flex w-full flex-col gap-3 pb-1">
+          {/* An idle session has run nothing — no sandbox, no LLM call. It wakes
+              when you talk to it (#163): the first message provisions the
+              egress-locked sandbox and becomes the opening turn's steer, so the
+              agent never starts unbidden and there is nothing extra to press. */}
+          {isIdle && (
+            <div
+              aria-label="asleep"
+              className="flex flex-col items-center gap-2 rounded-lg border border-line bg-panel-2/40 px-4 py-8 text-center"
+            >
+              <span className="flex items-center gap-2 text-faint">
+                <PowerIcon />
+                <Eyebrow>Agent asleep</Eyebrow>
+              </span>
+              <p className="max-w-sm text-sm text-dim">
+                The goal and scope are set, but nothing has run yet. Send a message below to wake
+                it — that provisions the sandbox and becomes its first instruction.
+              </p>
+            </div>
+          )}
+          {chatItems.length === 0 && !verdict && !isThinking(status) && !isIdle && (
+            <p className="text-sm text-dim">Starting the sandboxed retest…</p>
+          )}
+          {chatItems}
+          {isThinking(status) && !awaitingApproval && !verdict && (
+            <ThinkingBubble reasoning={thinking} />
+          )}
+          {isStopped && (
+            <div
+              aria-label="stopped"
+              className="rounded-lg border border-line bg-panel-2/50 p-4 text-sm text-dim"
+            >
+              <span className="flex items-center gap-2 text-faint">
+                <PauseIcon />
+                <Eyebrow>Paused by you</Eyebrow>
+              </span>
+              <p className="mt-1">
+                The sandbox is kept alive. Message the agent to pick up where it left off, or
+                conclude the retest yourself.
+              </p>
+            </div>
+          )}
+          {status === "needs_guidance" ? (
+            // Paused for guidance (ADR-0034): the agent handed back after
+            // exhausting its options. The operator steers (chat/commands below)
+            // and keeps going, or concludes the retest themselves. Sandbox alive.
+            <div
+              aria-label="needs guidance"
+              className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
+            >
+              <div>
+                <span className="flex items-center gap-2 text-iris-fg">
                   <AlertIcon />
-                  <Eyebrow>Retest ended</Eyebrow>
+                  <Eyebrow>Over to you</Eyebrow>
                 </span>
-                <p className="mt-1 text-sm text-warn-fg">
-                  {givenUpReason(events) ?? "The agent stopped without a determination."}
+                <p className="mt-1 text-sm text-fg">
+                  {guidanceReason(events) ?? "The agent handed back — your move."}
+                </p>
+                <p className="mt-1 text-xs text-dim">
+                  Reply below to keep it going — your message is the steer. Or conclude the retest
+                  yourself.
                 </p>
               </div>
-            ) : (
-              verdict && (
-                <div className="rounded-lg border border-line bg-panel-2/50 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-faint">
-                    <VerdictIcon />
-                    <Eyebrow>Verdict</Eyebrow>
-                    {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
-                  </div>
-                  <p className="text-sm text-fg">{verdict.rationale}</p>
+              {/* No "Keep going" button: replying *is* keeping going (#163). The
+                  Conclude form renders further down the thread (#157). */}
+              {!concluding && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setConcluding(true);
+                    }}
+                  >
+                    <FlagIcon />
+                    Conclude…
+                  </Button>
                 </div>
-              )
-            )}
-            {canAdjudicate && verdict && (
-              <div
-                aria-label="adjudication"
-                className="rounded-lg border border-line bg-panel-2/30 p-4"
-              >
-                <span className="flex items-center gap-2 text-faint">
+              )}
+            </div>
+          ) : status === "given_up" ? (
+            // Legacy: sessions from before ADR-0034 could reach a terminal
+            // give-up. New sessions pause for guidance instead.
+            <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
+              <span className="flex items-center gap-2 text-warn-fg">
+                <AlertIcon />
+                <Eyebrow>Retest ended</Eyebrow>
+              </span>
+              <p className="mt-1 text-sm text-warn-fg">
+                {givenUpReason(events) ?? "The agent stopped without a determination."}
+              </p>
+            </div>
+          ) : (
+            verdict && (
+              <div className="rounded-lg border border-line bg-panel-2/50 p-4">
+                <div className="mb-2 flex items-center gap-2 text-faint">
                   <VerdictIcon />
-                  <Eyebrow>Adjudication</Eyebrow>
-                </span>
-                {adjudicated ? (
-                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
-                    <span className="text-dim">Final verdict (operator):</span>
-                    {typeof finalVerdict?.status === "string" &&
-                      isKnownStatus(finalVerdict.status) && (
-                        <StatusBadge status={finalVerdict.status} />
-                      )}
-                    {typeof finalVerdict?.rationale === "string" && finalVerdict.rationale && (
-                      <span>— {finalVerdict.rationale}</span>
+                  <Eyebrow>Verdict</Eyebrow>
+                  {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
+                </div>
+                <p className="text-sm text-fg">{verdict.rationale}</p>
+              </div>
+            )
+          )}
+          {canAdjudicate && verdict && (
+            <div
+              aria-label="adjudication"
+              className="rounded-lg border border-line bg-panel-2/30 p-4"
+            >
+              <span className="flex items-center gap-2 text-faint">
+                <VerdictIcon />
+                <Eyebrow>Adjudication</Eyebrow>
+              </span>
+              {adjudicated ? (
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-fg">
+                  <span className="text-dim">Final verdict (operator):</span>
+                  {typeof finalVerdict?.status === "string" &&
+                    isKnownStatus(finalVerdict.status) && (
+                      <StatusBadge status={finalVerdict.status} />
                     )}
+                  {typeof finalVerdict?.rationale === "string" && finalVerdict.rationale && (
+                    <span>— {finalVerdict.rationale}</span>
+                  )}
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-dim">
+                    Accept the agent&rsquo;s verdict, or override it with your own determination.
                   </p>
-                ) : (
-                  <>
-                    <p className="mt-1 text-xs text-dim">
-                      Accept the agent&rsquo;s verdict, or override it with your own determination.
-                    </p>
-                    {overriding ? (
-                      <div className="mt-2 space-y-2">
-                        <select
-                          aria-label="override status"
-                          value={overrideStatus}
-                          onChange={(e) => {
-                            setOverrideStatus(e.target.value as VerdictStatus);
-                          }}
-                          className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                        >
-                          {VERDICT_STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {STATUS_META[s].label}
-                            </option>
-                          ))}
-                        </select>
-                        <textarea
-                          aria-label="override rationale"
-                          value={overrideRationale}
-                          onChange={(e) => {
-                            setOverrideRationale(e.target.value);
-                          }}
-                          placeholder="Why you override the agent's verdict…"
-                          className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                          rows={2}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="accent"
-                            disabled={adjudicateMutation.isPending}
-                            onClick={() => {
-                              adjudicateMutation.mutate({
-                                status: overrideStatus,
-                                rationale: overrideRationale,
-                              });
-                            }}
-                          >
-                            Submit override
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              setOverriding(false);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap gap-2">
+                  {overriding ? (
+                    <div className="mt-2 space-y-2">
+                      <select
+                        aria-label="override status"
+                        value={overrideStatus}
+                        onChange={(e) => {
+                          setOverrideStatus(e.target.value as VerdictStatus);
+                        }}
+                        className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                      >
+                        {VERDICT_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {STATUS_META[s].label}
+                          </option>
+                        ))}
+                      </select>
+                      <textarea
+                        aria-label="override rationale"
+                        value={overrideRationale}
+                        onChange={(e) => {
+                          setOverrideRationale(e.target.value);
+                        }}
+                        placeholder="Why you override the agent's verdict…"
+                        className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+                        rows={2}
+                      />
+                      <div className="flex flex-wrap gap-2">
                         <Button
-                          variant="positive"
+                          variant="accent"
                           disabled={adjudicateMutation.isPending}
                           onClick={() => {
                             adjudicateMutation.mutate({
-                              status: verdict.status,
-                              rationale: verdict.rationale,
+                              status: overrideStatus,
+                              rationale: overrideRationale,
                             });
                           }}
                         >
-                          <CheckIcon />
-                          Accept
+                          Submit override
                         </Button>
                         <Button
                           variant="ghost"
                           onClick={() => {
-                            setOverriding(true);
+                            setOverriding(false);
                           }}
                         >
-                          <PencilIcon />
-                          Override…
+                          Cancel
                         </Button>
                       </div>
-                    )}
-                    {adjudicateMutation.isError && (
-                      <p className="mt-2 text-xs text-danger">
-                        {errorMessage(adjudicateMutation.error)}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-            {/* Conclude — the operator writes their own verdict, available at any
-                live point in the retest (#150). It renders as the newest item in
-                the thread (#157) rather than a detached panel above it, so the
-                form appears where the conversation left off. */}
-            {concluding && sandboxLive && (
-              <div
-                aria-label="conclude"
-                className="space-y-3 rounded-lg border border-iris/50 bg-iris/5 p-4"
-              >
-                <div>
-                  <span className="flex items-center gap-2 text-iris-fg">
-                    <FlagIcon />
-                    <Eyebrow>Conclude the retest yourself</Eyebrow>
-                  </span>
-                  <p className="mt-1 text-xs text-dim">
-                    Record your own determination. The sandbox is torn down and this becomes the
-                    session&rsquo;s verdict.
-                  </p>
-                </div>
-                <select
-                  aria-label="conclude status"
-                  value={concludeStatus}
-                  onChange={(e) => {
-                    setConcludeStatus(e.target.value as VerdictStatus);
-                  }}
-                  className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                >
-                  {VERDICT_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {STATUS_META[s].label}
-                    </option>
-                  ))}
-                </select>
-                <textarea
-                  aria-label="conclude rationale"
-                  value={concludeRationale}
-                  onChange={(e) => {
-                    setConcludeRationale(e.target.value);
-                  }}
-                  placeholder="Your determination and why…"
-                  rows={2}
-                  className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="accent"
-                    disabled={concludeMutation.isPending}
-                    onClick={() => {
-                      concludeMutation.mutate({
-                        status: concludeStatus,
-                        rationale: concludeRationale,
-                      });
-                    }}
-                  >
-                    <VerdictIcon />
-                    Record verdict
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setConcluding(false);
-                    }}
-                  >
-                    <CrossIcon />
-                    Cancel
-                  </Button>
-                </div>
-                {concludeMutation.isError && (
-                  <p role="alert" className="text-xs text-danger-fg">
-                    {errorMessage(concludeMutation.error)}
-                  </p>
-                )}
-              </div>
-            )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        variant="positive"
+                        disabled={adjudicateMutation.isPending}
+                        onClick={() => {
+                          adjudicateMutation.mutate({
+                            status: verdict.status,
+                            rationale: verdict.rationale,
+                          });
+                        }}
+                      >
+                        <CheckIcon />
+                        Accept
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setOverriding(true);
+                        }}
+                      >
+                        <PencilIcon />
+                        Override…
+                      </Button>
+                    </div>
+                  )}
+                  {adjudicateMutation.isError && (
+                    <p className="mt-2 text-xs text-danger">
+                      {errorMessage(adjudicateMutation.error)}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
-          </div>
-
-          {/* Composer — welded to the thread's bottom edge inside the same panel
-              (#157), the way a chat app docks its input. A message is read by the
-              agent on its next turn (Slice 4). */}
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!canSendMessage) return;
-              messageMutation.mutate(trimmed);
-              setInput("");
-            }}
-            className="shrink-0 border-t border-line bg-panel-2/30 px-3 py-2.5"
-          >
-            <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
-              <input
-                value={input}
-                onChange={(event) => {
-                  setInput(event.target.value);
+          )}
+          {/* Conclude — the operator writes their own verdict, available at any
+              live point in the retest (#150). It renders as the newest item in
+              the thread (#157) rather than a detached panel above it, so the
+              form appears where the conversation left off. */}
+          {concluding && sandboxLive && (
+            <div
+              aria-label="conclude"
+              className="space-y-3 rounded-lg border border-iris/50 bg-iris/5 p-4"
+            >
+              <div>
+                <span className="flex items-center gap-2 text-iris-fg">
+                  <FlagIcon />
+                  <Eyebrow>Conclude the retest yourself</Eyebrow>
+                </span>
+                <p className="mt-1 text-xs text-dim">
+                  Record your own determination. The sandbox is torn down and this becomes the
+                  session&rsquo;s verdict.
+                </p>
+              </div>
+              <select
+                aria-label="conclude status"
+                value={concludeStatus}
+                onChange={(e) => {
+                  setConcludeStatus(e.target.value as VerdictStatus);
                 }}
-                placeholder={
-                  isIdle
-                    ? "Tell the agent to start…"
-                    : isStopped || status === "needs_guidance"
-                      ? "Reply to pick it back up…"
-                      : "Message the agent…"
-                }
-                disabled={sessionOver}
-                aria-label="Message the agent"
-                className="min-w-0 flex-1 bg-transparent text-[14px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
+                className="rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
+              >
+                {VERDICT_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_META[s].label}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                aria-label="conclude rationale"
+                value={concludeRationale}
+                onChange={(e) => {
+                  setConcludeRationale(e.target.value);
+                }}
+                placeholder="Your determination and why…"
+                rows={2}
+                className="w-full rounded border border-line bg-panel px-2 py-1 text-sm text-fg"
               />
-              <Button type="submit" variant="accent" disabled={!canSendMessage}>
-                <SendIcon />
-                Send
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="accent"
+                  disabled={concludeMutation.isPending}
+                  onClick={() => {
+                    concludeMutation.mutate({
+                      status: concludeStatus,
+                      rationale: concludeRationale,
+                    });
+                  }}
+                >
+                  <VerdictIcon />
+                  Record verdict
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setConcluding(false);
+                  }}
+                >
+                  <CrossIcon />
+                  Cancel
+                </Button>
+              </div>
+              {concludeMutation.isError && (
+                <p role="alert" className="text-xs text-danger-fg">
+                  {errorMessage(concludeMutation.error)}
+                </p>
+              )}
             </div>
-            {messageMutation.isError && (
-              <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
-                {errorMessage(messageMutation.error)}
-              </p>
-            )}
-          </form>
-        </Panel>
+          )}
+          </div>
+        </div>
 
-      </div>
+        {/* Composer — welded to the thread's bottom edge inside the same panel
+            (#157), the way a chat app docks its input. A message is read by the
+            agent on its next turn (Slice 4). */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canSendMessage) return;
+            messageMutation.mutate(trimmed);
+            setInput("");
+          }}
+          className="shrink-0 border-t border-line bg-panel-2/30 px-3 py-2.5"
+        >
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/60 px-3 py-2">
+            <input
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value);
+              }}
+              placeholder={
+                isIdle
+                  ? "Tell the agent to start…"
+                  : isStopped || status === "needs_guidance"
+                    ? "Reply to pick it back up…"
+                    : "Message the agent…"
+              }
+              disabled={sessionOver}
+              aria-label="Message the agent"
+              className="min-w-0 flex-1 bg-transparent text-[14px] text-fg outline-none placeholder:text-faint disabled:opacity-45"
+            />
+            <Button type="submit" variant="accent" disabled={!canSendMessage}>
+              <SendIcon />
+              Send
+            </Button>
+          </div>
+          {messageMutation.isError && (
+            <p role="alert" className="mt-1 px-1 text-sm text-danger-fg">
+              {errorMessage(messageMutation.error)}
+            </p>
+          )}
+        </form>
+      </Panel>
 
       {/* Terminal — docked below the conversation: executed output plus your own
           prompt. A command you run here executes once in the isolated sandbox and

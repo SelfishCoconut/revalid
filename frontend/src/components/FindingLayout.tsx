@@ -85,17 +85,27 @@ export function FindingLayout() {
 
   const backLink = finding.report_id != null ? `/reports/${String(finding.report_id)}` : "/";
 
+  // The retest console is the one stage that fills the viewport (a chat + docked
+  // terminal that scroll internally); it needs this layout to be a flex column
+  // that hands it the remaining height. The other stages stay in normal block
+  // flow so their content sizes naturally and long pages scroll (#202).
+  const fillHeight = activeStage === "retest";
+
   return (
-    <div className="rev-rise space-y-6">
+    <div
+      className={
+        fillHeight ? "rev-rise flex min-h-0 flex-1 flex-col gap-6" : "rev-rise space-y-6"
+      }
+    >
       <Link
         to={backLink}
-        className="inline-flex items-center gap-1.5 font-mono text-[12px] text-faint transition-colors hover:text-dim"
+        className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[12px] text-faint transition-colors hover:text-dim"
       >
         <span aria-hidden="true">←</span>
         Back to report
       </Link>
 
-      <Panel className="overflow-hidden">
+      <Panel className="shrink-0 overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 p-5">
           <SeverityBadge severity={finding.severity} />
           <h1 className="text-xl font-semibold tracking-tight text-fg">{finding.title}</h1>
@@ -112,7 +122,13 @@ export function FindingLayout() {
         </div>
       </Panel>
 
-      <Outlet context={context} />
+      {fillHeight ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Outlet context={context} />
+        </div>
+      ) : (
+        <Outlet context={context} />
+      )}
     </div>
   );
 }

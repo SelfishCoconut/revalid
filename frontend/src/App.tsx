@@ -81,7 +81,16 @@ export function App() {
           </NavLink>
         </header>
 
-        <main className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${contentWidth}`}>
+        {/* The cockpit routes fill the viewport via a flex height-chain (main →
+            FindingLayout → console), so the retest console sizes to the real
+            space left instead of guessing it with a magic `calc(100dvh-…rem)`
+            that overflowed when the finding chrome was taller than the guess
+            (#202). Other routes keep block flow so long pages scroll normally. */}
+        <main
+          className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${contentWidth} ${
+            cockpitRoute ? "flex min-h-0 flex-col" : ""
+          }`}
+        >
           <Routes>
             <Route path="/" element={<ReportsOverview />} />
             <Route path="/chat" element={<Chat />} />
