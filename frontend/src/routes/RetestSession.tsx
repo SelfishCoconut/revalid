@@ -137,7 +137,7 @@ function statusLabel(status: string): string {
     thinking: "Working",
     running_command: "Working",
     awaiting_command: "Awaiting your approval",
-    needs_guidance: "Paused — needs you",
+    needs_guidance: "Waiting for you",
     stopped: "Paused by you",
     concluded: "Concluded",
     given_up: "Ended",
@@ -504,7 +504,7 @@ export function RetestSession({
     // to its edge, the way a chat app behaves.
     <div
       className={`flex flex-col gap-3 ${
-        embedded ? "h-[calc(100dvh-20rem)]" : "h-[calc(100dvh-9rem)]"
+        embedded ? "h-[calc(100dvh-16rem)]" : "h-[calc(100dvh-8rem)]"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -609,8 +609,11 @@ export function RetestSession({
         </div>
       </div>
 
-      {/* main: the goal (full width, right below the stages bar) then the boxed chat */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* main: the goal (capped) then the boxed chat. This column and the docked
+          terminal below share the vertical space ~3:2 (grow-[3] vs grow-[2]) so the
+          conversation is the dominant panel instead of being squeezed to its floor
+          by a tall goal + an open terminal (#202). */}
+      <div className="flex min-h-0 grow-[3] basis-0 flex-col gap-3">
         {/* Current goal — the user-owned checklist, full width below the stages bar (FR-17 6b-ii). */}
         <Panel className="shrink-0">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
@@ -619,7 +622,9 @@ export function RetestSession({
               <Eyebrow>Current goal</Eyebrow>
             </span>
           </div>
-          <div className="space-y-3 p-4">
+          {/* Capped + scrollable (#202): the goal is set-once reference, so a long
+              goal/scope scrolls here instead of starving the conversation below. */}
+          <div className="max-h-40 space-y-3 overflow-y-auto p-4">
             {targetEndpoints.length > 0 && (
               <div className="rounded-lg border border-line bg-panel-2/40 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
@@ -722,7 +727,7 @@ export function RetestSession({
         {/* A modest floor, not 20rem: the root is now a fixed height (#163), so an
             over-tall floor here would push the composer out of the console when the
             terminal is expanded. The thread scrolls internally instead. */}
-        <Panel className="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
+        <Panel className="flex min-h-[9rem] flex-1 flex-col overflow-hidden">
           <PanelHeader eyebrow="Conversation" />
           <div
             ref={chatRef}
@@ -783,10 +788,10 @@ export function RetestSession({
                 <div>
                   <span className="flex items-center gap-2 text-iris-fg">
                     <AlertIcon />
-                    <Eyebrow>Paused — needs your guidance</Eyebrow>
+                    <Eyebrow>Over to you</Eyebrow>
                   </span>
                   <p className="mt-1 text-sm text-fg">
-                    {guidanceReason(events) ?? "The agent asked for your guidance."}
+                    {guidanceReason(events) ?? "The agent handed back — your move."}
                   </p>
                   <p className="mt-1 text-xs text-dim">
                     Reply below to keep it going — your message is the steer. Or conclude the retest
@@ -1066,7 +1071,13 @@ export function RetestSession({
       {/* Terminal — docked below the conversation: executed output plus your own
           prompt. A command you run here executes once in the isolated sandbox and
           the agent observes it on its next turn, as if it had run it itself. */}
-      <Panel className="shrink-0">
+      <Panel
+        className={
+          terminalOpen
+            ? "flex min-h-[7rem] grow-[2] basis-0 flex-col overflow-hidden"
+            : "shrink-0"
+        }
+      >
         <button
           type="button"
           onClick={() => {
@@ -1087,8 +1098,10 @@ export function RetestSession({
           </span>
         </button>
         {terminalOpen && (
-          <div className="space-y-2 p-3">
-            <RetestTerminal lines={terminalLines} />
+          <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+            <div className="min-h-0 flex-1">
+              <RetestTerminal lines={terminalLines} />
+            </div>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
