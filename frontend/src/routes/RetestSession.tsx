@@ -46,6 +46,7 @@ import { errorMessage } from "../lib/format";
 import {
   autoApprovedSeqs,
   currentFreeLaunch,
+  errorReason,
   givenUpReason,
   guidanceReason,
 } from "../lib/sessionDerivations";
@@ -255,7 +256,11 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
   const { events, status, verdict, thinking } = useRetestSession(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [terminalOpen, setTerminalOpen] = useState(true);
+  // Default the terminal collapsed: guided mode is driven from the chat composer,
+  // so on a normal viewport the conversation and goal should own the height. The
+  // terminal (raw output + the operator `!` prompt) is one click away when wanted
+  // (#202). Command output still surfaces in the chat as the agent narrates it.
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(true);
   const [input, setInput] = useState("");
   const [command, setCommand] = useState("");
@@ -623,7 +628,7 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
           </span>
         </button>
         {goalOpen && (
-          <div className="max-h-36 space-y-3 overflow-y-auto p-4">
+          <div className="max-h-52 space-y-3 overflow-y-auto p-4">
             {targetEndpoints.length > 0 && (
               <div className="rounded-lg border border-line bg-panel-2/40 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
@@ -822,6 +827,43 @@ export function RetestSession({ sessionId }: { sessionId: number }) {
               <p className="mt-1 text-sm text-warn-fg">
                 {givenUpReason(events) ?? "The agent stopped without a determination."}
               </p>
+            </div>
+          ) : status === "error" ? (
+            // A run failed at an orchestration boundary (e.g. the sandbox could not
+            // be provisioned). `error` is terminal, so the composer is disabled —
+            // without this banner the console just looks frozen (#202 follow-up).
+            // Surface the reason and keep Restart in reach, so the operator is never
+            // stranded on a dead screen.
+            <div
+              role="alert"
+              aria-label="error"
+              className="space-y-3 rounded-lg border border-danger/50 bg-danger/10 p-4"
+            >
+              <div>
+                <span className="flex items-center gap-2 text-danger-fg">
+                  <AlertIcon />
+                  <Eyebrow>Retest error</Eyebrow>
+                </span>
+                <p className="mt-1 text-sm text-danger-fg">
+                  {errorReason(events) ?? "The run failed before it could continue."}
+                </p>
+                <p className="mt-1 text-xs text-dim">
+                  Restart to try again with the same goal and scope.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={findingId === null || restartMutation.isPending}
+                  onClick={() => {
+                    if (findingId !== null)
+                      restartMutation.mutate({ findingId, goal: planSteps, scope: targetEndpoints });
+                  }}
+                >
+                  <RestartIcon />
+                  Restart
+                </Button>
+              </div>
             </div>
           ) : (
             verdict && (

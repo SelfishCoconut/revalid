@@ -94,7 +94,7 @@ export function FindingLayout() {
   return (
     <div
       className={
-        fillHeight ? "rev-rise flex min-h-0 flex-1 flex-col gap-6" : "rev-rise space-y-6"
+        fillHeight ? "rev-rise flex min-h-0 flex-1 flex-col gap-3" : "rev-rise space-y-6"
       }
     >
       <Link
@@ -106,12 +106,19 @@ export function FindingLayout() {
       </Link>
 
       <Panel className="shrink-0 overflow-hidden">
-        <div className="flex flex-wrap items-center gap-3 p-5">
+        {/* On the retest stage this header is compacted (tighter padding, smaller
+            title) so the console below gets more height — the stepper stays for
+            navigation, just slimmer (#202). */}
+        <div className={`flex flex-wrap items-center gap-3 ${fillHeight ? "px-5 py-2.5" : "p-5"}`}>
           <SeverityBadge severity={finding.severity} />
-          <h1 className="text-xl font-semibold tracking-tight text-fg">{finding.title}</h1>
+          <h1
+            className={`${fillHeight ? "text-base" : "text-xl"} font-semibold tracking-tight text-fg`}
+          >
+            {finding.title}
+          </h1>
           <span className="font-mono text-[11px] text-faint">v{finding.version}</span>
         </div>
-        <div className="border-t border-line bg-panel-2/30 px-4 py-4">
+        <div className={`border-t border-line bg-panel-2/30 px-4 ${fillHeight ? "py-2.5" : "py-4"}`}>
           <PipelineTrack
             sessionExists={sessions.length > 0}
             hasVerdict={findingVerdicts.length > 0}

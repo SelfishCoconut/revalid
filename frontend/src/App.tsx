@@ -87,8 +87,8 @@ export function App() {
             that overflowed when the finding chrome was taller than the guess
             (#202). Other routes keep block flow so long pages scroll normally. */}
         <main
-          className={`mx-auto w-full min-w-0 flex-1 px-5 py-8 ${contentWidth} ${
-            cockpitRoute ? "flex min-h-0 flex-col" : ""
+          className={`mx-auto w-full min-w-0 flex-1 px-5 ${contentWidth} ${
+            cockpitRoute ? "flex min-h-0 flex-col py-5" : "py-8"
           }`}
         >
           <Routes>

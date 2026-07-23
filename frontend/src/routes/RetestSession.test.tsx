@@ -295,14 +295,19 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    // `$ curl …` + one stdout line = 2 terminal lines; the docked terminal body renders.
+    // The terminal is collapsed by default (#202): the header still shows the
+    // line count (`$ curl …` + one stdout line = 2 lines), but the body is hidden.
     expect(screen.getByText(/2 lines/)).toBeInTheDocument();
-    expect(screen.getByTestId("retest-terminal")).toBeInTheDocument();
+    expect(screen.queryByTestId("retest-terminal")).not.toBeInTheDocument();
 
-    // The header doubles as the collapse toggle: hides the terminal body, keeps the count.
+    // The header doubles as the toggle: opening reveals the body and keeps the count …
+    await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
+    expect(screen.getByTestId("retest-terminal")).toBeInTheDocument();
+    expect(screen.getByText(/2 lines/)).toBeInTheDocument();
+
+    // … and collapsing it again hides the body.
     await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
     expect(screen.queryByTestId("retest-terminal")).not.toBeInTheDocument();
-    expect(screen.getByText(/2 lines/)).toBeInTheDocument();
   });
 
   it("runs a command typed into the terminal prompt (agent observes it)", async () => {
@@ -317,6 +322,8 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
+    // The terminal is collapsed by default (#202) — open it to reach its prompt.
+    await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
     // No `!` prefix any more — commands go straight into the terminal's own prompt.
     await userEvent.type(screen.getByLabelText(/terminal command input/i), "whoami");
     await userEvent.click(screen.getByRole("button", { name: /run/i }));
@@ -433,7 +440,7 @@ describe("RetestSession", () => {
     expect(screen.getByText(/2 lines/)).toBeInTheDocument();
   });
 
-  it("disables the terminal command prompt once the session is over", () => {
+  it("disables the terminal command prompt once the session is over", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
       status: "concluded",
@@ -444,6 +451,8 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
+    // Collapsed by default (#202); open it to reach the (disabled) prompt.
+    await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
     expect(screen.getByLabelText(/terminal command input/i)).toBeDisabled();
   });
 
@@ -640,12 +649,14 @@ describe("RetestSession", () => {
     expect(client.concludeSession).toHaveBeenCalledWith(1, "fixed", "patched by hand");
   });
 
-  it("keeps the composer and terminal usable while paused for guidance", () => {
+  it("keeps the composer and terminal usable while paused for guidance", async () => {
     mockPaused();
     renderAt(1);
     // needs_guidance is non-terminal: the operator steers by chatting and running
     // commands, so neither input is disabled.
     expect(screen.getByLabelText(/message the agent/i)).not.toBeDisabled();
+    // The terminal is collapsed by default (#202); open it to reach its prompt.
+    await userEvent.click(screen.getByRole("button", { name: /terminal/i }));
     expect(screen.getByLabelText(/terminal command input/i)).not.toBeDisabled();
   });
 

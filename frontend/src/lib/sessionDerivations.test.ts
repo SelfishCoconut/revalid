@@ -4,6 +4,7 @@ import type { SessionEvent } from "../api/client";
 import {
   autoApprovedSeqs,
   currentFreeLaunch,
+  errorReason,
   givenUpReason,
 } from "./sessionDerivations";
 
@@ -33,6 +34,19 @@ describe("givenUpReason", () => {
   });
   it("returns null when no verdict is present", () => {
     expect(givenUpReason([ev("command_output")])).toBeNull();
+  });
+});
+
+describe("errorReason", () => {
+  it("returns the detail of the latest error event", () => {
+    const events = [
+      ev("error", { detail: "the sandbox extra is required" }, 1),
+      ev("state_change", { to: "error" }, 2),
+    ];
+    expect(errorReason(events)).toBe("the sandbox extra is required");
+  });
+  it("returns null when no error event is present", () => {
+    expect(errorReason([ev("command_output")])).toBeNull();
   });
 });
 

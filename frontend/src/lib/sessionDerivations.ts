@@ -34,6 +34,18 @@ export function guidanceReason(events: SessionEvent[]): string | null {
 }
 
 /**
+ * The detail of a session that hit an orchestration error — a run that failed
+ * before it could continue (e.g. the sandbox could not be provisioned). The
+ * `detail` on the latest `error` event, or null if none has arrived. Surfaced so
+ * an errored session shows *why* and offers a restart, instead of a dead console.
+ */
+export function errorReason(events: SessionEvent[]): string | null {
+  const failed = [...events].reverse().find((e) => e.kind === "error");
+  if (!failed) return null;
+  return String(failed.payload.detail ?? "") || null;
+}
+
+/**
  * Seqs of `command_proposed` events that were auto-approved under free-launch —
  * a proposal whose next command decision in the (strictly ordered) transcript is
  * a `command_approved` flagged `auto`. Used to tag auto-run commands in the chat
