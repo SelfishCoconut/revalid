@@ -388,7 +388,7 @@ def test_regenerate_goal_endpoint_reseeds() -> None:
         assert updates[-1]["payload"]["steps"] == _GOAL_STEPS
 
 
-def test_retest_session_flow_proposes_then_concludes_on_approval() -> None:
+def test_retest_session_flow_proposes_approves_then_hands_back() -> None:
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
         started = client.post("/api/findings/1/retest-session")
@@ -404,9 +404,13 @@ def test_retest_session_flow_proposes_then_concludes_on_approval() -> None:
         assert approve.status_code == 202
 
         final = client.get(f"/api/retest-sessions/{sid}").json()
-        assert final["status"] == "concluded"
-        assert final["verdict_status"] == "still_open"
+        # Guided (ADR-0039): the command runs, but the agent's `still_open` is a
+        # recommendation — the session hands back rather than recording a verdict.
+        assert final["status"] == "needs_guidance"
+        assert final["verdict_status"] is None
         assert any(e["kind"] == "command_output" for e in final["events"])
+        guidance = next(e for e in final["events"] if e["kind"] == "needs_guidance")
+        assert "auth still bypassable" in guidance["payload"]["reason"]
 
 
 def test_retest_session_rejecting_the_command_records_the_reason() -> None:
@@ -565,7 +569,11 @@ def test_retest_session_message_delivered_on_next_decision() -> None:
         client.post(f"/api/retest-sessions/{sid}/commands/{cid}/approve")
 
         final = client.get(f"/api/retest-sessions/{sid}").json()
-        assert final["verdict_rationale"] == "saw-message"
+        # Guided (ADR-0039): the agent read the message, then handed back — its
+        # "saw-message" determination lands in the guidance reason, not a verdict.
+        assert final["status"] == "needs_guidance"
+        guidance = next(e for e in final["events"] if e["kind"] == "needs_guidance")
+        assert "saw-message" in guidance["payload"]["reason"]
 
 
 def test_start_session_in_free_launch_auto_runs_to_verdict() -> None:
@@ -720,12 +728,14 @@ def test_pause_then_operator_conclude_writes_a_verdict() -> None:
         assert [v["status"] for v in verdicts] == ["fixed"]
 
 
-def test_guidance_message_alone_resumes_the_agent_to_a_verdict() -> None:
+def test_guidance_message_alone_resumes_the_agent() -> None:
     """A reply at a guidance pause *is* "keep going" (#163) — no `/continue` needed.
 
     ADR-0034 paused the session when the agent handed back; the operator's reply
-    now both steers and resumes it, so the determination lands off the message
-    alone. This is what retires the "Keep going" button.
+    now both steers and resumes it. In guided mode (ADR-0039) the resumed agent
+    *recommends* a determination for the operator to confirm rather than recording
+    it itself — so the reply lands a fresh guidance hand-back citing the steer, and
+    this is still what retires the "Keep going" button.
     """
     with _paused_client(script_inconclusive_then_conclude_on_message) as client:
         client.post("/api/findings/import", json=_IMPORT)
@@ -735,5 +745,7 @@ def test_guidance_message_alone_resumes_the_agent_to_a_verdict() -> None:
         resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
         assert resp.status_code == 202
         state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "concluded"
-        assert state["verdict_status"] == "still_open"
+        assert state["status"] == "needs_guidance"  # resumed, then handed back a recommendation
+        assert state["verdict_status"] is None
+        guidance = [e for e in state["events"] if e["kind"] == "needs_guidance"]
+        assert "with the operator's steer, confirmed open" in guidance[-1]["payload"]["reason"]

@@ -300,8 +300,20 @@ def test_adjudicate_unknown_session_is_a_noop() -> None:
         rs.adjudicate_verdict(session, 999, VerdictStatus.FIXED, "n/a")  # must not raise
 
 
-def test_full_cycle_proposes_runs_and_concludes() -> None:
-    """start_and_step pauses on the proposed command; approving runs it and concludes."""
+def _latest_guidance_reason(session: Session, session_id: int) -> str:
+    """The reason carried by the most recent needs_guidance pause (ADR-0034/0039)."""
+    guidance = [
+        e
+        for e in rs.load_events_after(session, session_id, 0)
+        if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value
+    ]
+    assert guidance, "expected a needs_guidance pause"
+    return str(guidance[-1]["payload"]["reason"])
+
+
+def test_guided_approve_runs_command_then_hands_back() -> None:
+    """Guided mode (ADR-0039): approving runs the command, then hands back — it never
+    chains to a verdict. The agent's determination is a recommendation, not a ruling."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
@@ -319,20 +331,22 @@ def test_full_cycle_proposes_runs_and_concludes() -> None:
         cid = _pending_cid(registry, s.id)
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
         session.refresh(s)
-        assert s.status == RetestSessionStatus.CONCLUDED.value
-        assert s.verdict_status == "still_open"
-        assert box.commands and box.stopped  # ran once, torn down
+        # The command ran, but the agent's `still_open` is surfaced as a recommendation
+        # at a guidance pause — no terminal verdict, sandbox kept alive for the operator.
+        assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+        assert s.verdict_status is None
+        assert box.commands and not box.stopped  # ran once, NOT torn down
+        assert "auth still bypassable" in _latest_guidance_reason(session, s.id)
 
         events_before = rs.load_events_after(session, s.id, 0)
-        # A repeat decision with the same (now-consumed) cid must no-op: the live
-        # session was already torn down on conclude, so no command runs twice and
-        # no extra transcript event is appended (final-review Fix 1).
+        # A repeat decision with the now-consumed cid must no-op: the pending call was
+        # cleared on approval, so no command runs twice and no event is appended.
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
         session.refresh(s)
         events_after = rs.load_events_after(session, s.id, 0)
     assert len(box.commands) == 1  # still exactly one execution, not two
     assert events_after == events_before
-    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
 
 
 def test_apply_decision_wrong_command_id_is_a_noop() -> None:
@@ -359,8 +373,9 @@ def test_apply_decision_wrong_command_id_is_a_noop() -> None:
     assert live is not None and live.pending_call_id is not None  # still pending, untouched
 
 
-def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
-    """Denying the proposed command never touches the sandbox but still resumes the run."""
+def test_apply_decision_reject_never_executes_but_still_hands_back() -> None:
+    """Denying the proposed command never touches the sandbox; the resumed agent then
+    hands back (guided, ADR-0039) instead of the command silently running."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
@@ -378,7 +393,7 @@ def test_apply_decision_reject_never_executes_and_still_concludes() -> None:
         kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
     assert "command_rejected" in kinds
     assert box.commands == []
-    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
 
 
 def test_free_launch_auto_runs_command_to_verdict() -> None:
@@ -405,12 +420,10 @@ def test_free_launch_auto_runs_command_to_verdict() -> None:
     assert not any(e["kind"] == SessionEventKind.COMMAND_REJECTED.value for e in events)
 
 
-def test_session_never_pauses_on_a_step_count() -> None:
-    """With the step budget removed, a session gates commands indefinitely (ADR-0034).
-
-    It only ever pauses when the *agent* hands back — never on a step count — so an
-    operator can keep approving as long as the agent keeps proposing.
-    """
+def test_guided_parks_after_one_command_discarding_the_next_proposal() -> None:
+    """Guided mode does exactly one action then parks (ADR-0039): even an agent that
+    keeps proposing is stopped after a single approved command, its next proposal
+    surfaced as an advisory suggestion rather than opening another gate."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
@@ -421,16 +434,47 @@ def test_session_never_pauses_on_a_step_count() -> None:
         )
         agent = build_retest_agent(streaming(script_always_propose))  # never concludes
         start_and_step(session, registry, s.id, agent, box, "Retest.")
-        # Approve well past any former finite default (8) — it keeps gating each
-        # command, never pausing for guidance.
-        for _ in range(12):
-            apply_decision(
-                session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
-            )
+        apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
         session.refresh(s)
-    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # still gating, never paused
-    assert len(box.commands) == 12
-    assert registry.get(s.id) is not None
+        live = registry.get(s.id)
+        reason = _latest_guidance_reason(session, s.id)
+        events = rs.load_events_after(session, s.id, 0)
+        proposed = [e for e in events if e["kind"] == "command_proposed"]
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # parked, not re-gated
+    assert len(box.commands) == 1  # exactly one command ran
+    assert live is not None and live.pending_call_id is None  # the next proposal was discarded
+    assert not box.stopped  # sandbox kept alive so the operator can keep steering
+    assert "keep probing" in reason  # the discarded proposal surfaced as a suggestion
+    assert len(proposed) == 1  # only the first (approved) command was ever gated
+
+
+def test_continue_after_a_guided_discard_park_resumes_cleanly() -> None:
+    """After a guided one-action park that discarded a proposal, continuing re-runs the
+    agent from the trimmed history without error and gates its next command (ADR-0039)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = FakeSandbox(
+            lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1)
+        )
+        agent = build_retest_agent(streaming(script_always_propose))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")
+        apply_decision(
+            session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
+        )
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # parked (proposal discarded)
+        rs.submit_message(session, registry, s.id, "keep going then")
+        rs.continue_session(session, registry, s.id)  # re-run from the trimmed history
+        session.refresh(s)
+        live = registry.get(s.id)
+    assert s.status == RetestSessionStatus.AWAITING_COMMAND.value  # proposes again, gated
+    assert live is not None and live.pending_call_id is not None
+    assert len(box.commands) == 1  # the re-proposal awaits approval; nothing ran yet
 
 
 def test_agent_inconclusive_conclusion_pauses_for_guidance() -> None:
@@ -454,8 +498,10 @@ def test_agent_inconclusive_conclusion_pauses_for_guidance() -> None:
     assert guidance[-1]["payload"]["reason"] == "exhausted my options, need guidance"
 
 
-def test_continue_with_guidance_resumes_the_agent_to_a_verdict() -> None:
-    """Keep going after an exhausted-options pause re-runs the agent with the operator's steer."""
+def test_continue_after_guidance_resumes_with_the_operators_steer() -> None:
+    """Keep going after an exhausted-options pause re-runs the agent with the operator's
+    steer (ADR-0034); in guided mode the steered agent *recommends* a determination for
+    the operator to confirm rather than recording it itself (ADR-0039)."""
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
@@ -469,8 +515,11 @@ def test_continue_with_guidance_resumes_the_agent_to_a_verdict() -> None:
         rs.submit_message(session, registry, s.id, "try the admin endpoint")  # operator steer
         rs.continue_session(session, registry, s.id)  # re-runs the agent with the message
         session.refresh(s)
-    assert s.status == RetestSessionStatus.CONCLUDED.value  # the steer let it conclude
-    assert s.verdict_status == "still_open"
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # a recommendation, not a ruling
+    assert s.verdict_status is None
+    # The steer reached the agent: its second turn concluded citing the operator's steer.
+    assert "with the operator's steer, confirmed open" in reason
 
 
 def test_conclude_session_records_operator_verdict_and_tears_down() -> None:
@@ -829,8 +878,9 @@ def test_agent_observes_human_command_on_next_turn() -> None:
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
 
         session.refresh(s)
-    assert s.status == RetestSessionStatus.CONCLUDED.value
-    assert s.verdict_rationale == "saw-operator"  # the agent read the operator activity
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "saw-operator" in reason  # the agent read the operator activity, then handed back
 
 
 def test_reject_folds_operator_activity_into_the_denial() -> None:
@@ -850,7 +900,9 @@ def test_reject_folds_operator_activity_into_the_denial() -> None:
         apply_decision(session, registry, s.id, approved=False, reason="not that", command_id=cid)
 
         session.refresh(s)
-    assert s.verdict_rationale == "saw-operator"
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "saw-operator" in reason
 
 
 def test_submit_human_command_on_dead_session_is_a_noop() -> None:
@@ -902,7 +954,9 @@ def test_agent_reads_queued_message_on_approve() -> None:
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
 
         session.refresh(s)
-    assert s.verdict_rationale == "saw-message"
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "saw-message" in reason
 
 
 def test_agent_reads_queued_message_on_reject() -> None:
@@ -920,7 +974,9 @@ def test_agent_reads_queued_message_on_reject() -> None:
         apply_decision(session, registry, s.id, approved=False, reason="no", command_id=cid)
 
         session.refresh(s)
-    assert s.verdict_rationale == "saw-message"
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "saw-message" in reason
 
 
 def test_no_message_means_no_extra_user_turn() -> None:
@@ -937,7 +993,9 @@ def test_no_message_means_no_extra_user_turn() -> None:
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
 
         session.refresh(s)
-    assert s.verdict_rationale == "no-message"
+        reason = _latest_guidance_reason(session, s.id)
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "no-message" in reason
 
 
 def test_respond_emits_agent_message_through_the_orchestrator() -> None:
@@ -960,7 +1018,8 @@ def test_respond_emits_agent_message_through_the_orchestrator() -> None:
     prose = [e for e in events if e["kind"] == "agent_message"]
     assert len(prose) == 1
     assert prose[0]["payload"]["text"] == "the 500 was the WAF rejecting the payload"
-    assert s.status == RetestSessionStatus.CONCLUDED.value
+    # Guided (ADR-0039): the agent's `still_open` is a recommendation, so it hands back.
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
 
 
 def test_set_goal_records_plan_updated_and_queues_for_agent() -> None:
@@ -1028,5 +1087,8 @@ def test_queued_goal_is_injected_into_the_next_turn() -> None:
         rs.set_goal(session, registry, s.id, ["focus on the admin endpoint"])
         apply_decision(session, registry, s.id, approved=True, command_id=cid)
         session.refresh(s)
-    # The goal injection is delivered as a user turn -> the model reports "saw-message".
-    assert s.verdict_rationale == "saw-message"
+        reason = _latest_guidance_reason(session, s.id)
+    # The goal injection is delivered as a user turn -> the model reports "saw-message",
+    # surfaced in the guided hand-back reason (ADR-0039).
+    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert "saw-message" in reason

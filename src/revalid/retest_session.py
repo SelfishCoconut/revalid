@@ -492,6 +492,9 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
         emit_output=emit,
         drain_observations=live.drain,
         emit_message=emit_message,
+        # Selects the agent's persona for this turn (ADR-0039): read live so a
+        # mid-session Auto-run toggle switches guided ↔ autonomous next turn.
+        free_launch=live.free_launch,
     )
 
 
@@ -523,11 +526,48 @@ def _emit_proposal(session: Session, session_id: int, live: LiveSession, call: A
     )
 
 
+def _suggestion_reason(call: Any) -> str:
+    """Frame a guided-mode command the agent proposed post-run as an advisory suggestion.
+
+    In guided mode the agent's own next proposal is never opened as a gate
+    (ADR-0039); it is surfaced here as text in the hand-back so the operator can
+    act on it, ask for something else, or conclude — the operator drives, the
+    agent advises.
+    """
+    args = call.args_as_dict()
+    command = str(args.get("command", "")).strip()
+    rationale = str(args.get("rationale", "")).strip()
+    lead = (
+        f"I ran that. Next I'd suggest:\n`{command}`"
+        if command
+        else "Ready for your next instruction."
+    )
+    if rationale:
+        lead += f"\n({rationale})"
+    return f"{lead}\n\nTell me to go ahead, point me elsewhere, or conclude the retest."
+
+
+def _recommendation_reason(output: ConcludeOutput) -> str:
+    """Frame a guided-mode determination as a recommendation, not a ruling (ADR-0039).
+
+    The agent never records a terminal verdict while guided: its ``fixed``/
+    ``still_open`` is surfaced as advice for the operator to confirm (Conclude) or
+    overrule by steering further.
+    """
+    label = output.status.value.replace("_", " ")
+    return (
+        f"Based on that, I think this finding is {label}: {output.rationale}\n\n"
+        "Conclude to record this, adjust it, or keep steering me."
+    )
+
+
 def _dispatch_output(
     session: Session,
     registry: SessionRegistry,
     session_id: int,
     result: AgentRunResult[ConcludeOutput | DeferredToolRequests],
+    *,
+    after_command: bool = False,
 ) -> None:
     """Persist the outcome of one agent step: a proposed command or a verdict.
 
@@ -536,14 +576,28 @@ def _dispatch_output(
         registry: The live-session registry (to update transcript/pending state).
         session_id: The retest session this step belongs to.
         result: The run result just produced by ``agent.run_sync``.
+        after_command: ``True`` when this step *ran* a command (an approved
+            resume), which in guided mode is the one-action boundary: the session
+            hands back rather than chaining the agent's next proposal (ADR-0039).
     """
     live = registry.get(session_id)
     if live is None:
         return
     live.messages = result.all_messages()
     output = result.output
+    guided = not live.free_launch
     if isinstance(output, DeferredToolRequests) and output.approvals:
-        _emit_proposal(session, session_id, live, output.approvals[0])
+        proposal = output.approvals[0]
+        if guided and after_command:
+            # Guided one-action-then-park (ADR-0039): the operator's command has
+            # run, so do NOT chain into the next gate. Drop the fresh proposal —
+            # trimming the unresolved approval call from the history so a later
+            # continue resumes from a clean state — and hand back, surfacing the
+            # proposed command as an advisory suggestion rather than a demand.
+            live.messages = result.all_messages()[:-1]
+            _pause_for_guidance(session, registry, session_id, _suggestion_reason(proposal))
+            return
+        _emit_proposal(session, session_id, live, proposal)
         # If the operator pressed Stop while this step was thinking (issue #150),
         # hold the freshly proposed command and park in `stopped` rather than
         # opening the gate; Resume re-opens it. The pending call is retained.
@@ -555,6 +609,11 @@ def _dispatch_output(
             # options it can think of and asks the operator to steer or conclude
             # (ADR-0034). No verdict is written; the sandbox stays alive.
             _pause_for_guidance(session, registry, session_id, output.rationale)
+        elif guided:
+            # Guided mode never self-concludes (ADR-0039): the agent's `fixed`/
+            # `still_open` is a *recommendation*, surfaced for the operator to
+            # confirm (Conclude) — only the operator records a terminal verdict.
+            _pause_for_guidance(session, registry, session_id, _recommendation_reason(output))
         else:
             record_verdict(session, session_id, output.status, output.rationale)
             _teardown(registry, session_id)
@@ -795,7 +854,10 @@ def _resume_with_decision(
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
         return
-    _dispatch_output(session, registry, session_id, result)
+    # An approval *ran a command*: in guided mode that is the one-action boundary,
+    # so the session hands back instead of chaining the agent's next proposal
+    # (ADR-0039). A rejection ran nothing, so its follow-up proposal gates as usual.
+    _dispatch_output(session, registry, session_id, result, after_command=approved)
 
 
 def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) -> None:
