@@ -8,11 +8,17 @@ system test.
 
 from __future__ import annotations
 
+import base64
+import re
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from revalid.sandbox import (
     EGRESS_PROXY_PORT,
     CommandResult,
+    DockerSandbox,
     FakeSandbox,
     SandboxUnavailableError,
     egress_probe_command,
@@ -103,3 +109,104 @@ def test_squid_allowlist_denies_all_but_the_scoped_domains() -> None:
     assert "http_access allow scoped" in conf
     # The closed default — anything not scoped is denied (no open relay).
     assert "http_access deny all" in conf
+
+
+def test_proxy_launch_writes_a_real_multi_line_squid_config() -> None:
+    """The launch one-liner must reconstruct the config *with real newlines*.
+
+    Regression (issue #226): the original built the command as
+    ``printf '%s' {config!r}``. Python's ``repr`` escapes newlines to the two
+    characters ``\\n`` and ``printf '%s'`` does not interpret escapes, so Squid
+    got a single-line file full of literal ``\\n``, died on it, and every
+    online-scope retest silently had no route to its target. Asserting on the
+    *decoded payload* pins the property that actually matters — what lands in
+    ``squid.conf`` — rather than the shape of the shell string.
+    """
+    box = DockerSandbox(session_id=3)
+    launch = box._proxy_launch(("www.hackthissite.org",))
+
+    encoded = launch.split("echo ", 1)[1].split(" |", 1)[0]
+    written = base64.b64decode(encoded).decode()
+
+    assert written == squid_allowlist_config(("www.hackthissite.org",))
+    assert written.splitlines()[0] == f"http_port {EGRESS_PROXY_PORT}"
+    assert len(written.splitlines()) == 5
+    # The exact defect: no literal backslash-n may survive into the config.
+    assert "\\n" not in written
+    # base64 payloads are shell-safe, so no quoting rule can mangle the config.
+    assert re.fullmatch(r"[A-Za-z0-9+/=]+", encoded)
+
+
+class _FakeContainer:
+    """Minimal stand-in for a docker-py container."""
+
+    def __init__(self, ip: str = "172.30.0.2") -> None:
+        self.attrs = {"NetworkSettings": {"Networks": {"revalid-retest-5": {"IPAddress": ip}}}}
+
+    def reload(self) -> None:
+        """No-op: the fake's attrs are already populated."""
+
+
+class _FakeNetworks:
+    def __init__(self) -> None:
+        self.created: list[dict[str, object]] = []
+
+    def create(self, name: str, **kwargs: object) -> object:
+        self.created.append({"name": name, **kwargs})
+        return object()
+
+    def get(self, _name: str) -> Any:
+        return SimpleNamespace(connect=lambda _c: None)
+
+
+class _FakeContainers:
+    def __init__(self) -> None:
+        self.runs: list[dict[str, Any]] = []
+
+    def run(self, image: str, **kwargs: Any) -> _FakeContainer:
+        self.runs.append({"image": image, **kwargs})
+        return _FakeContainer()
+
+
+class _FakeDockerClient:
+    def __init__(self) -> None:
+        self.networks = _FakeNetworks()
+        self.containers = _FakeContainers()
+
+
+def test_online_proxy_overrides_the_image_entrypoint() -> None:
+    """The proxy shell must be passed as ``entrypoint``, never as ``command``.
+
+    Regression (issue #226): the Squid images declare
+    ``ENTRYPOINT ["entrypoint.sh"]`` with ``CMD ["-f", …, "-NYC"]``, so a
+    ``command=["sh", "-c", …]`` was handed to Squid as *its own* arguments —
+    the container died with "'-c': unrecognized option", the proxy never
+    listened, and the sandbox had no route out. Only overriding the entrypoint
+    actually gives our shell control.
+
+    Needs the optional ``sandbox`` extra: ``_start_online`` imports
+    ``docker.errors`` for its fail-closed except clause. The Docker *daemon* is
+    not needed — the client is a fake — so this runs anywhere the package is
+    installed, which is why CI's unit job syncs the extra.
+    """
+    pytest.importorskip("docker")
+    box = DockerSandbox(session_id=5)
+    client = _FakeDockerClient()
+
+    box._start_online(client, ("www.hackthissite.org",))
+
+    proxy_run = client.containers.runs[0]
+    assert proxy_run["entrypoint"][:2] == ["sh", "-c"]
+    assert "squid" in proxy_run["entrypoint"][2]
+    assert "command" not in proxy_run
+
+    # The session network stays internal: the proxy is the only way out.
+    assert client.networks.created[0]["internal"] is True
+
+    # The sandbox is pointed at the proxy for both schemes, upper and lower case
+    # (tools read one or the other).
+    env = client.containers.runs[1]["environment"]
+    expected = f"http://172.30.0.2:{EGRESS_PROXY_PORT}"
+    assert {env["http_proxy"], env["https_proxy"], env["HTTP_PROXY"], env["HTTPS_PROXY"]} == {
+        expected
+    }

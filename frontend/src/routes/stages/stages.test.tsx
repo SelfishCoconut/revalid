@@ -138,6 +138,74 @@ describe("ExtractStage", () => {
     // The CVSS was derived, the ATT&CK mapping was stated — exactly one badge.
     expect(screen.getAllByText("inferred")).toHaveLength(1);
   });
+
+  it("lets the operator score a finding that arrived with no taxonomy (FR-19)", async () => {
+    vi.mocked(client.editFinding).mockResolvedValue({ ...stageContext().finding, version: 2 });
+    renderStage(<ExtractStage />, stageContext());
+
+    await userEvent.type(
+      screen.getByLabelText(/cvss vector/i),
+      "CVSS:3.1/AV:N/AC:L/PR:N",
+    );
+    await userEvent.type(screen.getByLabelText(/cvss base score/i), "9.1");
+    await userEvent.type(screen.getByLabelText(/att&ck techniques/i), "T1190, T1110");
+    await userEvent.click(screen.getByRole("button", { name: /save as new version/i }));
+
+    await waitFor(() => {
+      expect(client.editFinding).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          cvss: { vector: "CVSS:3.1/AV:N/AC:L/PR:N", base_score: 9.1 },
+          mitre: { techniques: ["T1190", "T1110"] },
+        }),
+      );
+    });
+  });
+
+  it("resubmits an untouched taxonomy unchanged, so the server keeps its provenance", async () => {
+    const finding = {
+      ...stageContext().finding,
+      cvss: { vector: "CVSS:3.1/AV:N/AC:L", base_score: 9.8, inferred: true },
+      mitre: { techniques: ["T1190"], inferred: true },
+    };
+    vi.mocked(client.editFinding).mockResolvedValue({ ...finding, version: 2 });
+    renderStage(<ExtractStage />, stageContext({ finding }));
+
+    // Edit something else entirely and save.
+    await userEvent.type(screen.getByLabelText(/finding description/i), " corrected");
+    await userEvent.click(screen.getByRole("button", { name: /save as new version/i }));
+
+    await waitFor(() => {
+      expect(client.editFinding).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          // Sent verbatim and with no `inferred` key — provenance is the
+          // server's call, not the form's.
+          cvss: { vector: "CVSS:3.1/AV:N/AC:L", base_score: 9.8 },
+          mitre: { techniques: ["T1190"] },
+        }),
+      );
+    });
+  });
+
+  it("sends a null base score when the field is cleared", async () => {
+    const finding = {
+      ...stageContext().finding,
+      cvss: { vector: "CVSS:3.1/AV:N", base_score: 9.8, inferred: false },
+    };
+    vi.mocked(client.editFinding).mockResolvedValue({ ...finding, version: 2 });
+    renderStage(<ExtractStage />, stageContext({ finding }));
+
+    await userEvent.clear(screen.getByLabelText(/cvss base score/i));
+    await userEvent.click(screen.getByRole("button", { name: /save as new version/i }));
+
+    await waitFor(() => {
+      expect(client.editFinding).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ cvss: { vector: "CVSS:3.1/AV:N", base_score: null } }),
+      );
+    });
+  });
 });
 
 describe("StageRedirect", () => {

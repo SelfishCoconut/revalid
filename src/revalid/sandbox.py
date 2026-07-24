@@ -9,6 +9,7 @@ the nightly system test.
 
 from __future__ import annotations
 
+import base64
 import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
@@ -275,7 +276,13 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             self._proxy = client.containers.run(
                 egress_proxy_image(),
                 name=self._proxy_name,
-                command=["sh", "-c", self._proxy_launch(hosts)],
+                # `entrypoint`, not `command`: the Squid images ship an
+                # ENTRYPOINT that launches Squid itself and treats anything
+                # passed as *its* arguments, so a `command` here never ran — it
+                # arrived as `squid … sh -c '…'` and the container died on
+                # "'-c': unrecognized option". Overriding the entrypoint is what
+                # actually hands control to our shell.
+                entrypoint=["sh", "-c", self._proxy_launch(hosts)],
                 network=self._network_name,
                 detach=True,
                 auto_remove=False,
@@ -307,10 +314,22 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             ) from exc
 
     def _proxy_launch(self, hosts: tuple[str, ...]) -> str:
-        """A shell one-liner that writes the allowlist config and runs Squid in foreground."""
+        r"""A shell one-liner that writes the allowlist config and runs Squid in foreground.
+
+        The config is passed base64-encoded rather than interpolated as text.
+        The obvious ``printf '%s' {config!r}`` is broken in a way that fails
+        *silently at the wrong layer*: Python's ``repr`` escapes the newlines to
+        the two characters ``\\n``, and ``printf '%s'`` (unlike ``%b``) does not
+        interpret escapes, so Squid received a single-line file full of literal
+        ``\\n`` and died on it — leaving the sandbox with no route out and every
+        online-scope retest unable to reach its target. base64 output is
+        alphanumeric plus ``+/=``, so no quoting rule of any shell can mangle it,
+        whatever ends up in a hostname.
+        """
         config = squid_allowlist_config(hosts)
+        encoded = base64.b64encode(config.encode()).decode()
         return (
-            f"printf '%s' {config!r} > /etc/squid/squid.conf && "
+            f"echo {encoded} | base64 -d > /etc/squid/squid.conf && "
             "exec squid -N -f /etc/squid/squid.conf"
         )
 

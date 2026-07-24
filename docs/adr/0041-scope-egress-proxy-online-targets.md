@@ -90,3 +90,34 @@ scope's endpoints. The sandbox is provisioned against these hosts.
   (Docker + the `sandbox` extra), like the existing egress lock.
 - Supersedes the "the only reachable target is `revalid-juice-shop`" absolute in
   ADR-0025/0033 **for online scope**; the lab absolute still holds for lab scope.
+
+## Update (2026-07-25, issue #226) — the proxy path was broken from the start
+
+This ADR shipped with `DockerSandbox._start_online` marked `# pragma: no cover`
+and its live validation deferred to "a follow-up system test", which was never
+written. The path had **two** independent, fatal defects, and no online-scope
+retest could ever reach its target:
+
+1. The Squid config was interpolated as `printf '%s' {config!r}`. Python's
+   `repr` escapes newlines to the two characters `\n`, and `printf '%s'` does not
+   interpret escapes, so Squid was handed a single-line file of literal `\n`.
+2. The shell was passed as `command`, but the Squid images declare
+   `ENTRYPOINT ["entrypoint.sh"]` — so it arrived as arguments to Squid itself,
+   which exited with `FATAL: '-c': unrecognized option`.
+
+Both are fixed: the config is passed base64-encoded (immune to any shell quoting
+rule, whatever a hostname contains), and the shell is passed as `entrypoint`.
+The decision in this ADR is unchanged — only its implementation was wrong.
+
+**Now validated live**, against a real external host rather than in principle:
+from a sandbox scoped to `www.hackthissite.org`, the target returned HTTP 200 at
+both `/` and a deeper path, an off-scope `http://google.com` was refused by the
+proxy with **403 Forbidden** (proving the proxy is alive and denying, not merely
+absent), and off-scope HTTPS was refused at CONNECT. Two unit regression tests
+pin the defects that hid here: one asserts the *decoded* config has real
+newlines, the other that the proxy is launched via `entrypoint`.
+
+The lesson worth keeping: `# pragma: no cover` on a provisioning path meant a
+security-relevant component could ship completely non-functional while every gate
+stayed green. The pragma is still right — this code drives a live daemon — but
+the seams around it are now unit-tested.
