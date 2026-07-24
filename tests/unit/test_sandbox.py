@@ -183,7 +183,13 @@ def test_online_proxy_overrides_the_image_entrypoint() -> None:
     the container died with "'-c': unrecognized option", the proxy never
     listened, and the sandbox had no route out. Only overriding the entrypoint
     actually gives our shell control.
+
+    Needs the optional ``sandbox`` extra: ``_start_online`` imports
+    ``docker.errors`` for its fail-closed except clause. The Docker *daemon* is
+    not needed — the client is a fake — so this runs anywhere the package is
+    installed, which is why CI's unit job syncs the extra.
     """
+    pytest.importorskip("docker")
     box = DockerSandbox(session_id=5)
     client = _FakeDockerClient()
 

@@ -36,7 +36,12 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - run: uv sync --locked
+      # --extra sandbox: the retest sandbox's provisioning seams are unit-tested
+      # with a fake Docker client (no daemon), but importing them needs the
+      # `docker` package. Without the extra those tests skip — and skipping is
+      # how ADR-0041's egress proxy shipped completely non-functional with this
+      # job green (#226).
+      - run: uv sync --locked --extra sandbox
       - run: uv run pytest -m "not integration and not system" --cov --cov-report=xml --cov-report=term
       - uses: actions/upload-artifact@v7
         with:
