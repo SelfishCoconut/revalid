@@ -751,11 +751,13 @@ export function RetestSession({
             rather than a stack of disconnected boxes. */}
         {/* `flex-1` grows the panel to fill the space its parent hands down (#204),
             while a real `min-h` floor (#206) stops it collapsing when the terminal
-            is expanded — a crushed panel let the terminal overlap it. Its inner
+            is expanded — a crushed panel let the terminal overlap it. A `max-h`
+            ceiling (#209) caps how tall it grows on roomy viewports: past it the
+            panel stops growing and the transcript scrolls inside instead. Its inner
             `overflow-y-auto` keeps the transcript scrolling with the composer welded
             to the bottom edge; the page scrolls only once even this floor + the
             terminal exceed the viewport. */}
-        <Panel className="flex min-h-[18rem] flex-1 flex-col overflow-hidden">
+        <Panel className="flex min-h-[18rem] max-h-[48rem] flex-1 flex-col overflow-hidden">
           <PanelHeader eyebrow="Conversation" />
           <div
             ref={chatRef}
