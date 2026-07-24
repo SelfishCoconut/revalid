@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system test-demos sanity sandbox-image uml docs docs-serve thesis clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system test-demos sanity sandbox-image uml docs docs-serve thesis thesis-figs thesis-figs-check clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests scripts
@@ -178,3 +178,15 @@ thesis:
 clean:
 	rm -rf site .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov
 	cd thesis && latexmk -C TFG.tex 2>/dev/null || true
+
+# Thesis architecture figures — generated from the authored Mermaid sources in
+# docs/architecture/ so the memoir cannot drift from the documentation (#194).
+# Needs Node (npx) + a Chromium; the resulting PDFs are committed, so the LaTeX
+# build (local and thesis.yml) needs no JS toolchain. Re-run after editing a
+# diagram marked `<!-- thesis-fig: ... -->`.
+thesis-figs:
+	uv run python scripts/gen_thesis_figs.py
+
+# Fail if a marked diagram has no rendered PDF (no toolchain required).
+thesis-figs-check:
+	uv run python scripts/gen_thesis_figs.py --check
