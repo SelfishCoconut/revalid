@@ -20,7 +20,9 @@ without a human saying yes. What comes out is a verdict — `fixed` or
 |---|---|
 | **[How it works](architecture/workflow.md)** | The program narrative: what happens, in what order, and who is in control at each step. **Read this first.** |
 | [C4 model](architecture/c4.md) | Context, container and component diagrams, plus sequence diagrams for the wire-level detail. |
+| [Class model](architecture/class-model.md) | Curated class diagrams: the domain core, the persistence seam, the agentic session collaboration, the export document. |
 | [Requirements (SRS)](requirements/srs.md) | The FR/NFR catalogue driving the Kanban board, with per-requirement acceptance criteria. |
+| [Use-case model](requirements/use-cases.md) | Actors, use cases traced to requirements, and the decisive scenario expanded with its exception paths. |
 | [ADRs](adr/README.md) | The decision log (MADR). A decision without an ADR doesn't exist. |
 | [API reference](reference/api.md) | Generated from docstrings by mkdocstrings — edit the code, not the page. |
 | [UML](reference/uml.md) | Package dependencies plus a class diagram per group of modules, regenerated from the code by `pyreverse` on every build. |
@@ -52,9 +54,11 @@ proposal, approval, rejection, command output, operator message and verdict is a
 numbered row in an append-only transcript.
 
 **Refuse to guess.** An agent that has run out of ideas does not get to say
-"fixed". `inconclusive` is never written as a verdict — the session pauses in
-`needs_guidance`, keeps the sandbox alive, and hands back to the operator
-(ADR-0034).
+"fixed". `inconclusive` is never written as a verdict — the session parks in
+`awaiting_operator`, keeps the sandbox alive, and hands back to the operator
+(ADR-0034/0042). In the default guided mode the agent does not self-conclude at
+all: even a confident `fixed` comes back as a *recommendation* for the operator
+to confirm (ADR-0040).
 
 **Derive off the trail.** The audit re-projects each session's transcript and
 diffs it against the stored verdict row (FR-10); the export assembles a whole

@@ -4,17 +4,22 @@
 Chapter~\ref{ch:methodology} described how the work was carried out. This chapter
 describes what was built. It moves from the outside in: first the requirements the
 system answers to and the shape they impose, then the containers the tool is made
-of, then the modules inside the backend, the data they persist, and finally the
-mechanism the whole thesis turns on --- the gated agentic retest loop. It closes
-with the part of the design that is easiest to leave out of a dissertation and
-most instructive to include: the architecture that was built, shipped, and then
-deleted.
+of, then the modules inside the backend and the classes they are built from, the
+runtime topology that enforces its safety constraints, the data it persists, how a
+report becomes the finding that data describes, and finally the mechanism the whole
+thesis turns on --- the gated agentic retest loop. It closes with the part of the
+design that is easiest to leave out of a dissertation and most instructive to
+include: the architecture that was built, shipped, and then deleted.
 
-Every diagram in this chapter is generated from the project's own architecture
-documentation rather than redrawn for the memoir. That is a deliberate
-application of the docs-as-code rule of Section~\ref{subsec:docs}: a figure
-copied by hand into LaTeX is a second description of the system, and the second
-description is the one that silently goes stale.
+Every diagram in this chapter is rendered from the project's own architecture
+documentation rather than redrawn for the memoir. These C4, class and lifecycle
+diagrams are \emph{authored} --- written as Mermaid in the docs --- not extracted
+from the code the way the generated UML of Section~\ref{subsec:docs} is; rendering
+the memoir's figure and the documentation's figure from that one source, instead of
+copying either by hand, is what stops the two from drifting apart. Keeping the
+authored diagram itself faithful to the code is a review rule (the
+\emph{doc-curator} agent checks it) rather than a mechanical guarantee --- a
+distinction this chapter is careful not to overstate.
 
 \section{From requirements to design}
 \label{sec:design-requirements}
@@ -42,7 +47,7 @@ FR-02 & Ingest structured reports (JSON/XML) & Implemented for JSON and manual e
 FR-03 & Extract structured findings with a language model & Implemented \\ \hline
 FR-04 & Generate executable retest plans & \emph{Repurposed} as the user-owned retest goal \\ \hline
 FR-05 & Human plan review and approval & \emph{Superseded} --- approval moved to every command \\ \hline
-FR-06 & Target authorisation & Implemented, as network membership \\ \hline
+FR-06 & Target authorisation & Implemented, as sandbox topology \\ \hline
 FR-07 & HTTP probe executor & \emph{Deleted} with the batch path \\ \hline
 FR-08 & Execution sanity checker & \emph{Deleted} with the batch path \\ \hline
 FR-09 & Evidence-backed verdicts & Implemented \\ \hline
@@ -51,12 +56,12 @@ FR-11 & Results dashboard (web interface) & Implemented \\ \hline
 FR-12 & Machine-readable results export & Implemented \\ \hline
 FR-13 & Pluggable language-model backends & Implemented \\ \hline
 FR-14 & Browser-based probes & \emph{Dropped} --- subsumed by the sandbox \\ \hline
-FR-15 & Evaluation harness & Implemented (harness; the evaluation run is future work) \\ \hline
+FR-15 & Evaluation harness & Implemented; the run it scores is reported in Chapter~\ref{ch:evaluation} \\ \hline
 FR-16 & Operator finding revision and annotation & Implemented \\ \hline
 FR-17 & Interactive agentic retest console & Implemented \\ \hline
 FR-18 & Reports chat assistant & Implemented \\ \hline
 FR-19 & CVSS and MITRE ATT\&CK enrichment & Implemented; ground-truth tagging pending \\ \hline
-NFR-01 & Verdict reliability & \emph{Not yet measured} --- the harness is built, the run is future work \\ \hline
+NFR-01 & Verdict reliability & \emph{Partially met} --- the safety constraint held (no confidently wrong verdict); accuracy 67\%, short of the 70\% target (Chapter~\ref{ch:evaluation}) \\ \hline
 NFR-02 & Full reproducibility & Replayable session transcript \\ \hline
 NFR-03 & Safety (loopback only, no exposure) & Enforced by binding and topology \\ \hline
 NFR-04 & Data protection & Satisfied by construction --- synthetic and lab data only \\ \hline
@@ -70,6 +75,26 @@ implemented, tested and then removed or repurposed when the retest model changed
 they are discussed in Section~\ref{sec:design-evolution} rather than hidden.}
 \label{tab:requirements}
 \end{table}
+
+Figure~\ref{fig:arch-use-cases} gives the same contract from the outside, as the
+capabilities an operator actually exercises. Two features of it are worth noting
+before the architecture is opened. There is exactly \emph{one} human actor, which
+is what licenses the interaction model of Section~\ref{sec:design-retest}; and the
+use cases that matter cluster around a single one --- running a gated retest
+session --- whose \emph{included} step is the operator's approval of each command.
+An approval that appears as an included use case rather than an optional extension
+is the diagrammatic form of the claim this system makes.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-use-cases.pdf}
+\caption[Use-case model]{The use-case model, with each case labelled by the
+requirement it realises. The auditor is the only actor that decides; the
+language-model backend can only propose and the authorised target can only
+respond. Approving or rejecting each command is \emph{included} in a retest
+session --- it is not an optional extension of it.}
+\label{fig:arch-use-cases}
+\end{figure}
 
 Three requirements shape the architecture more than the rest, and it is worth
 naming them before any diagram. FR-06 (only authorised targets are ever reached)
@@ -186,6 +211,120 @@ backend is swapped from the settings view at runtime, and no component knows
 whether it is talking to a hosted model or one running on the operator's own
 machine.
 
+\section{The class model}
+\label{sec:design-classes}
+
+The module view of Section~\ref{sec:design-components} says where code lives; this
+section says what shape it has. The diagrams that follow are \emph{curated}: the
+project also generates an exhaustive class diagram per module group directly from
+the source with \texttt{pyreverse}, and that generated view --- a hundred and one
+classes joined by thirty-one relations --- is complete precisely because nobody
+chose what went into it, which is also why it explains nothing. The four structures below were
+selected because each carries a design decision, and each is presented with the
+decision it encodes.
+
+\subsection{The domain core}
+
+Figure~\ref{fig:arch-class-domain} shows the vocabulary every other layer speaks.
+These are frozen value objects: once constructed they cannot be mutated, so a
+finding cannot be altered in passing by a component that merely reads it.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[height=0.46\textheight]{figs/arch-class-domain.pdf}
+\caption[Domain class model]{The domain core. A finding composes its CVSS and
+ATT\&CK taxonomy, each carrying an \texttt{inferred} flag; agentic evidence is an
+explanation plus a real command's captured output. All are frozen, and the module
+imports nothing else in the system.}
+\label{fig:arch-class-domain}
+\end{figure}
+
+Two properties of this model are decisions rather than conveniences.
+\emph{Provenance travels with the value}: because a taxonomy code the model
+estimated and one the report stated are indistinguishable as data, each carries a
+flag saying which it is (FR-19). And \emph{evidence is tool-agnostic}: proof is an
+explanation plus the real output of a command, not a structured HTTP exchange.
+Fixing the evidence type to HTTP, as the first architecture did, would have fixed
+the retest to HTTP with it --- which is exactly what happened, and what
+Section~\ref{sec:design-evolution} describes undoing.
+
+\subsection{Persistence, and the seam to the domain}
+
+Figure~\ref{fig:arch-class-persistence} shows the row classes. Every one descends
+from a single declarative base, and the classes that carry domain content own the
+conversion themselves --- finding versions and settings round-trip in both
+directions, while a verdict is constructed from domain values and stores its
+evidence as JSON. That conversion is the seam: above it nothing handles a database
+column, below it nothing handles a domain object.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-class-persistence.pdf}
+\caption[Persistence class model]{The persistence layer. Composition (filled
+diamonds) marks a part with no independent existence --- a finding version, a
+transcript event --- while aggregation marks a record that outlives and is queried
+apart from its parent. The conversion methods on three of the classes are the
+entire seam between the database and the domain.}
+\label{fig:arch-class-persistence}
+\end{figure}
+
+The identity-versus-content split on the finding record is the structural claim of
+FR-16, and it is what Section~\ref{sec:design-data} depends on: because verdicts
+and sessions reference an identity row that holds no content, correcting a finding
+cannot orphan the work already done against it. That would be impossible if the
+content and the foreign-key target were the same row.
+
+\subsection{The agentic session}
+
+Figure~\ref{fig:arch-class-retest} is the collaboration the system exists to run,
+and the one place where a structural guarantee replaces a policy.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[height=0.72\textheight]{figs/arch-class-retest.pdf}
+\caption[Agentic retest class model]{The retest collaboration. The agent's turn
+resolves to exactly one of three outputs; the sandbox is a structural protocol with
+a real and a fake implementation; and the live session state --- deliberately not
+persisted --- is held in a process-local registry.}
+\label{fig:arch-class-retest}
+\end{figure}
+
+Three decisions are legible in it. First, \emph{the output union is the turn's
+contract}: a turn ends in a gated command, a determination, or a hand-back to the
+operator, and in nothing else, so the state machine of
+Section~\ref{sec:design-retest} is total by construction rather than by careful
+enumeration. Second, \emph{the sandbox is a protocol, not a base class}: the real
+implementation drives a Docker daemon and the test one replays a script, and
+neither inherits from nor registers with the other --- structural typing alone
+makes them interchangeable, which is what allows the whole HTTP flow to be tested
+with no daemon and no network. Third, \emph{what is deliberately not persisted}:
+the live agent, its message history and its sandbox handle live only in memory,
+and the reasoning-token channel that drives the console's live display persists
+nothing at all. A half-finished thought is not evidence, and writing it to the
+transcript would place text in the audit trail that no verdict was ever derived
+from.
+
+\subsection{The export document}
+
+The last structure, Figure~\ref{fig:arch-class-export}, is the FR-12 export, whose
+class model \emph{is} its published schema: the schema is generated from these
+models, so it cannot describe a document the code does not produce.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[height=0.5\textheight]{figs/arch-class-export.pdf}
+\caption[Export document class model]{The versioned export. A run composes its
+reports, findings --- each with its version history and notes --- and verdicts with
+their evidence, plus neutral metrics. The published JSON Schema is generated from
+these classes.}
+\label{fig:arch-class-export}
+\end{figure}
+
+The metrics carried in that document are counts and timings only, never
+correctness. Keeping the judgement out of the artefact the evaluation consumes is
+what stops the system from marking its own homework: scoring a run against ground
+truth is the harness's job, and it must be able to disagree with the run.
+
 \section{Runtime and containment}
 \label{sec:design-runtime}
 
@@ -196,11 +335,12 @@ design the topology \emph{is} the control.
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-deployment.pdf}
-\caption[Deployment and network topology]{Runtime topology. Dashed edges are
-connections that \textbf{do not exist}: the per-session Docker network is created
-in \texttt{internal} mode, so it has no gateway and the sandbox can reach neither
-the host nor the internet. The lab container is the only other member of that
-network, and therefore the only host the agent can reach.}
+\caption[Deployment and network topology]{Runtime topology, in the lab
+configuration the evaluation uses. Dashed edges are connections that \textbf{do not
+exist}: the per-session Docker network is created in \texttt{internal} mode, so it
+has no gateway and the sandbox can reach neither the host nor the internet. The lab
+container is the only other member of that network, and therefore the only host the
+agent can reach.}
 \label{fig:arch-deployment}
 \end{figure}
 
@@ -219,6 +359,20 @@ migration, and the requirement it re-interpreted (FR-06), is one of the clearest
 illustrations of the difference between a control that is stated and a control
 that is enforced --- and it is why the deleted implementation is discussed rather
 than quietly dropped.
+
+The topology is chosen from the retest's \emph{scope} rather than fixed, and the
+distinction matters for how far the guarantee reaches. When the scope is the lab
+--- the case the figure shows and the case the evaluation runs --- provisioning is
+exactly as described: an isolated network whose only other member is the target.
+When the scope names a host that is not the lab, the session network is still
+created in \texttt{internal} mode, but its single route out is a per-session
+proxy configured to deny everything except the scoped host. Provisioning that proxy
+\emph{fails closed}: if it cannot be created the session is torn down rather than
+allowed to run with open egress. The weaker property should be stated plainly ---
+in that second configuration the boundary is a correctly configured allowlist
+rather than an absent route, which is a promise again, if a much smaller and more
+auditable one than a check inside the application; and only HTTP traffic has any
+path out at all.
 
 \section{The data model}
 \label{sec:design-data}
@@ -278,6 +432,64 @@ question ``which backend produced this?'' has exactly one answer at any moment.
 Each report and each session additionally records the model that served it, so
 the answer survives a later change.
 
+\section{From report to finding}
+\label{sec:design-ingest}
+
+The chapter has so far described the system a finding flows \emph{through} without
+saying how a finding comes to exist. That front half of the pipeline is where two
+of the project's objectives are met: analysing a report into structured findings
+(objective~O1), and beginning the interpretation of a finding's reproduction steps
+into executable actions (objective~O2) --- an interpretation that the gated loop of
+Section~\ref{sec:design-retest} then completes. It is also where version one of the
+lineage in Figure~\ref{fig:arch-version-lineage} is created.
+
+\paragraph{Three doors, one shape.} A report enters through one of three ingestion
+paths, all of which converge on the same persisted finding. A PDF is uploaded and
+structured by a language model; a JSON export is imported directly; or a finding is
+entered by hand, bypassing the model entirely (ADR-0002, ADR-0013, ADR-0020). Only
+the PDF door is asynchronous --- extraction is slow enough to run as a polled
+background job --- and the manual door exists precisely so the tool remains usable
+when no machine reading is wanted or trusted.
+
+\paragraph{Extraction is validate-before-persist.} The PDF path is the one that
+answers O1, and its central design choice is \emph{where the language model is
+allowed to fail}. Text is lifted from the document with \texttt{pdfplumber}
+(ADR-0007) and split into candidate finding sections by heading --- best effort,
+with the whole document kept as a single candidate when no heading is recognised,
+so extraction always has something to work on. The model is then run \emph{once per
+candidate}, and its output must pass a schema gate before it becomes anything: a
+candidate whose output never validates is recorded as a flagged failure rather than
+persisted as a finding (ADR-0009). The system therefore cannot invent a finding
+from a malformed response --- the worst case is a section the operator is told was
+not understood, not a fabricated entry. Every finding that does survive keeps the
+exact source text it was drawn from and the name of the model that drew it, so
+version one is traceable to the paragraph it came from.
+
+\paragraph{Interpretation, and the honesty of an inference.} Structuring a finding
+is more than copying its fields across: the model is also asked for the CVSS vector
+and the MITRE ATT\&CK techniques a finding implies, which a report often omits
+(FR-19, ADR-0037). Here a machine's guess and a report's fact must not be confused,
+and the schema keeps them apart. A value the report stated is mapped verbatim; a
+value the model supplied where the report was silent is marked \texttt{inferred};
+and a value that is simply absent is left empty rather than guessed. A later
+reader --- or the export of Section~\ref{sec:design-derivations} --- can always tell
+the report's claim from the tool's interpretation of it. This is the same
+discipline as the verdict's bias toward \emph{inconclusive}: the system is permitted
+to help, never to launder its own uncertainty into apparent fact.
+
+\paragraph{The operator ratifies before anything runs.} A machine reading is a
+draft, not a determination, and the interface treats it as one. The finding page is
+a staged wizard (FR-16, ADR-0024) on which the operator reviews the extraction,
+corrects a wrong endpoint or an overstated severity, and only then advances the
+finding toward a retest --- each correction appending a version, as
+Section~\ref{sec:design-data} described, so the model's original answer is never
+overwritten by the human's improvement of it. This is the point at which O2 stops
+being a purely automated reading and becomes a supervised one: the reproduction
+steps the agent will work from are steps a human has ratified. From the finding, a
+generic \emph{goal} of non-destructive verification steps is generated to seed the
+retest (ADR-0032, which repurposed FR-04); the operator owns and may edit that
+goal, and it is what the loop of the next section begins from.
+
 \section{The agentic retest loop}
 \label{sec:design-retest}
 
@@ -324,22 +536,42 @@ the evidence the agent saw. A rejection is also not a dead end: the agent resume
 with the denial and the operator's stated reason, which lets a human steer by
 refusing rather than by editing the agent's plan.
 
+Figure~\ref{fig:arch-retest-activity} places the same cycle in its wider loop, with
+every step labelled by who is responsible for it. Read that way the design's claim
+becomes a property of the diagram rather than an assertion about it: the agent's
+steps only ever \emph{propose}, the sandbox's only ever \emph{execute}, and every
+step that causes something to happen in the world is the operator's.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-retest-activity.pdf}
+\caption[The retest loop as an activity]{The retest loop, partitioned by
+responsibility. Note that the operator's decision node has four outgoing edges, not
+two: besides approving or rejecting, they may send a message --- which withdraws
+the pending command and re-steers the agent --- or conclude the retest themselves
+at any point.}
+\label{fig:arch-retest-activity}
+\end{figure}
+
 \subsection{The session lifecycle}
+\label{subsec:design-lifecycle-budget}
 
 Figure~\ref{fig:arch-session-lifecycle} gives the states a session moves through.
 
 \begin{figure}[!htb]
 \centering
-\includegraphics[height=0.55\textheight]{figs/arch-session-lifecycle.pdf}
-\caption[Retest session lifecycle]{The session state machine. The loop between
-\emph{thinking}, \emph{awaiting\_command} and \emph{running\_command} is the
-gated cycle of Figure~\ref{fig:arch-gated-execution}. \emph{needs\_guidance} is
-deliberately non-terminal: an agent that has run out of ideas hands the session
-back to the operator instead of producing a verdict.}
+\includegraphics[width=\textwidth]{figs/arch-session-lifecycle.pdf}
+\caption[Retest session lifecycle]{The session state machine: five live states and
+three terminal ones. The loop between \emph{working} and
+\emph{awaiting\_command} is the gated cycle of
+Figure~\ref{fig:arch-gated-execution} --- an approved command runs \emph{inside}
+the next working turn, which is why there is no separate executing state.
+\emph{awaiting\_operator} is deliberately non-terminal: an agent that has run out
+of ideas hands the session back instead of producing a verdict.}
 \label{fig:arch-session-lifecycle}
 \end{figure}
 
-The most consequential state is \texttt{needs\_guidance}, and it exists because
+The most consequential state is \texttt{awaiting\_operator}, and it exists because
 of a failure mode specific to this problem. An agent that has exhausted its ideas
 will, if the design demands a verdict, produce one --- and the verdict it
 produces will be \emph{fixed}, because failing to reproduce a vulnerability looks
@@ -355,6 +587,20 @@ than terminate a session; ADR-0035 then removed the budget itself, on the ground
 that a step meter reads to an operator like a broken progress bar and is redundant
 once the agent's own hand-back is a trigger. What remains is a single, meaningful
 cause: the agent says it has run out of ideas.
+
+The set of states was itself narrowed twice, and the second narrowing is worth
+recording because it went against the grain of how such systems are usually built.
+An earlier design distinguished a \emph{stuck} pause from an ordinary hand-back,
+on the reasonable-sounding view that the interface should signal the difference.
+In practice they were two banners over one situation --- the agent is not working
+and it is the operator's move --- and the distinction cost a state, an event kind
+and a code path to maintain a difference the operator did not act on. ADR-0042
+folded them together, and at the same time collapsed three separate busy states
+into one \texttt{working}, on the observation that a turn is atomic from the
+operator's point of view: the model call and any command it runs happen inside it.
+Five live states remain. A state machine that a reader can hold in their head is
+not a cosmetic property of a system whose central claim is that a human stays in
+control of it.
 
 A session is also not wholly durable, which is the cost promised in
 Section~\ref{sec:design-overview}. Its transcript, status and goal are persisted,
@@ -375,11 +621,40 @@ agent then observes on its next turn. The last of these is deliberately
 to supervise the human, and a tool that asked the operator to approve their own
 command would be ceremony rather than safety.
 
+Who sets the \emph{pace} turned out to be a separate question from who holds the
+gate, and getting it wrong made the tool unpleasant to use in a way the gate alone
+did not fix. In an intermediate design every approval fed straight into the agent's
+next proposal, so the operator faced an approval treadmill: they were consenting
+continuously without ever being in a position to direct. The design that replaced
+it (ADR-0040) makes the default mode \emph{guided} --- the agent performs one
+action per operator turn and then hands back, reporting what it saw and, if it has
+one, recommending a next step. Two consequences follow, and the second is the
+substantive one. A proposal the agent makes after an approved command is not opened
+as a gate but offered as advice, so the operator is never asked to consent to
+something they did not ask for; and in guided mode the agent \emph{never records a
+verdict at all}. Even a confident determination comes back as a recommendation for
+the operator to confirm. The gate ensures no command runs without a human; guided
+mode ensures no \emph{conclusion} is reached without one, which is the claim that
+actually matters for a compliance decision.
+
+A related refinement concerns what a message means when a command is waiting for
+approval. Rather than queueing behind the pending decision, a message withdraws the
+proposal and re-runs the agent with what the operator said (ADR-0042) --- the
+behaviour of typing at a permission prompt in a coding assistant. It reflects a
+small observation about intent: an operator who starts typing instead of clicking
+has already decided that the proposed command is not what they want next, and
+making them formally reject it first is bookkeeping.
+
 A mode called \emph{free launch} removes the per-command approval and lets the
 agent proceed on its own. It is included honestly and it is a real weakening of
 the central claim: with it enabled, the system is an autonomous testing agent of
 the kind Chapter~\ref{ch:sota} surveys, and its containment rests entirely on the
-topology of Section~\ref{sec:design-runtime} rather than on human judgement.
+topology of Section~\ref{sec:design-runtime} rather than on human judgement. It is
+also the one mode in which the agent may record its own verdict. The mode is
+entered by an explicit switch and never inferred: an earlier proposal to let the
+operator hand over the wheel in natural language was rejected, because a classifier
+deciding when supervision ends is precisely the component this design exists to
+avoid.
 
 \section{Derivations off the trail}
 \label{sec:design-derivations}
@@ -458,5 +733,5 @@ decision to delete it was taken only once the agentic path covered the whole
 retest lifecycle end to end on the same lab targets, and it was recorded --- with
 its rationale, its alternatives and its consequences --- in ADR-0033, which
 supersedes the eight architecture decision records the batch path rested on. That
-record is the most accurate surviving artefact of the *reasoning* this chapter
+record is the most accurate surviving artefact of the \emph{reasoning} this chapter
 describes, which the remaining code cannot show.

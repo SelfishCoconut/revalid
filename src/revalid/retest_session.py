@@ -373,8 +373,9 @@ class LiveSession:
     messages: list[ModelMessage] = field(default_factory=list)
     pending_call_id: str | None = None
     #: Whether the agent's commands auto-run without a per-command human approval
-    #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
-    #: ``set_free_launch``; the free-launch loop lives in ``_advance``.
+    #: (FR-17 Slice 5) — the one deliberate relaxation of the gate; the egress lock
+    #: is unaffected. Toggled live by ``set_free_launch``; the loop lives in
+    #: ``_advance``, which also delivers queued operator messages (ADR-0042).
     free_launch: bool = False
     #: The agent handed control back (ADR-0034/0042): a reply, a guided report, a
     #: recommendation, or "I'm stuck". Set by ``_await_operator``, cleared by
@@ -386,9 +387,10 @@ class LiveSession:
     #: advancing, and the free-launch loop halts — the sandbox is kept alive.
     stopped: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
-    #: Manual operator commands (`!`) run since the agent's last turn, buffered
-    #: here and surfaced to the agent on its next turn so it observes what the
-    #: human did (FR-17 Slice 2). Guarded by ``lock`` — appended by the human-
+    #: Manual operator commands run since the agent's last turn (from the console
+    #: terminal's ``operator$`` prompt), buffered here and surfaced to the agent on
+    #: its next turn so it observes what the human did (FR-17 Slice 2, ADR-0026).
+    #: Guarded by ``lock`` — appended by the human-
     #: command worker, drained by the next agent resume, on separate threads.
     observations: list[str] = field(default_factory=list)
 
@@ -579,7 +581,7 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
         emit_output=emit,
         drain_observations=live.drain,
         emit_message=emit_message,
-        # Selects the agent's persona for this turn (ADR-0039): read live so a
+        # Selects the agent's persona for this turn (ADR-0040): read live so a
         # mid-session Auto-run toggle switches guided ↔ autonomous next turn.
         free_launch=live.free_launch,
     )
@@ -617,7 +619,7 @@ def _suggestion_reason(call: Any) -> str:
     """Frame a guided-mode command the agent proposed post-run as an advisory suggestion.
 
     In guided mode the agent's own next proposal is never opened as a gate
-    (ADR-0039); it is surfaced here as text in the hand-back so the operator can
+    (ADR-0040); it is surfaced here as text in the hand-back so the operator can
     act on it, ask for something else, or conclude — the operator drives, the
     agent advises.
     """
@@ -635,7 +637,7 @@ def _suggestion_reason(call: Any) -> str:
 
 
 def _recommendation_reason(output: ConcludeOutput) -> str:
-    """Frame a guided-mode determination as a recommendation, not a ruling (ADR-0039).
+    """Frame a guided-mode determination as a recommendation, not a ruling (ADR-0040).
 
     The agent never records a terminal verdict while guided: its ``fixed``/
     ``still_open`` is surfaced as advice for the operator to confirm (Conclude) or
@@ -665,7 +667,7 @@ def _dispatch_output(
         result: The run result just produced by ``agent.run_sync``.
         after_command: ``True`` when this step *ran* a command (an approved
             resume), which in guided mode is the one-action boundary: the session
-            hands back rather than chaining the agent's next proposal (ADR-0039).
+            hands back rather than chaining the agent's next proposal (ADR-0040).
     """
     live = registry.get(session_id)
     if live is None:
@@ -676,7 +678,7 @@ def _dispatch_output(
     if isinstance(output, DeferredToolRequests) and output.approvals:
         proposal = output.approvals[0]
         if guided and after_command:
-            # Guided one-action-then-park (ADR-0039): the operator's command has
+            # Guided one-action-then-park (ADR-0040): the operator's command has
             # run, so do NOT chain into the next gate. Drop the fresh proposal —
             # trimming the unresolved approval call from the history so a later
             # continue resumes from a clean state — and hand back, surfacing the
@@ -701,7 +703,7 @@ def _dispatch_output(
             # (ADR-0034). No verdict is written; the sandbox stays alive.
             _await_operator(session, registry, session_id, output.rationale)
         elif guided:
-            # Guided mode never self-concludes (ADR-0039): the agent's `fixed`/
+            # Guided mode never self-concludes (ADR-0040): the agent's `fixed`/
             # `still_open` is a *recommendation*, surfaced for the operator to
             # confirm (Conclude) — only the operator records a terminal verdict.
             _await_operator(session, registry, session_id, _recommendation_reason(output))
@@ -1016,7 +1018,7 @@ def _resume_with_decision(
         return
     # An approval *ran a command*: in guided mode that is the one-action boundary,
     # so the session hands back instead of chaining the agent's next proposal
-    # (ADR-0039). A rejection ran nothing, so its follow-up proposal gates as usual.
+    # (ADR-0040). A rejection ran nothing, so its follow-up proposal gates as usual.
     _dispatch_output(session, registry, session_id, result, after_command=approved)
 
 

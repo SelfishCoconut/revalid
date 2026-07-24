@@ -4,7 +4,7 @@ Regenerated from the actual code by `pyreverse` on every docs build (`make docs`
 CI). Never edit by hand — they cannot be stale.
 
 Several diagrams, one per group of modules, rather than one for the whole
-package. A single dump of `revalid` is 96 classes joined by 31 relations, which
+package. A single dump of `revalid` is 101 classes joined by 31 relations, which
 is a wall of disconnected boxes and says nothing about how the system fits
 together. The groups follow the same lines as the [API reference](api.md) — with
 `app` split out, because its 35 request and response models earn a diagram of
@@ -13,7 +13,11 @@ that one gives the docstrings.
 
 These groups are a reading order, not a second architecture. The layered view of
 the system is the [C4 model](../architecture/c4.md), which is the authority on
-where a module belongs.
+where a module belongs, and the **curated** counterpart to this page is the
+[class model](../architecture/class-model.md) — four hand-drawn diagrams that
+select the structures carrying a design decision and pair each with the decision
+it encodes. Use that page to understand the design and this one to look something
+up: it is exhaustive precisely because nobody chose what goes in it.
 
 Each group pulls in one level of ancestors and associations from outside its own
 modules, so an edge that crosses a boundary — `FindingExport` pointing at the
@@ -60,10 +64,12 @@ shows up here as the classes the other three exchange.
 
 ## Retest goal and agentic session
 
-`plan` produces the retest goal, `sandbox` is the egress-locked execution
-environment, `retest_agent` is the Pydantic AI agent with its tools, and
+`plan` produces the retest goal, `scope` parses a scope endpoint to the host the
+sandbox is provisioned against, `sandbox` is the egress-locked execution
+environment, `retest_agent` is the Pydantic AI agent with its tools,
 `retest_session` is the orchestrator owning the lifecycle, transcript and
-approval gate.
+approval gate, and `deltas` is the transient reasoning-token channel. `scope`
+contributes no boxes — it is function-only, like `findings` and `llm` above.
 
 ```mermaid
 --8<-- "docs/reference/generated/classes_retest.mmd"

@@ -34,7 +34,8 @@ Three transports carry data to the browser, by need:
 | Transport | Used for | Why |
 |---|---|---|
 | REST (`/api/...`) | every mutation and most reads | plain request/response |
-| WebSocket (`/api/retest-sessions/{id}/stream`) | the retest console | the operator must see each transcript event as it happens |
+| WebSocket (`/api/retest-sessions/{id}/stream`) | the retest console | the operator must see each transcript event as it happens, plus the model's reasoning tokens while a turn is in flight |
+| SSE (`/api/chats/{id}/messages/stream`) | the corpus chat reply | one-way, one-shot token stream — an EventSource-shaped response is all it needs (ADR-0038) |
 
 ## The object model, and what owns what
 
@@ -141,22 +142,32 @@ launch, or a `Restart`, instead lands on `idle` and waits for `Start`).
 
 ### Provisioning: the sandbox *is* the allowlist
 
-`start_and_step` calls `sandbox.start()` before the agent thinks at all. The
+`start_and_step` calls `sandbox.start(scope_hosts)` before the agent thinks at
+all, where `scope_hosts` are the launch scope's endpoints parsed down to their
+hosts by `scope.py` (`https://example.com/#/login` → `example.com`). The
 production `DockerSandbox`:
 
 1. creates a per-session Docker network named `revalid-retest-{session_id}` with
    `internal=True` — **no route to the host and no route to the internet**;
-2. connects the allowlisted lab container (`revalid-juice-shop`) to it;
-3. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
+2. **lab scope** (empty, or every host is the lab): connects the authorised lab
+   container (`revalid-juice-shop`) to that network as its only other member;
+3. **online scope** (ADR-0041): instead launches a per-session Squid container on
+   the network, configured deny-all-by-default with the scoped host(s) as the
+   only `dstdomain` allowlist, and points the sandbox's proxy variables at it —
+   so the one route out reaches the scoped host and nothing else. Any failure
+   while provisioning it **fails closed**: the session dies rather than running
+   with open egress;
+4. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
    base carrying the pentest toolbox (nmap, sqlmap, nikto, hydra, …) — on that
-   network,
-   idling on `sleep infinity` so it persists for the whole session.
+   network, idling on `sleep infinity` so it persists for the whole session.
 
-This is what FR-06 means in the current design: **the allowlist is network
-membership**, not an HTTP-layer check. The agent is not *asked* to stay on
-target — it is physically unable to reach anything the operator did not attach.
-Consequently the scope is fixed when the sandbox is provisioned: changing it
-needs a fresh session (the `target_set` event is emitted once and never again).
+This is what FR-06 means in the current design: **the allowlist is topology**,
+not an HTTP-layer check — network membership on the lab, a closed egress
+allowlist online. The agent is not *asked* to stay on target; it is physically
+unable to reach anything the operator did not scope. Note that online mode
+permits HTTP(S) only — non-HTTP egress has no path out at all. Either way the
+scope is fixed when the sandbox is provisioned: changing it needs a fresh session
+(the `target_set` event is emitted once and never again).
 
 Two operational details worth knowing: `start()` self-heals a network left
 behind by a crashed prior session of the same id (it would otherwise 409
@@ -201,6 +212,48 @@ stateDiagram-v2
     error --> [*]
     working --> ended: operator ends the session
     ended --> [*]
+```
+
+The same loop as an activity, with each step labelled by **who is responsible for
+it**. That labelling is the point of the figure: the agent only ever *proposes*,
+the sandbox only ever *executes*, and every step that causes something to happen
+in the world is the auditor's. Colour repeats the same information — blue for the
+auditor, light blue for the orchestrator, amber for the agent, red for the
+egress-locked sandbox.
+
+<!-- thesis-fig: retest-activity -->
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 26, "wrappingWidth": 320}}}%%
+flowchart TB
+    A1(["AUDITOR · wake the agent"])
+    O1["SYSTEM · provision the sandbox for the scope"]
+    G1["AGENT · reason over goal, history, observations"]
+    G2{"AGENT · how does this turn end?"}
+    O2["SYSTEM · record the proposal, suspend the run"]
+    A2{"AUDITOR · approve · reject · message · conclude"}
+    S1["SANDBOX · run it against the only reachable peer"]
+    O6["SYSTEM · park in awaiting_operator"]
+    O7["SYSTEM · record the verdict + evidence, tear down"]
+
+    A1 --> O1 --> G1 --> G2
+    G2 -->|"proposes a command"| O2 --> A2
+    G2 -->|"hands back"| O6
+    G2 -->|"concludes — Auto-run only"| O7
+    A2 -->|approve| S1
+    A2 -->|"reject / message"| G1
+    A2 -->|"conclude it yourself"| O7
+    S1 -->|"guided — one action per turn"| O6
+    S1 -->|"Auto-run"| G1
+    O6 --> A2
+
+    classDef human fill:#dbe4ff,stroke:#3b5bdb,stroke-width:2px
+    classDef sys fill:#e7f5ff,stroke:#1971c2
+    classDef agent fill:#fff9db,stroke:#f08c00
+    classDef box fill:#fff5f5,stroke:#e03131,stroke-width:2px
+    class A1,A2 human
+    class O1,O2,O6,O7 sys
+    class G1,G2 agent
+    class S1 box
 ```
 
 The gate is not a policy check the code performs after the fact — it is
@@ -304,11 +357,14 @@ read; it has no sandbox, cannot execute anything and cannot mutate a row. The
 agent runs inline and the caller awaits the whole answer; threads are persisted
 (`chat_sessions` / `chat_messages`) so a conversation survives a reload.
 
-!!! note "In flight: token-by-token streaming"
-    Replies currently arrive in one block. A streaming variant — an async
-    `POST /api/chats/{id}/messages/stream` emitting Server-Sent Events — is
-    designed in **ADR-0038** and tracked by [#140](https://github.com/SelfishCoconut/revalid/issues/140);
-    it is not on `main` yet. The blocking endpoint above is kept as the fallback.
+!!! note "Token-by-token streaming"
+    The reply streams as it is generated: `POST /api/chats/{id}/messages/stream`
+    emits Server-Sent Events (one `event: token` per delta, a terminal
+    `event: done`) and the SPA grows the assistant bubble live, handing off to the
+    persisted thread on completion. That endpoint has to be **async** — the sync
+    `run_stream_sync` binds its anyio portal to the calling thread and dies inside
+    a `StreamingResponse` — so it runs `agent.run_stream` on the request's own
+    event loop; the blocking endpoint above is kept as the fallback (**ADR-0038**).
 
 ## Choosing the LLM backend
 
@@ -335,6 +391,8 @@ exercisable with no network and no daemon.
 | `retest_session.py` | the orchestrator: lifecycle, transcript, gate, verdicts |
 | `retest_agent.py` | the Pydantic AI agent and its two tools |
 | `sandbox.py` | `Sandbox` protocol, `DockerSandbox` (egress-locked), `FakeSandbox` |
+| `scope.py` | parses a scope endpoint to the host the sandbox is provisioned against (ADR-0041) |
+| `deltas.py` | transient, never-persisted channel for the model's reasoning tokens mid-turn |
 | `reports_chat.py` | read-only corpus Q&A agent + chat threads |
 | `audit.py`, `export.py`, `eval.py` | re-derivation, versioned export, FR-15 scoring |
 | `db.py`, `settings.py`, `llm.py` | persistence, runtime settings, model resolution |

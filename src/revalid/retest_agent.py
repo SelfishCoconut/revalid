@@ -1,9 +1,14 @@
 """FR-17 / M6 agentic retest agent (ADR-0025, Slice 0).
 
-One gated ``run_command`` tool (Pydantic AI deferred approval) + a
-``ConcludeOutput`` structured verdict. The orchestrator (retest_session.py)
-runs the agent step-by-step, pausing on each proposed command for human
-approval and resuming with ``ToolApproved``/``ToolDenied``.
+Two tools — a gated ``run_command`` (Pydantic AI deferred approval) and an
+ungated ``respond`` for prose — over a three-way output union: a
+``ConcludeOutput`` verdict, an ``AwaitOperator`` hand-back (ADR-0039), or a
+``DeferredToolRequests`` pause while a proposed command awaits approval. The
+orchestrator (retest_session.py) runs the agent step-by-step, pausing on each
+proposed command for human approval and resuming with
+``ToolApproved``/``ToolDenied``. Its persona branches per turn on
+``deps.free_launch``: guided (one action, then hand back) or autonomous
+(drive to a verdict) — ADR-0040.
 """
 
 from __future__ import annotations
@@ -80,7 +85,7 @@ status note, never step-by-step narration.
 """
 
 #: Appended when the operator has handed over the wheel (Auto-run / free-launch,
-#: ADR-0039): the agent drives itself to a verdict, chaining commands as needed.
+#: ADR-0040): the agent drives itself to a verdict, chaining commands as needed.
 _AUTONOMOUS_GUIDANCE = """\
 You are running AUTONOMOUSLY: the operator turned Auto-run on and handed you the \
 wheel. Keep going on your own — reason, run a command, observe its output, and \
@@ -88,7 +93,7 @@ continue — until you can make a determination. When you are confident, conclud
 `still_open` (the issue reproduces) or `fixed` (it does not). That ends the session.
 """
 
-#: Appended in the default guided mode (ADR-0039): the operator drives one step at
+#: Appended in the default guided mode (ADR-0040): the operator drives one step at
 #: a time, so the agent does a single action and hands back rather than racing to a
 #: verdict. The orchestrator enforces the stop; these instructions shape a *useful*
 #: hand-back (a recommendation for the operator, not a silent stall).
@@ -153,7 +158,7 @@ class RetestSessionDeps:
     #: ``agent_message`` transcript event. The default drops it (agent-unit tests).
     emit_message: Callable[[str], None] = _no_emit_message
     #: Whether the operator has handed over the wheel (Auto-run / free-launch). It
-    #: selects the agent's persona via dynamic instructions (ADR-0039): guided
+    #: selects the agent's persona via dynamic instructions (ADR-0040): guided
     #: (one action then hand back) when ``False``, autonomous (drive to a verdict)
     #: when ``True``. Rebuilt fresh each turn from the live session, so a live
     #: Auto-run toggle takes effect on the agent's next turn. Default ``False`` —
@@ -222,7 +227,7 @@ def build_retest_agent(
 
     @agent.instructions
     def _mode_guidance(ctx: RunContext[RetestSessionDeps]) -> str:
-        """Append the persona for this turn's mode (ADR-0039).
+        """Append the persona for this turn's mode (ADR-0040).
 
         Evaluated per run against freshly-built deps, so a live Auto-run toggle
         switches the agent between driving itself to a verdict (autonomous) and

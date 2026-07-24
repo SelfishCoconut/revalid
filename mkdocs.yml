@@ -56,9 +56,12 @@ nav:
   - Architecture:
       - How it works (workflow): architecture/workflow.md
       - C4 model: architecture/c4.md
+      - Class model: architecture/class-model.md
       - Data model: architecture/data-model.md
       - Subsystem flows: architecture/subsystem-flows.md
-  - Requirements (SRS): requirements/srs.md
+  - Requirements:
+      - SRS: requirements/srs.md
+      - Use-case model: requirements/use-cases.md
   - API reference: reference/api.md
   - UML (generated): reference/uml.md
   - ADRs: adr/README.md

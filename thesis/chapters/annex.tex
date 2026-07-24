@@ -33,9 +33,15 @@ The Python dependencies are installed with a single command; a second command
 compiles the web interface into the bundle the service serves at its root.
 
 \begin{lstlisting}[language=bash]
-uv sync         # install the pinned Python dependencies
-make build-ui   # compile the React single-page interface
+uv sync --extra sandbox   # pinned Python dependencies + the Docker sandbox
+make build-ui             # compile the React single-page interface
 \end{lstlisting}
+
+The \texttt{sandbox} extra installs the Docker client library the retest agent
+needs. It is optional because every path that does not start a retest session ---
+ingestion, extraction, the audit, the export and the whole test suite --- imports
+nothing from it; omitting it yields a working installation in which a retest cannot
+be started.
 
 \section{Running the application}
 \label{sec:annex-run}
@@ -72,11 +78,15 @@ make lab-down   # stop it when finished
 \label{sec:annex-sandbox}
 
 The agent's commands run inside a sandbox container placed on a Docker network in
-\texttt{internal} mode, to which only the lab target is attached. Reachability is
-therefore decided by network membership (FR-06): the lab container is the one host
-the sandbox has any route to, and no command --- whatever address it names --- can
-leave that network. Two practical consequences follow, both worth knowing before the
-first run.
+\texttt{internal} mode. What is attached to that network is decided by the
+\emph{scope} the operator sets when starting the retest: for a lab scope --- the
+case this guide follows --- the lab target is attached and nothing else, so
+reachability is network membership (FR-06), the lab container is the one host the
+sandbox has any route to, and no command, whatever address it names, can leave that
+network. (A scope naming a host outside the lab instead provisions a per-session
+proxy that permits that host alone; if it cannot be provisioned the session is torn
+down rather than run unrestricted.) Two practical consequences follow for the lab
+case, both worth knowing before the first run.
 
 Because the sandbox cannot download anything, every tool the agent may use has to be
 present in its image already. That image is built once, locally:

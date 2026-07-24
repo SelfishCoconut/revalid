@@ -1032,7 +1032,8 @@ def run_continue(
     """Resume a paused session (ADR-0034 "Keep going", background task).
 
     Runs in the background because resuming drives further agent turns. A no-op
-    unless the session is paused in ``needs_guidance`` with a live agent.
+    unless the session is parked in ``awaiting_operator`` with a live agent
+    (``needs_guidance`` folded into that state in ADR-0042).
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -1792,8 +1793,8 @@ def _register_guidance_routes(
     ) -> dict[str, str]:
         """Manually conclude a session with the operator's determination (ADR-0034).
 
-        Available at any live point in the retest (issue #150), not only at a
-        ``needs_guidance`` pause. Records the operator's verdict (the only path that
+        Available at any live point in the retest (issue #150), not only at an
+        ``awaiting_operator`` hand-back. Records the operator's verdict (the only path that
         writes ``inconclusive``) and tears down. Runs in the background; a no-op if
         the session is already terminal.
         """

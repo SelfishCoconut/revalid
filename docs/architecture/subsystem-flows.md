@@ -91,11 +91,12 @@ Only prose turns are stored; the agent re-queries through its tools on every
 turn, so an answer can never be stale relative to the database. Threads persist
 (`chat_sessions` / `chat_messages`) so a conversation survives a reload.
 
-!!! note "In flight: token-by-token streaming"
-    Replies currently arrive in one block. An async SSE variant
-    (`POST /api/chats/{id}/messages/stream`) is designed in **ADR-0038** and
-    tracked by [#140](https://github.com/SelfishCoconut/revalid/issues/140);
-    it is not on `main` yet.
+!!! note "Token-by-token streaming"
+    The blocking endpoint above is the fallback; the SPA's default path is the
+    async SSE variant `POST /api/chats/{id}/messages/stream`, which emits one
+    `event: token` frame per delta and a terminal `event: done` (**ADR-0038**).
+    It must be async: the sync `run_stream_sync` binds its anyio portal to the
+    calling thread and fails inside a `StreamingResponse`.
 
 ## Model resolution — one switch, every component (FR-13, ADR-0010/0021)
 
