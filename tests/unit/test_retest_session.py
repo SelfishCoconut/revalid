@@ -1303,4 +1303,6 @@ def test_reopen_is_a_noop_when_not_concluded() -> None:
         session.refresh(s)
         after = rs.load_events_after(session, s.id, 0)
     assert after == before
-    assert s.status == RetestSessionStatus.STARTING.value
+    # ADR-0042 collapsed `starting` into `working`; a non-deferred session is
+    # created straight into it, and a no-op reopen must leave that untouched.
+    assert s.status == RetestSessionStatus.WORKING.value
