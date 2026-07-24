@@ -164,43 +164,40 @@ class ReportStatus(enum.StrEnum):
 
 
 class RetestSessionStatus(enum.StrEnum):
-    """Lifecycle of an FR-17 agentic retest session.
+    """Lifecycle of an FR-17 agentic retest session — one agent, five live states.
 
-    A session reaches a terminal state (``CONCLUDED``/``ENDED``/``ERROR``) only
-    on a real determination or an operator action; between turns it may pause in
-    the non-terminal ``NEEDS_GUIDANCE`` state, asking the operator to steer or
-    conclude (ADR-0034). ``GIVEN_UP`` is retired — kept only so any legacy row
-    stays terminal.
-
-    Two further non-terminal states give the operator lifecycle control (issue
-    #150): ``IDLE`` — created but not yet started, awaiting a ``Start`` (a
-    ``Restart`` lands here so it never auto-runs); and ``STOPPED`` — the operator
-    paused a running session, its sandbox kept alive, awaiting ``Resume``.
+    A live session is always in exactly one of: ``WORKING`` (a turn in flight),
+    ``AWAITING_COMMAND`` (a proposed command awaits the operator's approval),
+    ``AWAITING_OPERATOR`` (the agent handed back — a reply, an acknowledgement, a
+    guided one-action report, "steer me or conclude", or a verdict recommendation),
+    ``IDLE`` (created but not yet provisioned — a ``Restart`` lands here so it never
+    auto-runs), or ``STOPPED`` (the operator paused it, sandbox kept alive). A
+    session reaches a terminal state (``CONCLUDED``/``ENDED``/``ERROR``) only on a
+    determination or an operator action. ``GIVEN_UP`` is retired — kept only so any
+    legacy row stays terminal. ADR-0042 collapsed the earlier
+    ``needs_guidance``/``running_command``/``starting``/``thinking`` states into
+    these five (``needs_guidance`` folded into ``awaiting_operator``).
     """
 
-    #: Created but not started: no sandbox yet, awaiting an operator ``Start``.
-    #: A ``Restart`` opens a session here so the fresh attempt never auto-runs.
+    #: Created but not started: no sandbox yet, awaiting an operator ``Start`` or a
+    #: message. A ``Restart`` opens a session here so the fresh attempt never auto-runs.
     IDLE = "idle"
-    STARTING = "starting"
-    #: The agent is computing its next turn (an LLM call is in flight). Emitted
-    #: before each ``agent.run_sync`` so the console can show a live "thinking"
-    #: indicator while local models — which can take a while — work (FR-17).
-    THINKING = "thinking"
+    #: A turn is in flight — the LLM call and any command it runs happen inside one
+    #: turn, so this is the single "busy" state (was ``thinking``/``starting``/the
+    #: never-set ``running_command``). The console shows a live indicator; an operator
+    #: message is queued and delivered to the same agent at the next turn boundary.
+    WORKING = "working"
+    #: A command is proposed and awaits the operator's approve/reject — the Claude-Code
+    #: permission prompt. A message here withdraws the proposal and steers the agent.
     AWAITING_COMMAND = "awaiting_command"
-    RUNNING_COMMAND = "running_command"
-    #: Paused mid-session: the agent exhausted the options it could think of and
-    #: handed back to the operator (ADR-0034). Non-terminal — the sandbox stays
-    #: alive; the operator steers and keeps going, or concludes.
-    NEEDS_GUIDANCE = "needs_guidance"
-    #: The agent replied conversationally and handed control back without a command
-    #: or verdict (issue #204): a greeting, a small-talk answer, an acknowledgement.
-    #: Non-terminal and *lighter* than ``NEEDS_GUIDANCE`` — no "needs your guidance"
-    #: banner, just the agent's reply and an open composer — the sandbox stays alive
-    #: and the operator's next message resumes it. Lets the agent focus on the
-    #: operator's messages (goal as context) instead of bolting for the goal.
+    #: The agent handed control back without a command or verdict: a conversational
+    #: reply, an acknowledgement, a guided "ran X — your move" report with a suggested
+    #: next step, a verdict *recommendation* to confirm, or "I've exhausted my options"
+    #: (the former ``needs_guidance``, now just the agent's own words). Non-terminal:
+    #: the sandbox stays alive and the operator's next message resumes it.
     AWAITING_OPERATOR = "awaiting_operator"
     #: The operator paused a running session (issue #150). Non-terminal — the
-    #: sandbox stays alive; ``Resume`` continues, ``Restart``/``Conclude`` end it.
+    #: sandbox stays alive; a message/Resume continues, ``Restart``/``Conclude`` end it.
     STOPPED = "stopped"
     CONCLUDED = "concluded"
     GIVEN_UP = "given_up"
@@ -233,9 +230,6 @@ class SessionEventKind(enum.StrEnum):
     #: start and never again — reachability is fixed when the sandbox is provisioned,
     #: so changing scope needs a fresh session (Restart), not a live edit.
     TARGET_SET = "target_set"
-    #: The session paused for operator guidance (ADR-0034); payload carries the
-    #: human-readable ``reason`` the agent gave when it handed back.
-    NEEDS_GUIDANCE = "needs_guidance"
     STATE_CHANGE = "state_change"
     FREE_LAUNCH_CHANGED = "free_launch_changed"
     VERDICT = "verdict"

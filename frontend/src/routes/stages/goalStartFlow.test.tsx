@@ -47,7 +47,7 @@ const finding: Finding = {
 const createdSession: RetestSession = {
   id: 5,
   finding_id: 7,
-  status: "starting",
+  status: "working",
   model: "gpt-test",
   verdict_status: null,
   verdict_rationale: null,

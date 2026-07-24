@@ -101,14 +101,12 @@ from revalid.reports_chat import (
 )
 from revalid.retest_agent import (
     RetestAgent,
-    build_qa_agent,
     build_retest_agent,
 )
 from revalid.retest_session import (
     SessionRegistry,
     _fail,
     adjudicate_verdict,
-    answer_operator_question,
     append_event,
     apply_decision,
     conclude_session,
@@ -119,6 +117,7 @@ from revalid.retest_session import (
     load_events_after,
     restart_model,
     resume_session,
+    resume_with_message_at_gate,
     session_goal,
     session_scope,
     set_free_launch,
@@ -606,11 +605,6 @@ def get_retest_agent(settings: SettingsDep) -> RetestAgent:
     return build_retest_agent(build_model(settings))
 
 
-def get_qa_agent(settings: SettingsDep) -> Agent[None, str]:
-    """Yield the FR-17 chat Q&A agent built from the persisted setting (ADR-0021)."""
-    return build_qa_agent(build_model(settings))
-
-
 def get_reports_agent(settings: SettingsDep) -> Agent[ReportsChatDeps, str]:
     """Yield the FR-18 read-only reports assistant built from the persisted setting."""
     return build_reports_agent(build_model(settings))
@@ -633,7 +627,6 @@ GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 MetadataAgentDep = Annotated[Agent[None, ReportMetadata], Depends(get_metadata_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
-QaAgentDep = Annotated[Agent[None, str], Depends(get_qa_agent)]
 ReportsChatAgentDep = Annotated[Agent[ReportsChatDeps, str], Depends(get_reports_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
 
@@ -774,21 +767,6 @@ def _current_or_404(session: Session, finding_id: int) -> FindingVersionRecord:
     if version is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return version
-
-
-def _session_finding(session: Session, session_id: int) -> Finding | None:
-    """Return the current finding for a session, or ``None`` if unavailable (FR-17).
-
-    Gives the chat Q&A its context. Tolerant of a missing session or finding version
-    so sending a message never 404s — the reply is simply skipped when there is no
-    finding to reason from.
-    """
-    record = session.get(RetestSessionRecord, session_id)
-    if record is None:
-        return None
-    with contextlib.suppress(HTTPException):
-        return _current_or_404(session, record.finding_id).to_domain()
-    return None
 
 
 def _finding_out(identity: FindingRecord, version: FindingVersionRecord) -> FindingOut:
@@ -967,40 +945,37 @@ def run_message(
     registry: SessionRegistry,
     session_id: int,
     text: str,
-    qa_agent: Agent[None, str],
-    finding: Finding | None,
     agent: RetestAgent,
     make_sandbox: SandboxFactory,
 ) -> None:
-    """Deliver an operator chat message, waking the agent if it is parked (#163).
+    """Deliver an operator chat message to the one agent — the Claude-Code model (#163).
 
-    The chat *is* the lifecycle control (issue #163): talking to a parked agent is
-    how you start or continue it, so there is no Resume/Wake/Keep-going button.
-    What the message does depends on where the session is parked:
+    The chat *is* the lifecycle control: talking to a parked agent is how you start or
+    continue it, so there is no separate Resume/Wake/Keep-going button and no second
+    voice (ADR-0042 removed the parallel read-only Q&A). What the message does depends
+    only on where the session is:
 
-    * ``idle`` — provision the sandbox and run the first turn, with the message
-      folded into the opening prompt.
-    * ``stopped`` / ``needs_guidance`` / ``awaiting_operator`` — buffer the message
-      and resume/continue; :func:`~revalid.retest_session._resume_prompt` delivers
-      it as that turn's user message.
-    * anything else (the agent is mid-run, or a command awaits approval) — buffer
-      it for the next turn boundary as before, and answer it *now* with the
-      read-only Q&A so the operator is not left hanging.
+    * ``idle`` — provision the sandbox and run the first turn, message folded into the
+      opening prompt.
+    * ``awaiting_operator`` — the agent handed back (a reply, a guided report, "steer
+      me"); resume it with the message.
+    * ``stopped`` — resume the paused session with the message.
+    * ``awaiting_command`` — a command awaits approval; the message withdraws it and
+      steers the agent (Claude Code's "type at the permission prompt").
+    * ``working`` — the agent is mid-turn; the message is queued and the *same* agent
+      answers it at the next turn boundary (:func:`~revalid.retest_session._advance`).
+    * terminal — a finished session cannot be messaged; a no-op.
 
-    Whether the message is a question or an instruction is the **agent's** call,
-    not ours: it answers with the ungated ``respond`` tool and acts with the
-    approval-gated ``run_command``, so waking it can never execute anything the
-    operator has not approved. The Q&A stand-in is therefore skipped whenever the
-    message woke the agent — the real agent replies itself, with the full message
-    history, and two voices answering one message is noise.
+    Whether the message is a question or an instruction is the **agent's** call: it
+    answers with the ungated ``respond`` tool and acts with the approval-gated
+    ``run_command``, so waking it can never execute anything the operator has not
+    approved.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
         registry: The process-local live-session registry.
         session_id: The retest session to message.
         text: The exact operator message.
-        qa_agent: The prose Q&A agent (a stand-in model in tests).
-        finding: The session's finding, for Q&A context; ``None`` skips the reply.
         agent: The built retest agent, to wake an ``idle`` session.
         make_sandbox: The session-scoped sandbox factory, likewise.
     """
@@ -1009,31 +984,23 @@ def run_message(
         if record is None:
             return
         status = RetestSessionStatus(record.status)
+        if is_terminal(status):
+            return  # a concluded/ended/errored session cannot be messaged
         if status is RetestSessionStatus.IDLE:
-            # No live session yet, so the message cannot be buffered on one: record
-            # it here and hand it to the opening prompt instead.
+            # No live session yet, so the message cannot be buffered on one: record it
+            # here and hand it to the opening prompt instead.
             append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
             _start_idle(session, registry, session_id, agent, make_sandbox, steer=text)
             return
         submit_message(session, registry, session_id, text)
         if status is RetestSessionStatus.STOPPED:
             resume_session(session, registry, session_id)
-            return
-        if status in (RetestSessionStatus.NEEDS_GUIDANCE, RetestSessionStatus.AWAITING_OPERATOR):
-            # The agent handed control back (guidance pause or a conversational
-            # reply, issue #204); the operator's message resumes it (#163).
+        elif status is RetestSessionStatus.AWAITING_OPERATOR:
             continue_session(session, registry, session_id)
-            return
-        # Busy: the message is queued for the next turn boundary, so answer it now.
-        # answer_operator_question reads events + finding and appends an
-        # agent_message that the transcript stream surfaces.
-        if finding is not None and registry.get(session_id) is not None:
-            with contextlib.suppress(Exception):
-                answer = answer_operator_question(qa_agent, session, session_id, finding, text)
-                if answer:
-                    append_event(
-                        session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": answer}
-                    )
+        elif status is RetestSessionStatus.AWAITING_COMMAND:
+            resume_with_message_at_gate(session, registry, session_id)
+        # else ``working``: the message is queued and delivered by the running turn's
+        # _advance at the next boundary — the same agent answers when it is done.
 
 
 def run_free_launch(
@@ -1065,7 +1032,8 @@ def run_continue(
     """Resume a paused session (ADR-0034 "Keep going", background task).
 
     Runs in the background because resuming drives further agent turns. A no-op
-    unless the session is paused in ``needs_guidance`` with a live agent.
+    unless the session is parked in ``awaiting_operator`` with a live agent
+    (``needs_guidance`` folded into that state in ADR-0042).
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -1745,17 +1713,16 @@ def _register_session_routes(
         body: MessageRequest,
         background: BackgroundTasks,
         session: SessionDep,
-        qa_agent: QaAgentDep,
         agent: RetestAgentDep,
         make_sandbox: SandboxFactoryDep,
     ) -> dict[str, str]:
-        """Deliver an operator chat message, waking the agent if parked (#163).
+        """Deliver an operator chat message to the one agent, waking it if parked (#163).
 
         The chat is the lifecycle control: a message to an ``idle``, ``stopped`` or
-        ``needs_guidance`` session starts/resumes/continues it with that message as
-        the steer. While the agent is busy the message is queued for its next turn
-        and answered immediately by the read-only Q&A instead. See
-        :func:`run_message`. A no-op if the session no longer exists.
+        ``awaiting_operator`` session starts/resumes/continues it; at the approval gate
+        (``awaiting_command``) it withdraws the pending command and steers; while the
+        agent is ``working`` it is queued and the same agent answers at the next turn
+        boundary. See :func:`run_message`. A no-op if the session no longer exists.
         """
         background.add_task(
             run_message,
@@ -1763,8 +1730,6 @@ def _register_session_routes(
             registry,
             session_id,
             body.text,
-            qa_agent,
-            _session_finding(session, session_id),
             agent,
             make_sandbox,
         )
@@ -1828,8 +1793,8 @@ def _register_guidance_routes(
     ) -> dict[str, str]:
         """Manually conclude a session with the operator's determination (ADR-0034).
 
-        Available at any live point in the retest (issue #150), not only at a
-        ``needs_guidance`` pause. Records the operator's verdict (the only path that
+        Available at any live point in the retest (issue #150), not only at an
+        ``awaiting_operator`` hand-back. Records the operator's verdict (the only path that
         writes ``inconclusive``) and tears down. Runs in the background; a no-op if
         the session is already terminal.
         """

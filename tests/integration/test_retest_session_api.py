@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo
 from tests._retest_helpers import (
     script_conclude_inconclusive,
@@ -29,13 +29,12 @@ from tests._retest_helpers import (
 from revalid.app import (
     create_app,
     get_goal_agent,
-    get_qa_agent,
     get_retest_agent,
     get_sandbox_factory,
 )
 from revalid.db import IN_MEMORY, create_db_engine
 from revalid.plan import build_goal_agent
-from revalid.retest_agent import build_qa_agent, build_retest_agent
+from revalid.retest_agent import build_retest_agent
 from revalid.sandbox import CommandResult, FakeSandbox
 
 pytestmark = pytest.mark.integration
@@ -53,20 +52,6 @@ def _override_goal_agent(app: FastAPI) -> None:
         )
 
     app.dependency_overrides[get_goal_agent] = lambda: build_goal_agent(streaming(gen))
-
-
-def _override_qa_agent(app: FastAPI) -> None:
-    """Override the FR-18 Q&A agent with a stand-in so chat questions never hit a live model.
-
-    Message-posting tests would otherwise reach the real Q&A backend (a live Ollama
-    on the dev box, nothing in CI) and wedge the run — this keeps the decoupled Q&A
-    path deterministic and offline. Tests needing a specific reply override it again.
-    """
-
-    def qa_reply(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[TextPart(content="Standing in for the Q&A model.")])
-
-    app.dependency_overrides[get_qa_agent] = lambda: build_qa_agent(streaming(qa_reply))
 
 
 _IMPORT: dict[str, Any] = {
@@ -88,7 +73,6 @@ def _client() -> TestClient:
         streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
-    _override_qa_agent(app)
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     return TestClient(app)
@@ -234,7 +218,12 @@ def test_message_wakes_an_idle_session_with_that_message_as_the_steer() -> None:
 
 
 def test_message_resumes_a_stopped_session() -> None:
-    """A message to a `stopped` session picks it back up — there is no Resume button (#163)."""
+    """A message to a `stopped` session picks it back up — there is no Resume button (#163).
+
+    The session was stopped with a command pending; the message resumes it and, being a
+    message at the gate, withdraws that command and steers the agent (ADR-0042). A plain
+    resume that keeps the pending command is the separate ``/resume`` route.
+    """
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
@@ -244,31 +233,27 @@ def test_message_resumes_a_stopped_session() -> None:
         resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "keep going"})
         assert resp.status_code == 202
         state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "awaiting_command"  # resumed to the held gate
-        assert "human_message" in [e["kind"] for e in state["events"]]
+    assert state["status"] != "stopped"  # picked it back up off the message alone
+    assert "human_message" in [e["kind"] for e in state["events"]]
 
 
-def test_message_to_a_busy_session_does_not_re_run_the_agent() -> None:
-    """While a command awaits approval a message only queues + gets the Q&A reply (#163).
-
-    The waking rule is scoped to *parked* states; a session mid-gate must not be
-    re-driven behind the operator's back, or the pending command would be lost.
+def test_message_at_gate_withdraws_command_and_steers() -> None:
+    """A message sent while a command awaits approval withdraws it and steers the one
+    agent — Claude Code's "type at the permission prompt", with no separate Q&A voice (#163).
     """
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
-        before = client.get(f"/api/retest-sessions/{sid}").json()
-        assert before["status"] == "awaiting_command"
-        proposals = [e for e in before["events"] if e["kind"] == "command_proposed"]
-
-        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "what are we retesting?"})
-
-        after = client.get(f"/api/retest-sessions/{sid}").json()
-        assert after["status"] == "awaiting_command"  # undisturbed
-        # No *new* proposal: the agent was not re-run, only messaged.
-        assert len([e for e in after["events"] if e["kind"] == "command_proposed"]) == len(
-            proposals
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+        client.post(
+            f"/api/retest-sessions/{sid}/message", json={"text": "wait — check /rest instead"}
         )
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+    kinds = [e["kind"] for e in state["events"]]
+    assert "human_message" in kinds  # the operator's message is recorded
+    assert "command_rejected" in kinds  # the pending command was withdrawn, not run
+    # One voice: no parallel Q&A reply; the steered agent moved the run off the gate.
+    assert state["status"] != "awaiting_command"
 
 
 def test_conclude_from_awaiting_command_records_operator_verdict() -> None:
@@ -285,38 +270,6 @@ def test_conclude_from_awaiting_command_records_operator_verdict() -> None:
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "concluded"
         assert state["verdict_status"] == "still_open"
-
-
-def test_message_gets_immediate_agent_reply() -> None:
-    """A chat message triggers an immediate agent_message reply from the Q&A agent (FR-17).
-
-    The message is also buffered for the main loop (steering), but the reply is
-    additive and arrives without an approve/reject — proving the decoupled Q&A path.
-    """
-    app = create_app(engine=create_db_engine(IN_MEMORY))
-    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
-        streaming(script_run_then_conclude)
-    )
-    _override_goal_agent(app)
-
-    def qa_reply(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[TextPart(content="We are retesting the login SQL injection.")])
-
-    app.dependency_overrides[get_qa_agent] = lambda: build_qa_agent(streaming(qa_reply))
-    box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
-    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
-    with TestClient(app) as client:
-        client.post("/api/findings/import", json=_IMPORT)
-        sid = client.post("/api/findings/1/retest-session").json()["id"]
-        # The session is paused awaiting the proposed command (live); a question now
-        # gets an immediate reply without approving/rejecting the pending command.
-        client.post(f"/api/retest-sessions/{sid}/message", json={"text": "what are we retesting?"})
-        state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "awaiting_command"  # the pending command is undisturbed
-        kinds = [e["kind"] for e in state["events"]]
-        assert "human_message" in kinds
-        reply = next(e for e in state["events"] if e["kind"] == "agent_message")
-        assert "retesting" in reply["payload"]["text"].lower()
 
 
 def test_session_start_degrades_to_empty_goal_on_generation_failure() -> None:
@@ -421,11 +374,11 @@ def test_retest_session_flow_proposes_approves_then_hands_back() -> None:
         final = client.get(f"/api/retest-sessions/{sid}").json()
         # Guided (ADR-0039): the command runs, but the agent's `still_open` is a
         # recommendation — the session hands back rather than recording a verdict.
-        assert final["status"] == "needs_guidance"
+        assert final["status"] == "awaiting_operator"
         assert final["verdict_status"] is None
         assert any(e["kind"] == "command_output" for e in final["events"])
-        guidance = next(e for e in final["events"] if e["kind"] == "needs_guidance")
-        assert "auth still bypassable" in guidance["payload"]["reason"]
+        message = [e for e in final["events"] if e["kind"] == "agent_message"][-1]
+        assert "auth still bypassable" in message["payload"]["text"]
 
 
 def test_retest_session_rejecting_the_command_records_the_reason() -> None:
@@ -586,9 +539,9 @@ def test_retest_session_message_delivered_on_next_decision() -> None:
         final = client.get(f"/api/retest-sessions/{sid}").json()
         # Guided (ADR-0039): the agent read the message, then handed back — its
         # "saw-message" determination lands in the guidance reason, not a verdict.
-        assert final["status"] == "needs_guidance"
-        guidance = next(e for e in final["events"] if e["kind"] == "needs_guidance")
-        assert "saw-message" in guidance["payload"]["reason"]
+        assert final["status"] == "awaiting_operator"
+        message = [e for e in final["events"] if e["kind"] == "agent_message"][-1]
+        assert "saw-message" in message["payload"]["text"]
 
 
 def test_start_session_in_free_launch_auto_runs_to_verdict() -> None:
@@ -716,7 +669,6 @@ def _paused_client(script: Any) -> TestClient:
     app = create_app(engine=create_db_engine(IN_MEMORY))
     app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(streaming(script))
     _override_goal_agent(app)
-    _override_qa_agent(app)
     box = FakeSandbox(lambda cmd: CommandResult(stdout="", stderr="", exit_code=0, elapsed_ms=1))
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     return TestClient(app)
@@ -728,9 +680,9 @@ def test_pause_then_operator_conclude_writes_a_verdict() -> None:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
         state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "needs_guidance"
+        assert state["status"] == "awaiting_operator"
         assert state["verdict_status"] is None
-        assert any(e["kind"] == "needs_guidance" for e in state["events"])
+        assert any(e["kind"] == "agent_message" for e in state["events"])
 
         resp = client.post(
             f"/api/retest-sessions/{sid}/conclude",
@@ -756,15 +708,15 @@ def test_guidance_message_alone_resumes_the_agent() -> None:
     with _paused_client(script_inconclusive_then_conclude_on_message) as client:
         client.post("/api/findings/import", json=_IMPORT)
         sid = client.post("/api/findings/1/retest-session").json()["id"]
-        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "needs_guidance"
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_operator"
 
         resp = client.post(f"/api/retest-sessions/{sid}/message", json={"text": "try /rest/admin"})
         assert resp.status_code == 202
         state = client.get(f"/api/retest-sessions/{sid}").json()
-        assert state["status"] == "needs_guidance"  # resumed, then handed back a recommendation
+        assert state["status"] == "awaiting_operator"  # resumed, then handed back a recommendation
         assert state["verdict_status"] is None
-        guidance = [e for e in state["events"] if e["kind"] == "needs_guidance"]
-        assert "with the operator's steer, confirmed open" in guidance[-1]["payload"]["reason"]
+        messages = [e for e in state["events"] if e["kind"] == "agent_message"]
+        assert "with the operator's steer, confirmed open" in messages[-1]["payload"]["text"]
 
 
 def test_delete_report_ends_its_live_retest_session() -> None:
@@ -826,7 +778,6 @@ def test_session_provisions_the_sandbox_against_the_scope_host() -> None:
         streaming(script_run_then_conclude)
     )
     _override_goal_agent(app)
-    _override_qa_agent(app)
     box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
     app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
     with TestClient(app) as client:

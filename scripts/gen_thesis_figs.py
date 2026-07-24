@@ -42,6 +42,9 @@ from pathlib import Path
 SOURCES = (
     Path("docs/architecture/c4.md"),
     Path("docs/architecture/data-model.md"),
+    Path("docs/architecture/class-model.md"),
+    Path("docs/architecture/workflow.md"),
+    Path("docs/requirements/use-cases.md"),
 )
 OUT_DIR = Path("thesis/figs")
 #: Rendered files carry this prefix so they are visibly generated, and so a
@@ -77,6 +80,7 @@ MERMAID_CONFIG = {
     "flowchart": {"useMaxWidth": False, "wrappingWidth": 165},
     "sequence": {"useMaxWidth": False, "width": 160, "wrap": True},
     "er": {"useMaxWidth": False},
+    "class": {"useMaxWidth": False},
 }
 
 

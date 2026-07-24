@@ -23,17 +23,6 @@ export function givenUpReason(events: SessionEvent[]): string | null {
 }
 
 /**
- * Why a session paused for operator guidance (ADR-0034): the reason on the latest
- * `needs_guidance` event — the agent handing back after exhausting the options it
- * could think of. Null if no such event has arrived.
- */
-export function guidanceReason(events: SessionEvent[]): string | null {
-  const paused = [...events].reverse().find((e) => e.kind === "needs_guidance");
-  if (!paused) return null;
-  return String(paused.payload.reason ?? "") || null;
-}
-
-/**
  * Seqs of `command_proposed` events that were auto-approved under free-launch —
  * a proposal whose next command decision in the (strictly ordered) transcript is
  * a `command_approved` flagged `auto`. Used to tag auto-run commands in the chat

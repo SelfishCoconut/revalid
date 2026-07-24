@@ -28,17 +28,23 @@ CVSS/MITRE enrichment every door shares.
 ## Retest goal and agentic session
 
 `plan` generates the retest **goal** (FR-04, repurposed by ADR-0032);
-`sandbox` provides the egress-locked execution environment; `retest_agent` is the
-Pydantic AI agent and its two tools; `retest_session` is the orchestrator that
-owns the lifecycle, the transcript and the approval gate.
+`sandbox` provides the egress-locked execution environment and `scope` parses the
+host it is provisioned against; `retest_agent` is the Pydantic AI agent and its
+two tools; `retest_session` is the orchestrator that owns the lifecycle, the
+transcript and the approval gate; `deltas` is the transient reasoning-token
+channel that deliberately never reaches that transcript.
 
 ::: revalid.plan
+
+::: revalid.scope
 
 ::: revalid.sandbox
 
 ::: revalid.retest_agent
 
 ::: revalid.retest_session
+
+::: revalid.deltas
 
 ## Verdicts, audit and export
 

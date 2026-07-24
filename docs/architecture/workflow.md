@@ -34,7 +34,8 @@ Three transports carry data to the browser, by need:
 | Transport | Used for | Why |
 |---|---|---|
 | REST (`/api/...`) | every mutation and most reads | plain request/response |
-| WebSocket (`/api/retest-sessions/{id}/stream`) | the retest console | the operator must see each transcript event as it happens |
+| WebSocket (`/api/retest-sessions/{id}/stream`) | the retest console | the operator must see each transcript event as it happens, plus the model's reasoning tokens while a turn is in flight |
+| SSE (`/api/chats/{id}/messages/stream`) | the corpus chat reply | one-way, one-shot token stream — an EventSource-shaped response is all it needs (ADR-0038) |
 
 ## The object model, and what owns what
 
@@ -134,27 +135,39 @@ but does not rewrite it behind the operator's back.
 ## Stage 3 — the agentic retest session
 
 This is the heart of the system. Launching (`POST
-/api/findings/{id}/retest-session`) creates a `starting` session row, returns
-`202` immediately, and schedules the first agent step as a background task.
+/api/findings/{id}/retest-session`) creates a `working` session row, returns
+`202` immediately, and schedules the first agent step as a background task — the
+sandbox is provisioned at the top of that first `working` turn (a *deferred*
+launch, or a `Restart`, instead lands on `idle` and waits for `Start`).
 
 ### Provisioning: the sandbox *is* the allowlist
 
-`start_and_step` calls `sandbox.start()` before the agent thinks at all. The
+`start_and_step` calls `sandbox.start(scope_hosts)` before the agent thinks at
+all, where `scope_hosts` are the launch scope's endpoints parsed down to their
+hosts by `scope.py` (`https://example.com/#/login` → `example.com`). The
 production `DockerSandbox`:
 
 1. creates a per-session Docker network named `revalid-retest-{session_id}` with
    `internal=True` — **no route to the host and no route to the internet**;
-2. connects the allowlisted lab container (`revalid-juice-shop`) to it;
-3. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
+2. **lab scope** (empty, or every host is the lab): connects the authorised lab
+   container (`revalid-juice-shop`) to that network as its only other member;
+3. **online scope** (ADR-0041): instead launches a per-session Squid container on
+   the network, configured deny-all-by-default with the scoped host(s) as the
+   only `dstdomain` allowlist, and points the sandbox's proxy variables at it —
+   so the one route out reaches the scoped host and nothing else. Any failure
+   while provisioning it **fails closed**: the session dies rather than running
+   with open egress;
+4. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
    base carrying the pentest toolbox (nmap, sqlmap, nikto, hydra, …) — on that
-   network,
-   idling on `sleep infinity` so it persists for the whole session.
+   network, idling on `sleep infinity` so it persists for the whole session.
 
-This is what FR-06 means in the current design: **the allowlist is network
-membership**, not an HTTP-layer check. The agent is not *asked* to stay on
-target — it is physically unable to reach anything the operator did not attach.
-Consequently the scope is fixed when the sandbox is provisioned: changing it
-needs a fresh session (the `target_set` event is emitted once and never again).
+This is what FR-06 means in the current design: **the allowlist is topology**,
+not an HTTP-layer check — network membership on the lab, a closed egress
+allowlist online. The agent is not *asked* to stay on target; it is physically
+unable to reach anything the operator did not scope. Note that online mode
+permits HTTP(S) only — non-HTTP egress has no path out at all. Either way the
+scope is fixed when the sandbox is provisioned: changing it needs a fresh session
+(the `target_set` event is emitted once and never again).
 
 Two operational details worth knowing: `start()` self-heals a network left
 behind by a crashed prior session of the same id (it would otherwise 409
@@ -178,29 +191,69 @@ a fresh attempt, or **Conclude** it themselves at any live point.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> idle: Restart (deferred)
-    [*] --> starting: launch
-    idle --> starting: operator Start
-    starting --> thinking: sandbox up, first agent step
-    thinking --> awaiting_command: proposes run_command (gated)
-    awaiting_command --> running_command: operator approves
-    awaiting_command --> thinking: operator rejects (agent reconsiders)
-    running_command --> thinking: output fed back to the agent
-    thinking --> needs_guidance: agent is out of ideas (ADR-0034)
-    needs_guidance --> thinking: operator steers → Keep going
-    thinking --> awaiting_operator: AwaitOperator (conversational reply, ADR-0039)
-    awaiting_operator --> thinking: operator messages back
-    thinking --> thinking: Restart model — abort + re-run a wedged turn (ADR-0039)
-    awaiting_command --> stopped: operator Stop
-    stopped --> awaiting_command: operator Resume
-    needs_guidance --> concluded: operator concludes manually
-    thinking --> concluded: ConcludeOutput(fixed | still_open)
+    [*] --> idle: deferred / Restart
+    [*] --> working: launch
+    idle --> working: operator Start (or a message)
+    working --> awaiting_command: proposes run_command (gated)
+    awaiting_command --> working: operator approves — the command runs inside the next turn
+    awaiting_command --> working: operator rejects (agent reconsiders)
+    awaiting_command --> working: operator message at the gate — withdraws the command, re-runs the agent (ADR-0042)
+    working --> awaiting_operator: agent hands back — reply, guided one-action report, verdict rec, or out of options (ADR-0040/0042)
+    awaiting_operator --> working: operator messages back
+    working --> working: Restart model — abort + re-run a wedged turn (ADR-0039)
+    working --> stopped: operator Stop
+    stopped --> working: operator Resume
+    stopped --> awaiting_command: a message picks it back up
+    awaiting_operator --> concluded: operator concludes manually
+    working --> concluded: ConcludeOutput(fixed | still_open) — free-launch only
     stopped --> concluded: operator concludes manually
-    thinking --> error: unhandled failure
+    working --> error: unhandled failure
     concluded --> [*]
     error --> [*]
-    thinking --> ended: operator ends the session
+    working --> ended: operator ends the session
     ended --> [*]
+```
+
+The same loop as an activity, with each step labelled by **who is responsible for
+it**. That labelling is the point of the figure: the agent only ever *proposes*,
+the sandbox only ever *executes*, and every step that causes something to happen
+in the world is the auditor's. Colour repeats the same information — blue for the
+auditor, light blue for the orchestrator, amber for the agent, red for the
+egress-locked sandbox.
+
+<!-- thesis-fig: retest-activity -->
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 26, "wrappingWidth": 320}}}%%
+flowchart TB
+    A1(["AUDITOR · wake the agent"])
+    O1["SYSTEM · provision the sandbox for the scope"]
+    G1["AGENT · reason over goal, history, observations"]
+    G2{"AGENT · how does this turn end?"}
+    O2["SYSTEM · record the proposal, suspend the run"]
+    A2{"AUDITOR · approve · reject · message · conclude"}
+    S1["SANDBOX · run it against the only reachable peer"]
+    O6["SYSTEM · park in awaiting_operator"]
+    O7["SYSTEM · record the verdict + evidence, tear down"]
+
+    A1 --> O1 --> G1 --> G2
+    G2 -->|"proposes a command"| O2 --> A2
+    G2 -->|"hands back"| O6
+    G2 -->|"concludes — Auto-run only"| O7
+    A2 -->|approve| S1
+    A2 -->|"reject / message"| G1
+    A2 -->|"conclude it yourself"| O7
+    S1 -->|"guided — one action per turn"| O6
+    S1 -->|"Auto-run"| G1
+    O6 --> A2
+
+    classDef human fill:#dbe4ff,stroke:#3b5bdb,stroke-width:2px
+    classDef sys fill:#e7f5ff,stroke:#1971c2
+    classDef agent fill:#fff9db,stroke:#f08c00
+    classDef box fill:#fff5f5,stroke:#e03131,stroke-width:2px
+    class A1,A2 human
+    class O1,O2,O6,O7 sys
+    class G1,G2 agent
+    class S1 box
 ```
 
 The gate is not a policy check the code performs after the fact — it is
@@ -218,19 +271,29 @@ Two non-terminal states give the operator lifecycle control: **`idle`** (created
 but not started — a Restart lands here so the fresh attempt never auto-runs; the
 sandbox is provisioned only on Start) and **`stopped`** (an operator pause that
 keeps the sandbox alive so Resume can continue). Stop is *cooperative*: a command
-already running finishes and its output is recorded before the session parks. A
-third light non-terminal state, **`awaiting_operator`** (ADR-0039), is where the
-agent lands after a conversational reply — it answered the operator (a greeting, a
-small-talk answer) and handed back without running anything, sandbox kept alive; it
-is deliberately lighter than `needs_guidance` (no "needs your guidance" banner), and
-the operator's next message resumes it.
+already running finishes and its output is recorded before the session parks. The
+agent's own hand-back state is **`awaiting_operator`** (ADR-0039/0040/0042): the
+agent lands here whenever it hands control back without concluding — a
+conversational reply (a greeting, a small-talk answer), a guided one-action report
+("ran X — I'd try Y next"), a verdict *recommendation* for the operator to confirm,
+or an honest "I've exhausted my options". That last case folds in the retired
+`needs_guidance` state (ADR-0042): there is no longer a separate "needs your
+guidance" banner — every hand-back is the same lightweight "your move" prompt. The
+sandbox stays alive throughout, and the operator's next message resumes the agent.
 
 The agent has exactly two tools — `run_command` (gated) and `respond` (prose to the
 operator, runs nothing) — and three ways a turn can end: a gated command
-(`DeferredToolRequests`), a verdict (`ConcludeOutput`), or a conversational
-hand-back (`AwaitOperator`, ADR-0039). The instructions make the operator's live
-message the agent's priority and the goal its background context, so a plain "hi"
-gets a reply and a wait, not a dash for the goal.
+(`DeferredToolRequests`), a verdict (`ConcludeOutput`), or a hand-back to
+`awaiting_operator` (`AwaitOperator`, ADR-0039). The instructions make the
+operator's live message the agent's priority and the goal its background context,
+so a plain "hi" gets a reply and a wait, not a dash for the goal.
+
+There is **one agent and one chat** (ADR-0042): the earlier parallel read-only Q&A
+agent is gone. A question to a `working` agent is queued and answered by that same
+agent at the next turn boundary (a `messages_delivered` event marks the hand-off);
+a message sent while a command waits at the `awaiting_command` gate withdraws the
+proposal and steers the agent — "typing at the permission prompt" — rather than
+opening a second conversation.
 
 ### What the operator can do mid-session
 
@@ -238,24 +301,29 @@ gets a reply and a wait, not a dash for the goal.
 |---|---|---|
 | Approve / reject a command | `.../commands/{cid}/approve\|reject` | the only way anything executes |
 | Run their own command | `.../human-command` | executes in the *same* sandbox; the output is buffered and handed to the agent as an observation on its next turn |
-| Send a message | `.../message` | steers the agent, or asks it a question |
+| Send a message | `.../message` | steers or questions the *same* agent — queued to a `working` turn and delivered at the next boundary, or, at the `awaiting_command` gate, withdrawing the pending command and re-running the agent (ADR-0042) |
 | Change the goal | `.../goal`, `.../goal/regenerate` | the goal stays user-owned |
 | Free launch | `.../free-launch` | auto-approves the agent's commands so the loop runs unattended — the one deliberate relaxation of the gate (ADR-0029); the egress lock still holds |
 | **Start** | `.../start` | provisions the sandbox and runs the first step of an `idle` (deferred/Restarted) session |
 | **Stop / Resume** | `.../stop`, `.../resume` | cooperatively pause a running session (sandbox kept alive) and continue it (issue #150) |
 | **Restart model** | `.../restart-model` | aborts a wedged in-flight turn and re-runs it — unstick a frozen model (ADR-0039); keeps the session, sandbox, goal and history (distinct from Restart) |
 | **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
-| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes a `needs_guidance` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
+| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes an `awaiting_operator` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
 | End it | `.../end` | terminal; sandbox torn down |
 
 ### Concluding — and the honest "I don't know"
 
 The agent's structured output is a `ConcludeOutput(status, rationale)`. Only
-`fixed` and `still_open` become verdicts. An `inconclusive` result is **not**
-written as a verdict: the session pauses in `needs_guidance` with the agent's
-reason, keeps the sandbox alive, and asks the operator to steer or to conclude
-themselves (ADR-0034). A machine that has run out of ideas is not evidence that
-a vulnerability is fixed.
+`fixed` and `still_open` can become a verdict, and the agent authors one itself
+**only under free launch (Auto-run)**: there it drives the loop to a `concluded`
+verdict unattended. In **guided mode** the agent never self-concludes — after an
+approved command it parks in `awaiting_operator` with its next suggestion, and a
+determination is surfaced as a verdict *recommendation* for the operator to
+confirm, not self-recorded (ADR-0040). An `inconclusive` result is **never**
+written as a verdict in either mode: the session pauses in `awaiting_operator`
+with the agent's reason, keeps the sandbox alive, and asks the operator to steer
+or to conclude themselves (ADR-0034/0042). A machine that has run out of ideas is
+not evidence that a vulnerability is fixed.
 
 When a real determination is reached, `record_verdict` writes a `VerdictRecord`
 (actor = agent) plus `AgenticEvidence` assembled **from the transcript** — the
@@ -289,11 +357,14 @@ read; it has no sandbox, cannot execute anything and cannot mutate a row. The
 agent runs inline and the caller awaits the whole answer; threads are persisted
 (`chat_sessions` / `chat_messages`) so a conversation survives a reload.
 
-!!! note "In flight: token-by-token streaming"
-    Replies currently arrive in one block. A streaming variant — an async
-    `POST /api/chats/{id}/messages/stream` emitting Server-Sent Events — is
-    designed in **ADR-0038** and tracked by [#140](https://github.com/SelfishCoconut/revalid/issues/140);
-    it is not on `main` yet. The blocking endpoint above is kept as the fallback.
+!!! note "Token-by-token streaming"
+    The reply streams as it is generated: `POST /api/chats/{id}/messages/stream`
+    emits Server-Sent Events (one `event: token` per delta, a terminal
+    `event: done`) and the SPA grows the assistant bubble live, handing off to the
+    persisted thread on completion. That endpoint has to be **async** — the sync
+    `run_stream_sync` binds its anyio portal to the calling thread and dies inside
+    a `StreamingResponse` — so it runs `agent.run_stream` on the request's own
+    event loop; the blocking endpoint above is kept as the fallback (**ADR-0038**).
 
 ## Choosing the LLM backend
 
@@ -320,6 +391,8 @@ exercisable with no network and no daemon.
 | `retest_session.py` | the orchestrator: lifecycle, transcript, gate, verdicts |
 | `retest_agent.py` | the Pydantic AI agent and its two tools |
 | `sandbox.py` | `Sandbox` protocol, `DockerSandbox` (egress-locked), `FakeSandbox` |
+| `scope.py` | parses a scope endpoint to the host the sandbox is provisioned against (ADR-0041) |
+| `deltas.py` | transient, never-persisted channel for the model's reasoning tokens mid-turn |
 | `reports_chat.py` | read-only corpus Q&A agent + chat threads |
 | `audit.py`, `export.py`, `eval.py` | re-derivation, versioned export, FR-15 scoring |
 | `db.py`, `settings.py`, `llm.py` | persistence, runtime settings, model resolution |

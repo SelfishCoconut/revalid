@@ -119,10 +119,17 @@ conservative, evidence-linked verdict --- \emph{still-open}, \emph{fixed} or
 exploiting new vulnerabilities, it specialises in re-verifying reported ones under
 per-command human oversight, defaulting to an inconclusive verdict whenever the
 evidence is ambiguous. Built on a model-agnostic language-model layer that runs
-against either a hosted or a locally hosted model, the system is exercised end-to-end
-on a real penetration-test report; a quantitative evaluation of its verdict
-reliability and of the effort it saves over manual retesting is defined, together
-with its harness and ground-truth basis, as the immediate next step this work opens.
+against either a hosted or a locally hosted model, the system is evaluated
+end-to-end on a real penetration-test report against a live, deliberately vulnerable
+target. On a locally hosted model it reached the correct verdict on eight of twelve
+findings and hedged on the remaining four, never once declaring a still-exploitable
+finding fixed --- meeting the safety constraint the design exists to enforce, while
+falling narrowly short of the accuracy target on hedges rather than errors. Its
+machine time was comparable to a manual pass over the same findings, and removing the
+approval gate bought no meaningful speed, indicating that per-command human oversight
+costs far less than it is usually assumed to. Scaling that study to more reports,
+targets that include genuinely remediated findings, and a stronger reasoning backend
+is the immediate next step this work opens.
 
 % -------------------------------
 % Agradecimientos

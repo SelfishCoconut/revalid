@@ -48,7 +48,6 @@ import {
   autoApprovedSeqs,
   currentFreeLaunch,
   givenUpReason,
-  guidanceReason,
 } from "../lib/sessionDerivations";
 import { STATUS_META, type KnownStatus } from "../lib/status";
 import type { VerdictStatus } from "../api/types";
@@ -87,7 +86,7 @@ function toTerminalLines(events: SessionEvent[]): string[] {
 const OVER_STATUSES = new Set(["concluded", "ended", "given_up", "error"]);
 
 /** Statuses where the agent is actively working, so the operator can Stop it (#150). */
-const RUNNING_STATUSES = new Set(["starting", "thinking", "awaiting_command", "running_command"]);
+const RUNNING_STATUSES = new Set(["working", "awaiting_command"]);
 
 /** Extract the ordered plan steps from an event payload (defensively typed). */
 function payloadSteps(payload: Record<string, unknown>): string[] {
@@ -122,8 +121,8 @@ function StepList({ steps }: { steps: string[] }) {
   );
 }
 
-/** Statuses where the agent is computing its next turn (an LLM call is in flight). */
-const THINKING_STATUSES = new Set(["starting", "thinking", "running_command"]);
+/** The status where the agent is actively working a turn (its LLM call is in flight). */
+const THINKING_STATUSES = new Set(["working"]);
 
 /** Whether the agent is actively working — drives the live "thinking" indicator. */
 function isThinking(status: string): boolean {
@@ -134,12 +133,9 @@ function isThinking(status: string): boolean {
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     idle: "Not started",
-    starting: "Working",
-    thinking: "Working",
-    running_command: "Working",
+    working: "Working",
     awaiting_command: "Awaiting your approval",
-    needs_guidance: "Paused — needs you",
-    awaiting_operator: "Waiting for you",
+    awaiting_operator: "Your move",
     stopped: "Paused by you",
     concluded: "Concluded",
     given_up: "Ended",
@@ -585,10 +581,10 @@ export function RetestSession({
                 Restart model
               </Button>
             )}
-            {/* Conclude is reachable from any live state (#150). In needs_guidance the
-                pause banner carries its own Conclude button, so skip it here to keep
-                a single entry point. */}
-            {sandboxLive && !concluding && status !== "needs_guidance" && (
+            {/* Conclude is reachable from any live state (#150). In awaiting_operator the
+                hand-back prompt carries its own Record-verdict button, so skip it here to
+                keep a single entry point. */}
+            {sandboxLive && !concluding && status !== "awaiting_operator" && (
               <Button
                 variant="ghost"
                 onClick={() => {
@@ -807,33 +803,31 @@ export function RetestSession({
                 </p>
               </div>
             )}
-            {status === "needs_guidance" ? (
-              // Paused for guidance (ADR-0034): the agent handed back after
-              // exhausting its options. The operator steers (chat/commands below)
-              // and keeps going, or concludes the retest themselves. Sandbox alive.
+            {status === "awaiting_operator" ? (
+              // The agent handed control back — "your move" (ADR-0042). Its message
+              // (a reply, a guided "ran X — I'd try Y next" report, a verdict
+              // recommendation, or "I'm stuck") is in the chat above. Prompt the
+              // operator to steer on, or record the verdict now. Sandbox stays alive.
               <div
-                aria-label="needs guidance"
+                aria-label="handed back"
                 className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
               >
                 <div>
                   <span className="flex items-center gap-2 text-iris-fg">
-                    <AlertIcon />
-                    <Eyebrow>Paused — needs your guidance</Eyebrow>
+                    <FlagIcon />
+                    <Eyebrow>The agent handed back — your move</Eyebrow>
                   </span>
                   <p className="mt-1 text-sm text-fg">
-                    {guidanceReason(events) ?? "The agent asked for your guidance."}
-                  </p>
-                  <p className="mt-1 text-xs text-dim">
-                    Reply below to keep it going — your message is the steer. Or conclude the retest
-                    yourself.
+                    Reply below to keep it going — your message is the steer — or conclude to record
+                    the verdict now.
                   </p>
                 </div>
-                {/* No "Keep going" button: replying *is* keeping going (#163). The
-                    Conclude form renders further down the thread (#157). */}
+                {/* No "Keep going" button: replying *is* keeping going (#163). Conclude
+                    opens the verdict form further down the thread (#157). */}
                 {!concluding && (
                   <div className="flex flex-wrap gap-2">
                     <Button
-                      variant="ghost"
+                      variant="accent"
                       onClick={() => {
                         setConcluding(true);
                       }}
@@ -1075,7 +1069,7 @@ export function RetestSession({
                 placeholder={
                   isIdle
                     ? "Tell the agent to start…"
-                    : isStopped || status === "needs_guidance"
+                    : isStopped || status === "awaiting_operator"
                       ? "Reply to pick it back up…"
                       : "Message the agent…"
                 }

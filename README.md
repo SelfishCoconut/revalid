@@ -55,9 +55,9 @@ evidence-backed workflow — **report in → verdict out**, with the proof attac
 | --- | --- |
 | **📥 Ingest anything** | PDF reports parsed with `pdfplumber` (FR-01), DefectDojo-style JSON, or a manual-entry escape hatch (FR-02) — all landing on one internal model. |
 | **🧠 Extract & enrich** | An LLM pulls out structured findings and reproduction steps (FR-03), each enriched with an inferred **CVSS** score and **MITRE ATT&CK** mapping when the report omits them — stated values verbatim, derived ones flagged `inferred` (FR-19). |
-| **🛑 Human-in-the-loop retest** | The agent proposes **one command at a time**; you approve or reject *every* one before it runs (FR-17). It owns exactly two tools — a gated shell and a prose channel — and you can steer it mid-session or take the shell yourself with `!<command>`. |
-| **🐳 Contained by construction** | Each session gets an ephemeral Docker container on a per-session `--internal` network with only the allowlisted target attached. Egress control **is** network membership: there is no route to the host, the internet, or anything else (FR-06). |
-| **⚖️ Verdicts with proof** | `still open` / `fixed`, pinned to the real output of the deciding command (FR-09). An honest `needs guidance` hands the session back to you instead of guessing — and *you* adjudicate the final call. |
+| **🛑 Human-in-the-loop retest** | The agent proposes **one command at a time**; you approve or reject *every* one before it runs (FR-17). It owns exactly two tools — a gated shell and a prose channel — and you can steer it mid-session by typing in the chat, or take the shell yourself at the terminal's `operator$` prompt. |
+| **🐳 Contained by construction** | Each session gets an ephemeral Docker container on a per-session `--internal` network with only the target you scoped attached. Egress control **is** topology: network membership for a lab target, a deny-all-but-scope proxy for an online one — no route to the host, the internet, or anything else (FR-06). |
+| **⚖️ Verdicts with proof** | `still open` / `fixed`, pinned to the real output of the deciding command (FR-09). Guided, the agent hands back a *recommendation* rather than ruling; out of ideas, it says so instead of guessing — either way *you* make the final call. |
 | **🔗 Audit & export** | A read-only re-derivation proves every verdict still follows from its append-only transcript (FR-10); a schema-versioned JSON export feeds the evaluation harness (FR-12, FR-15). |
 | **💬 Ask the corpus** | A read-only chat agent over every loaded report, with typed DB query tools and persisted threads (FR-18). |
 | **🔌 Local-first LLM** | Ships defaulting to a **local Ollama** model; swap to the Claude API (or any Pydantic AI backend) from the Settings page — no code change, no restart (FR-13). |
@@ -287,14 +287,18 @@ regulation (*Reglamento de Trabajos Fin de Grado*, ESII, Feb 2026, §6):
 > [!WARNING]
 > `revalid` retests **only explicitly authorised targets** — by default, local lab containers such as
 > OWASP Juice Shop. Authorisation is enforced in code, not in policy: the sandbox sits on an isolated
-> Docker `--internal` network with only the authorised target attached, so it has *no route* to the
-> host, the internet, or any other system. Every agent command additionally passes a human approval
-> gate. This is a revalidation tool for findings from an authorised audit — never an attack tool.
+> Docker `--internal` network, so it has *no route* to the host, the internet, or any other system.
+> The reachable set is whatever the operator scoped, and nothing else — for a lab target that is the
+> single container attached to the session network; for an online host it is a per-session
+> deny-all-by-default egress proxy allowlisting only that host, which **fails closed** if it cannot be
+> provisioned ([ADR-0041](docs/adr/0041-scope-egress-proxy-online-targets.md)). Every agent command
+> additionally passes a human approval gate. This is a revalidation tool for findings from an
+> authorised audit — never an attack tool.
 >
-> Two limits of that boundary, stated plainly (see the ADR-0025 update of 2026-07-22): the lock
-> confines *the agent*, not code the agent successfully executes **on the target**; and on hosts whose
-> resolver is a loopback stub (systemd-resolved), Docker still proxies DNS out of the sandbox. Public
-> IPs are not a supported target — the reachable set is the lab container, by construction.
+> Three limits of that boundary, stated plainly (see the ADR-0025 update of 2026-07-22 and ADR-0041):
+> the lock confines *the agent*, not code the agent successfully executes **on the target**; on hosts
+> whose resolver is a loopback stub (systemd-resolved), Docker still proxies DNS out of the sandbox;
+> and online mode permits HTTP(S) to the scoped host only — non-HTTP egress has no path out at all.
 
 ## 📜 License
 

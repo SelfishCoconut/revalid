@@ -11,16 +11,17 @@ surrendering the human judgement that a compliance-grade verdict demands. The re
 \emph{revalid}, is a deliberately narrow tool: it does not discover or exploit
 vulnerabilities, but re-executes the reproduction steps of an already-reported finding
 under a per-command human gate and returns a conservative, evidence-linked verdict.
-Whether that specialisation earns its keep is ultimately an empirical question --- one
-this work frames and equips but leaves open. The first three objectives are realised in
-the artefact: penetration-test reports are analysed into findings and their reproduction
-steps, those steps are interpreted into gated verification commands, and a
-human-supervised retest turns them into an evidence-backed verdict. The fourth --- a
-quantitative evaluation of verdict reliability against ground truth and of the effort
-saved over manual retesting --- is defined, together with its harness and ground-truth
-basis, as the immediate next step rather than a completed result. This closing chapter
-steps back from the artefact to set down what the work \emph{taught}, and how the degree
-made it possible.
+Whether that specialisation earns its keep is ultimately an empirical question. The
+first three objectives are realised in the artefact: penetration-test reports are
+analysed into findings and their reproduction steps, those steps are interpreted into
+gated verification commands, and a human-supervised retest turns them into an
+evidence-backed verdict. The fourth --- a quantitative evaluation of verdict
+reliability and of the effort saved over manual retesting --- is addressed by the
+preliminary study of Chapter~\ref{ch:evaluation}, which exercises the whole pipeline
+against a real report on a live target and reports a first result; scaling that study
+to more reports, targets and a stronger model backend is the immediate next step
+rather than a completed one. This closing chapter steps back from the artefact to set
+down what the work \emph{taught}, and how the degree made it possible.
 
 \section{Lessons learned}
 \label{sec:lessons}
@@ -86,19 +87,83 @@ increasingly demands, and it would be perverse to ignore it --- but using it
 \section{Future work}
 \label{sec:future}
 
-Several directions remain open. The most immediate is the evaluation itself: running
-the harness over the ground-truth report set to quantify verdict accuracy against
-ground truth and the time saved against manual retesting --- the measurement this work
-sets up but does not yet report. Beyond it, the quality of a verdict depends on the
-panel of assessors behind it, and broadening that panel is the most direct lever on
-verdict reliability; the system would also benefit from a wider range of lab targets
-and report formats. Further out, the tightest opportunity is to close the loop between
-remediation and revalidation: as automated code-fixing agents such as
-CodeMender~\cite{codemender} begin
-to \emph{apply} fixes, an automated, human-gated tool to \emph{confirm} those fixes
-becomes a natural complement rather than a curiosity.
+Several directions remain open, from extending the measurement this work sets up to
+lifting the single-operator scope it deliberately adopted.
 
-\section{Growing the application}
+\subsection{Strengthening the evaluation and the verdicts}
+\label{subsec:future-eval}
+
+The most immediate is to widen the evaluation of Chapter~\ref{ch:evaluation}: to run
+the harness over a larger, independently established ground-truth set --- more
+findings, more report formats and lab targets with genuinely \emph{fixed} findings
+among them, not only vulnerable ones --- so that verdict accuracy and time saved are
+measured at scale rather than on a first sample. Verdict quality then rests chiefly on
+the language-model backend and the guidance it is given: the preliminary run shows a
+small local model straining at endpoint discovery and long transcripts, so a stronger
+reasoning model --- the hosted Claude backend over a local one --- is the most direct
+lever on reliability. Further out, the tightest opportunity is to close the loop
+between remediation and revalidation: as automated code-fixing agents such as
+CodeMender~\cite{codemender} begin to \emph{apply} fixes, an automated, human-gated
+tool to \emph{confirm} those fixes becomes a natural complement rather than a
+curiosity.
+
+\subsection{Verifying browser-observable findings}
+\label{subsec:future-browser}
+
+A sharper limitation surfaced in the preliminary evaluation of
+Chapter~\ref{ch:evaluation}: a whole class of vulnerabilities can be confirmed only by
+observing its effect take shape in a rendered page, which a purely command-line, HTTP
+retest cannot see. Stored cross-site scripting and server-side template injection are
+the clearest cases --- with DOM-based and reflected scripting alongside them: a retest
+over HTTP can establish that a payload is stored or reflected, but not that the injected
+script \emph{executes} in the browser or that the template expression is
+\emph{evaluated} on render. Faced with that gap the system did what NFR-01 demands ---
+it returned an \emph{inconclusive} verdict rather than guessing \emph{fixed}, a safe
+hedge noted among the threats to validity (Section~\ref{sec:eval-threats}) rather than a
+confident call.
+
+The natural improvement is to give the retest sandbox eyes. A headless browser, driven
+inside the same network-isolated sandbox and under the same per-command human gate as
+every other action, would let the agent load the response, run its scripts and watch
+whether the payload actually fires --- turning a principled hedge into a confident
+confirmation on exactly the findings the current design must otherwise leave open.
+Browser-driven verification in fact existed in an earlier iteration of the project and
+was retired when the batch architecture it belonged to was removed; reviving it as one
+more tool the agent can reach for, now inside the agentic sandbox, would recover that
+capability on the disciplined foundation the rest of the system was rebuilt on.
+
+\subsection{Observing the model's own work}
+\label{subsec:future-observability}
+
+A third direction follows from a limitation this work states rather than solves, and
+the evaluation of Chapter~\ref{ch:evaluation} is what makes it pressing. Reproducibility
+(NFR-02) is met at the level of the \emph{verdict}: the session transcript records every
+command, its real output and the determination drawn from them, and the audit re-derives
+each stored verdict from it. What the trail does \emph{not} capture is the model's side
+of each exchange --- the exact prompt, the parameters, the token usage and the latency of
+every individual call. That gap is tolerable for the claim actually made, since a verdict
+is re-derivable without it, but it limits precisely the questions the preliminary study
+had to answer by hand or leave open: why a particular turn proposed the command it did,
+whether the four hedged findings failed on reasoning or on context length, and what a
+retest costs in tokens and time on one backend against another --- the comparison
+Section~\ref{sec:eval-time} could only make in wall-clock, and only by naming the model
+loaded at the time.
+
+Closing that gap does not require building anything, which is what makes it attractive.
+Pydantic~AI already emits OpenTelemetry spans for every agent step, so an
+LLM-observability platform such as Langfuse~\cite{langfuse} --- open-source and
+self-hostable, and therefore compatible with the localhost-only posture of NFR-03 and
+with the privacy argument of Section~\ref{subsec:eval-local} --- can ingest them with an
+instrumentation call rather than a redesign. A wider evaluation instrumented that way
+would report not only how often the system is right, but what each verdict cost and
+which prompt produced it, turning the backend comparison from an observation into a
+measurement. It is worth being clear about what such a platform would and would not add.
+It is a development and analysis instrument, not a second audit trail: the append-only
+transcript remains the record a verdict is derived from, because the reproducibility
+argument of Section~\ref{sec:design-data} depends on that record being written by the
+system itself rather than by an optional external collector.
+
+\subsection{Growing the application}
 \label{sec:scaling}
 
 \emph{revalid} was deliberately scoped as a local, single-operator application, a

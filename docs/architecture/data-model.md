@@ -85,7 +85,7 @@ erDiagram
     FINDING_NOTES {
         int id PK
         int finding_id FK
-        string stage "extract-plan-approve-retest-verdict-general"
+        string stage "extract-goal-retest-verdict-general (+legacy plan-approve)"
         string body
         string author
         datetime created_at
@@ -105,7 +105,7 @@ erDiagram
         int id PK
         int session_id FK
         int seq "monotonic per session"
-        string kind "15 event kinds"
+        string kind "16 event kinds"
         json payload
         datetime created_at
     }
@@ -173,7 +173,7 @@ flowchart LR
     F(["finding identity<br/>(findings row)"])
     F --- A
     N1["note @ extract"] --> F
-    N2["note @ plan<br/>= the goal stage"] --> F
+    N2["note @ goal"] --> F
     N3["note @ retest"] --> F
     N4["note @ verdict"] --> F
 
@@ -185,51 +185,79 @@ flowchart LR
 The evaluation depends on this: scoring "did the model get it right" requires
 knowing what the model actually said, *after* a human has corrected it.
 
-Notes are tagged with the stage they were written on. The enum keeps the legacy
-`plan` and `approve` values from the retired batch path — the **goal** stage
-tags its notes `plan` — and `general` marks a note left from the finding
-overview rather than a specific stage.
+Notes are tagged with the stage they were written on: `extract`, `goal`,
+`retest`, `verdict`, or `general` for a note left from the finding overview
+rather than any one stage. The enum still *reads* the retired batch path's `plan`
+and `approve` values so an older database loads, but nothing writes them — the
+goal stage tagged its notes `plan` until issue #113, and those rows are renamed
+in place by an idempotent backfill when the engine opens
+(`db._backfill_note_stages`).
 
-## Retest session lifecycle (FR-17, ADR-0034)
+## Retest session lifecycle (FR-17, ADR-0034/0042)
+
+Five live states, one agent. A turn — the LLM call *and* any command it runs —
+happens inside `working`; there is no separate `running_command`, because the
+command executes within the working turn (ADR-0042). The old `thinking`,
+`starting` and `running_command` states collapsed into `working`, and
+`needs_guidance` folded into `awaiting_operator`.
 
 <!-- thesis-fig: session-lifecycle -->
 ```mermaid
 stateDiagram-v2
-    direction TB
-    [*] --> starting
+    direction LR
+    [*] --> working: launch
+    [*] --> idle: deferred / Restart
 
-    starting --> thinking: sandbox provisioned, first agent step
-    starting --> ended: operator ends it
-    starting --> error: provisioning failed
+    idle --> working: Start
 
-    thinking --> awaiting_command: proposes run_command (gated)
-    awaiting_command --> running_command: operator approves
-    awaiting_command --> thinking: operator rejects (ToolDenied)
-    running_command --> thinking: output appended, fed back
+    working --> awaiting_command: proposes a command
+    awaiting_command --> working: approve
+    awaiting_command --> working: reject / message
 
-    thinking --> needs_guidance: agent hands back (out of ideas)
-    needs_guidance --> thinking: operator steers, Keep going
-    needs_guidance --> concluded: operator concludes manually
+    working --> awaiting_operator: agent hands back
+    awaiting_operator --> working: operator replies
+    awaiting_operator --> concluded: operator concludes
 
-    thinking --> awaiting_operator: replies (AwaitOperator, ADR-0039)
-    awaiting_operator --> thinking: operator messages back
+    working --> concluded: concludes (Auto-run only)
+    working --> stopped: Stop
+    stopped --> working: Resume
+    stopped --> concluded: operator concludes
 
-    thinking --> concluded: ConcludeOutput(fixed / still_open)
-    thinking --> error: unhandled failure
+    working --> working: Restart model
+    working --> error: unhandled failure
+    working --> ended: operator ends it
 
     concluded --> [*]
     ended --> [*]
     error --> [*]
 
-    note right of needs_guidance
-        Non-terminal, and the sandbox stays alive.
-        An agent that has run out of ideas is not
-        evidence that a vulnerability is fixed.
+    note right of awaiting_operator
+        Non-terminal: the sandbox stays alive.
+        Guided mode parks here after every
+        approved action, and the agent never
+        self-records a verdict — only the
+        operator concludes (ADR-0034/0040/0042).
     end note
 ```
 
-`given_up` exists in the enum but is **retired** — kept only so any legacy row
-stays terminal. Nothing writes it.
+The transitions, in full — the diagram keeps its labels short so it stays legible
+when it is scaled into the memoir:
+
+| Transition | What it is |
+|---|---|
+| `idle → working` | The operator presses **Start**, or sends a message. The sandbox is provisioned at the top of that first turn. |
+| `working → awaiting_command` | The agent proposed a `run_command`; the deferred-tool gate suspended the run. |
+| `awaiting_command → working` (approve) | The command runs **inside** the next turn — there is no separate `running_command` state. |
+| `awaiting_command → working` (reject / message) | A rejection resumes the agent with `ToolDenied`; a message **withdraws** the proposal and re-runs the agent with it (ADR-0042). |
+| `working → awaiting_operator` | The agent handed back: a reply, a guided one-action report, a verdict recommendation, or "I'm out of options". |
+| `working → working` | **Restart model** — the operator aborts a wedged in-flight turn and has it re-run (ADR-0039). |
+| `working → concluded` | The agent recorded its own verdict. Reachable **only** under Auto-run. |
+
+A verdict the agent authors itself (`working --> concluded`) is reachable **only
+under free launch / Auto-run**; in guided mode the agent never self-concludes and
+never self-records `inconclusive` — it hands back through `awaiting_operator` and
+lets the operator conclude (ADR-0034/0040). `given_up` exists in the enum but is
+**retired** — kept only so any legacy row stays terminal. Nothing writes it.
 
 ## Transcript event kinds
 
@@ -255,7 +283,6 @@ flowchart TB
         S1["command_output"]
         S2["state_change"]
         S3["target_set — scope, emitted once"]
-        S4["needs_guidance"]
         S5["free_launch_changed"]
         S6["error"]
         S7["messages_delivered — queued msg read (ADR-0039)"]
@@ -273,6 +300,11 @@ flowchart TB
     style V fill:#ebfbee,stroke:#2f9e44
 ```
 
+There is no `needs_guidance` event kind (removed in ADR-0042): an agent hand-back
+to `awaiting_operator` is recorded like any other turn — an `agent_message`
+carrying its words plus a `state_change` — so the transcript needs no special
+"stuck" marker.
+
 `verdict_adjudicated` is the operator's override. Once present, the **latest**
 one is the authoritative event for audit purposes — not the agent's original
 `verdict`.
@@ -285,8 +317,10 @@ stateDiagram-v2
     [*] --> extracting: POST /api/reports (PDF)
     extracting --> ready: findings persisted
     extracting --> failed: PdfError or any exception
+    extracting --> cancelled: operator stops it mid-run (ADR-0039)
     ready --> [*]
     failed --> [*]
+    cancelled --> [*]
 
     note right of extracting
         Only the PDF door is asynchronous.
@@ -295,5 +329,8 @@ stateDiagram-v2
         run_extraction guarantees the report
         always leaves extracting, so the SPA
         status poll is guaranteed to terminate.
+        A cancelled report keeps whatever was
+        extracted before the stop, so it stays
+        re-runnable or deletable.
     end note
 ```
