@@ -115,6 +115,7 @@ from revalid.retest_session import (
     end_session,
     is_terminal,
     load_events_after,
+    reopen_session,
     restart_model,
     resume_session,
     resume_with_message_at_gate,
@@ -1064,6 +1065,20 @@ def run_conclude(
         conclude_session(session, registry, session_id, status, rationale)
 
 
+def run_reopen(sessions: sessionmaker[Session], session_id: int) -> None:
+    """Reopen a concluded session so testing can continue (issue #214 background task).
+
+    A pure DB op (the session is already torn down); the operator wakes the now-idle
+    session to re-provision the sandbox and continue.
+
+    Args:
+        sessions: The app's session factory (each task opens a fresh session).
+        session_id: The concluded session to reopen.
+    """
+    with sessions() as session:
+        reopen_session(session, session_id)
+
+
 def run_start(
     sessions: sessionmaker[Session],
     registry: SessionRegistry,
@@ -1801,6 +1816,17 @@ def _register_guidance_routes(
         background.add_task(
             run_conclude, sessions, registry, session_id, body.status, body.rationale
         )
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/reopen", status_code=202)
+    def reopen_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
+        """Reopen a concluded session — withdraw the verdict and keep testing (issue #214).
+
+        Returns the session to ``idle`` (the verdict is kept in the transcript but
+        removed from the ``verdicts`` projection); the operator then wakes it to
+        re-provision the sandbox and continue. A no-op unless the session is concluded.
+        """
+        background.add_task(run_reopen, sessions, session_id)
         return {"status": "accepted"}
 
 

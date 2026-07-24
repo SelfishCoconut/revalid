@@ -234,6 +234,11 @@ class SessionEventKind(enum.StrEnum):
     FREE_LAUNCH_CHANGED = "free_launch_changed"
     VERDICT = "verdict"
     VERDICT_ADJUDICATED = "verdict_adjudicated"
+    #: The operator reopened a concluded session (issue #214): the recorded verdict
+    #: is cancelled (kept in the transcript, never deleted — FR-10) and the session
+    #: returns to ``idle`` so testing can continue. Payload carries the cancelled
+    #: verdict's ``status`` for the audit trail.
+    VERDICT_CANCELLED = "verdict_cancelled"
     ERROR = "error"
 
 

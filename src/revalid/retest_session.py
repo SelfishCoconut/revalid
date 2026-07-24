@@ -343,6 +343,51 @@ def adjudicate_verdict(
     session.commit()
 
 
+def reopen_session(session: Session, session_id: int) -> None:
+    """Reopen a concluded session so the operator can keep testing (issue #214).
+
+    Withdraws the recorded verdict and returns the session to ``idle``, whose wake
+    path re-provisions the sandbox and continues from the transcript (goal + scope
+    reconstructed there). The verdict is **kept in the transcript** — the ``VERDICT``
+    event plus a new ``VERDICT_CANCELLED`` event — which is the append-only audit
+    for an agentic session (ADR-0025); its row in the queryable ``verdicts``
+    projection is removed because a withdrawn verdict is no longer a current
+    determination, so the finding stops showing an outcome the operator retracted.
+
+    A pure DB operation (the session is already torn down, so the live registry is
+    never touched). A no-op unless the session is ``concluded`` — so a premature or
+    duplicate call is safe.
+
+    Args:
+        session: Active DB session for this call.
+        session_id: The concluded retest session to reopen.
+    """
+    record = session.get(RetestSessionRecord, session_id)
+    if record is None or RetestSessionStatus(record.status) is not RetestSessionStatus.CONCLUDED:
+        return
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.VERDICT_CANCELLED,
+        {"status": record.verdict_status},
+    )
+    append_event(
+        session,
+        session_id,
+        SessionEventKind.STATE_CHANGE,
+        {"to": RetestSessionStatus.IDLE.value},
+    )
+    for verdict in session.scalars(
+        select(VerdictRecord).where(VerdictRecord.session_id == session_id)
+    ):
+        session.delete(verdict)
+    record.status = RetestSessionStatus.IDLE.value
+    record.verdict_status = None
+    record.verdict_rationale = None
+    record.ended_at = None
+    session.commit()
+
+
 @dataclass
 class LiveSession:
     """In-memory live state for one active session (not restart-safe, Slice 0).
