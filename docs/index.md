@@ -73,6 +73,22 @@ Everything runs in one `uvicorn` process bound to `127.0.0.1` (NFR-03) — FastA
 serves the compiled React SPA at `/` and the JSON API under `/api`. No broker, no
 second service, SQLite for durable state.
 
+Deploying it needs nothing but Docker — no Python or Node toolchain
+([ADR-0044](adr/0044-containerised-deployment.md)):
+
+```bash
+make deploy      # app on 127.0.0.1:8000, pinned lab on :3000
+make deploy-down # stop (the database volume survives)
+```
+
+The LLM stays on your host, so no model weights are pulled into the stack. Note
+that the app container mounts the host Docker socket — the retest sandbox
+provisions its own networks and containers as siblings — which is
+root-equivalent access to the host, accepted only under the single-operator
+threat model ([ADR-0008](adr/0008-single-user-threat-model.md)).
+
+From a checkout instead:
+
 ```bash
 make lab-up   # the authorised target (Juice Shop, pinned) — required for a real retest
 make run      # build the SPA if needed, serve everything on 127.0.0.1:8000

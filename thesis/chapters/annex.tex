@@ -12,7 +12,9 @@ application binds only to the loopback interface and is never exposed to the net
 \label{sec:annex-prereq}
 
 The tool is a single Python service that also serves a compiled web interface, plus
-an isolated lab target it retests against. The following are required:
+an isolated lab target it retests against. To \emph{deploy} it
+(Section~\ref{sec:annex-deploy}) only Docker and a model backend are needed; the
+first two entries below are required to build, modify or test it from source.
 
 \begin{itemize}
 \item \textbf{Python 3.12 or newer}, managed with the \texttt{uv} package manager,
@@ -26,7 +28,36 @@ an isolated lab target it retests against. The following are required:
   local-first, so no external service is required to run the tool.
 \end{itemize}
 
-\section{Installation}
+\section{Deployment in one command}
+\label{sec:annex-deploy}
+
+For simply \emph{running} the tool, neither Python nor Node is needed: the whole
+system --- the service with its compiled interface, and the lab target it retests
+--- is built and started from containers by a single command.
+
+\begin{lstlisting}[language=bash]
+make deploy
+\end{lstlisting}
+
+The interface is then at \texttt{http://127.0.0.1:8000} and the lab target at
+\texttt{http://127.0.0.1:3000}, both bound to the loopback interface only. The
+language-model backend deliberately stays on the host machine, so no model weights
+are pulled into the deployment and an existing local server is reused as it is.
+\texttt{make deploy-down} stops the stack, keeping the database on its volume.
+
+One consequence deserves to be stated rather than buried. The retest sandbox
+creates its own container and its own isolated network for every session, so the
+service container is given access to the host's container daemon --- which is
+equivalent to giving it administrative control of the host. That is acceptable
+here only because the tool is a single-operator local instrument, run by the
+person who already owns the machine; it is the reason the system is not something
+to host on behalf of others. The isolation of the retest sandbox itself is
+unaffected, and was re-verified inside the deployed stack.
+
+The remainder of this annex describes the development installation, which is what
+a reader wanting to modify or test the system needs.
+
+\section{Installation from source}
 \label{sec:annex-install}
 
 The Python dependencies are installed with a single command; a second command

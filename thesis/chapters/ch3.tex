@@ -29,7 +29,7 @@ judgement and architecture, not on typing code.
 
 The evidence for this model is the decision trail. Every significant choice was
 recorded as an Architecture Decision Record (ADR) in the lightweight MADR format
-\cite{madr, nygard_adr}; the repository contains \textbf{forty-two} such records,
+\cite{madr, nygard_adr}; the repository contains \textbf{forty-four} such records,
 each stating a context, the options considered, and the decision with its
 consequences. Requirements were captured in a Software Requirements Specification
 following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. These artefacts ---
@@ -74,7 +74,7 @@ attempt played.
 \emph{Adeptus} (hand-crafted) & AI-powered pentesting platform & Ad-hoc prompting; no skills, hooks or ADRs & First attempt; showed that unstructured AI use does not scale. \\ \hline
 \emph{Adeptus} (workbench) & Multi-user pentest workbench + knowledge graph & Heavy: 13 skills, 7 role-agents, 7 hooks, slice-based flow & Peak tooling; revealed that ceremony had outgrown the task. \\ \hline
 \emph{Retester} & Report-driven vulnerability \emph{revalidation} & Focused; Pydantic AI, swappable Claude/Ollama & The pivot from pentesting to retesting. \\ \hline
-\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 42 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
+\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 44 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
 \end{tabular}
 \end{center}
 \caption[Evolution of the project across earlier attempts]{Evolution from the
@@ -115,11 +115,11 @@ values of the Agile Manifesto \cite{agilemanifesto} to a single developer workin
 with an assistant. Work flows continuously from a prioritised backlog; there are no
 sprints and no meetings; and \emph{milestones} mark feature-complete increments
 rather than time boxes. The project passed through six such milestones, from the M1
-walking skeleton to the M6 agentic console; the first four each closed with a
-semantically versioned release \cite{semver} (v0.1.0 through v0.4.0). M6 was
-feature-complete at the time of writing, with its release tag still to be cut,
-while M5 --- the evaluation --- remained open. Figure~\ref{fig:milestones}
-lays out this milestone sequence.
+walking skeleton to the M6 agentic console, each closing with a semantically
+versioned release \cite{semver}: v0.1.0 through v0.4.0 for the first four, and a
+single v1.0.0 closing both M6 and M5 --- the agentic console was feature-complete
+before the evaluation that measures it could be run, so the two closed together.
+Figure~\ref{fig:milestones} lays out this milestone sequence.
 
 \begin{figure}[htb]
 \centering
@@ -135,15 +135,14 @@ lays out this milestone sequence.
   \node[ms, anchor=south] at (\x,0.35) {\bft{\m}\\\l};
 }
 \foreach \x/\v in {1/{v0.1.0}, 3.3/{v0.2.0}, 5.6/{v0.3.0}, 7.9/{v0.4.0}} {\node[rel, anchor=north] at (\x,-0.22) {\v};}
-\node[font=\scriptsize\itshape, text=gris50, anchor=north] at (10.2,-0.22) {(open)};
-\node[font=\scriptsize\itshape, text=gris50, anchor=north] at (12.5,-0.22) {(tag pending)};
+\foreach \x in {10.2, 12.5} {\node[rel, anchor=north] at (\x,-0.22) {v1.0.0};}
 \end{tikzpicture}%
 }
 \caption[Milestone sequence of the project]{The six feature-complete milestones, from
 the M1 walking skeleton to the M6 agentic console. Milestones M1--M4 each closed with a
-semantically versioned release (v0.1.0--v0.4.0). M6 was feature-complete at the time of
-writing with its tag still to be cut; M5, the evaluation, remained open --- which is why
-the two appear out of numerical order.}
+semantically versioned release (v0.1.0--v0.4.0); M6 and M5 closed together as v1.0.0,
+because the agentic console had to be feature-complete before the evaluation that
+measures it could be run --- which is also why the two appear out of numerical order.}
 \label{fig:milestones}
 \end{figure}
 
@@ -647,7 +646,7 @@ dissertation, the chapters listed above were drafted with assistance; all were
 reviewed, corrected and approved by the author.
 
 \paragraph{Authorship statement.} All design, architecture and scope decisions were
-made by the author, as evidenced by the forty-two ADRs and the requirements
+made by the author, as evidenced by the forty-four ADRs and the requirements
 specification that precede the code. Every AI output --- code, tests, documentation
 and thesis prose --- was reviewed and validated by the author before acceptance,
 through pull-request validation and the continuous-integration gate. The author is
