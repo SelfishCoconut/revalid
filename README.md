@@ -14,7 +14,7 @@ approval, inside a sandbox that can reach nothing but the target.
 [![Security](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/security.yml?branch=main&style=flat-square&label=security&color=8c7bff)](https://github.com/SelfishCoconut/revalid/actions/workflows/security.yml)
 [![Docs](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/docs.yml?branch=main&style=flat-square&label=docs&color=8c7bff)](https://selfishcoconut.github.io/revalid/)
 [![Last commit](https://img.shields.io/github/last-commit/SelfishCoconut/revalid?style=flat-square&color=8c7bff)](https://github.com/SelfishCoconut/revalid/commits)
-[![Version](https://img.shields.io/badge/version-0.4.0-8c7bff?style=flat-square)](https://github.com/SelfishCoconut/revalid/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-8c7bff?style=flat-square)](https://github.com/SelfishCoconut/revalid/releases)
 [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-d97757?style=flat-square&logo=anthropic&logoColor=white)](#-use-of-ai--transparency-notice)
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](#)
@@ -283,8 +283,8 @@ resume point live in **[`docs/roadmap.md`](docs/roadmap.md)**.
 | **M2** | Report understanding — PDF → LLM extraction → pluggable backends | ✅ `v0.2.0` |
 | **M3** | Plan & approve — the human gate and the SPA | ✅ `v0.3.0` |
 | **M4** | Trust & audit — re-derivation, versioned export | ✅ `v0.4.0` |
-| **M6** | **Agentic interactive retest** — sandbox, gated console, adjudication | ✅ merged, tag pending |
-| **M5** | Evaluation — ground truth, harness, the Results-chapter numbers | 🚧 in progress → `v1.0.0` |
+| **M6** | **Agentic interactive retest** — sandbox, gated console, adjudication | ✅ `v1.0.0` |
+| **M5** | Evaluation — ground truth, harness, the Results-chapter numbers | ✅ `v1.0.0` |
 
 M6 landed after M4 and **superseded** the batch retest path M1/M3 shipped: the one-shot structured
 plan is gone, replaced by the interactive console

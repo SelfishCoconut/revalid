@@ -1,7 +1,7 @@
 # 0041. Retest scope drives the sandbox target: allowlisting egress proxy for online targets
 
 Date: 2026-07-24
-Status: proposed
+Status: accepted (ratified 2026-07-25)
 
 ## Context
 

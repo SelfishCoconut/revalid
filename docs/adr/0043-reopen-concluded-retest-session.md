@@ -1,7 +1,7 @@
 # 0043. Reopen a concluded retest session: withdraw the verdict, keep the transcript
 
 Date: 2026-07-24
-Status: proposed
+Status: accepted (ratified 2026-07-25)
 
 ## Context
 

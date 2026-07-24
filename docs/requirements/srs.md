@@ -30,30 +30,30 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall accept a PDF pentest report and extract its content for finding identification, tolerating common report layouts (headings, tables, finding sections).
 - **Acceptance criteria**:
-  - [ ] Uploading the evaluation Juice Shop PDF report yields raw finding candidates without manual preprocessing.
-  - [ ] A malformed/non-report PDF is rejected with a clear error, not a crash.
+  - [x] Uploading the evaluation Juice Shop PDF report yields raw finding candidates without manual preprocessing. *(ADR-0007: the real external Juice Shop write-up — 11 pages — segmented into 8 clean finding candidates with no manual preprocessing.)*
+  - [x] A malformed/non-report PDF is rejected with a clear error, not a crash. *(`pdf.read_pdf` fails closed on non-PDF, corrupt and text-free input; `test_read_pdf_rejects_bad_input`.)*
 
 ### FR-02 — Ingest structured reports (JSON/XML)
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall ingest machine-readable findings exports (initial target: DefectDojo-style JSON; one XML format) by schema mapping, without LLM involvement.
 - **Acceptance criteria**:
-  - [ ] A DefectDojo-format JSON export imports with all findings mapped to the internal model.
-  - [ ] Unknown fields are preserved in a raw-payload attribute for audit.
+  - [x] A DefectDojo-format JSON export imports with all findings mapped to the internal model. *(`ingest.py`; the same mapping backs manual entry, ADR-0020.)*
+  - [x] Unknown fields are preserved in a raw-payload attribute for audit. *(`ingest.py` sets `raw=item`, so unmapped fields stay auditable.)*
 
 ### FR-03 — Extract structured findings
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall extract, per finding: title, description, severity, impact, attack vector, affected endpoint(s), and ordered reproduction steps, into a validated schema (Pydantic). Extraction from unstructured input uses the LLM; output failing validation is retried/flagged, never silently accepted.
 - **Acceptance criteria**:
-  - [ ] ≥ 90% of findings in the evaluation report are extracted with all mandatory fields present.
-  - [ ] Invalid LLM output never reaches persistence (property: schema validation gate).
+  - [x] ≥ 90% of findings in the evaluation report are extracted with all mandatory fields present. *(8/8 = 100% on the real evaluation report, on the local `ollama:qwen3.5:9b` backend.)*
+  - [x] Invalid LLM output never reaches persistence (property: schema validation gate). *(ADR-0009: the `list[ExtractedFinding]` gate flags invalid output instead of persisting it.)*
 
 ### FR-04 — Generate executable retest plans
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The typed-HTTP-probe plan was retired with the batch execution path; `generate_plan` is deleted. The *plan-generation* intent is repurposed as the generic, user-owned **goal** that seeds an agentic session (`generate_goal`, ADR-0032, under FR-17).
 - **Description**: For each finding, the system shall derive a retest plan: an ordered list of typed, non-destructive HTTP probe actions with expected still-open/fixed indicators, generated from the reproduction steps.
 - **Acceptance criteria**:
-  - [ ] Each plan action is a typed object (no free-form commands) referencing only allowlisted targets.
-  - [ ] Each plan states, per action, the indicator that would mark the vulnerability present.
+  - [x] Each plan action is a typed object (no free-form commands) referencing only allowlisted targets. *(Met as shipped in `v0.3.0` — ADR-0011's `PlannedAction`, gated against the FR-06 allowlist; the mechanism was then retired with the batch path.)*
+  - [x] Each plan states, per action, the indicator that would mark the vulnerability present. *(Met as shipped in `v0.3.0` — `expected_indicator` was required by the schema.)*
 
 ### FR-05 — Human plan review & approval
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -68,16 +68,16 @@ non-lab targets, destructive exploitation.
 - **Status**: satisfied, mechanism changed (ADR-0033, 2026-07-19; broadened by ADR-0041, 2026-07-24). With the batch HTTP executor retired, egress control lives **in the agentic sandbox's topology**, not in an HTTP-layer check — a strictly stronger guarantee than the transport allowlist, and the `allowlist.py` HTTP guard was removed (FR-17 6b-iii-b). Two provisioning modes, both derived from the operator's launch **scope**: a lab target is enforced by Docker `--internal` **network membership** (ADR-0025) — the container reaches only the connected lab target and nothing else — while an online host is enforced by a per-session **deny-all-by-default egress proxy** allowlisting only the scoped host(s), failing closed on any provisioning error (ADR-0041, see FR-17 AC27).
 - **Description**: The executor shall refuse any action whose target is not on the configured allowlist (default: the lab compose targets). Allowlist changes are explicit configuration, never inferred from report content.
 - **Acceptance criteria**:
-  - [ ] An approved plan referencing a non-allowlisted host fails closed with an audit-trail entry.
-  - [ ] Report-supplied URLs never expand the allowlist (SSRF guard test).
+  - [x] A command targeting anything outside the authorised scope fails closed. *(Mechanism changed, guarantee strengthened: the sandbox has no route to an unscoped host at all. Verified live — from the deployed app container a real `DockerSandbox` reached the lab over its `--internal` network (HTTP 200) while `example.com` failed to resolve (curl exit 6); the nightly system test asserts the same. Originally met as a transport-level allowlist in `v0.1.0`.)*
+  - [x] Report-supplied URLs never expand the authorised scope. *(The scope is the operator's launch `target_set`, parsed by `scope.py`; it is fixed when the sandbox is provisioned and cannot be widened by report content or by the agent — changing it needs a fresh session. The SSRF guard test covered the same property for the retired HTTP transport.)*
 
 ### FR-07 — HTTP probe executor
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Status**: **superseded by FR-17** (ADR-0033, 2026-07-19). The httpx batch executor (`retest.py`) is deleted. Verification now runs as **arbitrary gated commands inside the egress-locked sandbox** — HTTP is one case among many (the agent uses `curl` and any lab CLI), and evidence is the tool-agnostic `AgenticEvidence` (ADR-0031) rather than a fixed request/response record.
 - **Description**: The system shall execute approved plans via HTTP (httpx), capturing full request/response evidence per step. Probes are verification-only: no destructive payloads, no state-damaging operations.
 - **Acceptance criteria**:
-  - [ ] Each executed step persists request, response (status/headers/body excerpt), timing, and matched indicators.
-  - [ ] Known Juice Shop findings from the evaluation set are detectable end-to-end via HTTP probes.
+  - [x] Each executed step persists request, response (status/headers/body excerpt), timing, and matched indicators. *(Met as shipped in `v0.1.0`–`v0.4.0`. Under FR-17 the equivalent record is the transcript's `command_output` event — command, stdout/stderr excerpt, exit code and elapsed time — plus `AgenticEvidence` on the verdict, ADR-0031.)*
+  - [x] Known Juice Shop findings from the evaluation set are detectable end-to-end via HTTP probes. *(Met as shipped — the M1 walking skeleton returned `still_open` against the live lab. The FR-15 evaluation now measures the same end to end through the agentic path: 8 of 12 findings correctly `still_open`, zero false clearances.)*
 
 ### FR-08 — Execution sanity checker
 - **Priority**: Must · **Source**: interview 2026-06-11 (author's design)
@@ -91,8 +91,8 @@ non-lab targets, destructive exploitation.
 - **Priority**: Must · **Source**: interview 2026-06-11
 - **Description**: The system shall assign per finding: **still-open / fixed / inconclusive**, each linked to the evidence that justifies it. *(Since ADR-0031/ADR-0033 that evidence is the tool-agnostic `AgenticEvidence` — the agent's explanation plus the real last command, its output excerpt, exit code and timing — not the retired HTTP request/response `Evidence`.)*
 - **Acceptance criteria**:
-  - [ ] No verdict exists without linked evidence records.
-  - [ ] Inconclusive verdicts always carry a machine-readable reason code.
+  - [x] No verdict exists without linked evidence records. *(ADR-0031: `record_verdict` — the single conclude hook — builds `AgenticEvidence` from the transcript's last `command_output`, so the proof is the real captured output, not the model restating it. A conclusion reached without running a command carries the agent's explanation alone, which the export and the SPA render as such.)*
+  - [x] Inconclusive verdicts always carry a machine-readable reason code. *(`record_verdict` takes a `reason_code` on every path: `agentic_conclusion`, `operator_conclusion`, `operator_adjudication`.)*
 
 ### FR-10 — Full audit trail
 - **Priority**: Must · **Source**: interview 2026-06-11
@@ -116,7 +116,7 @@ non-lab targets, destructive exploitation.
 - **Priority**: Should · **Source**: interview 2026-06-11
 - **Description**: The LLM layer (Pydantic AI) shall be model-agnostic: Claude API as primary; a local model (Ollama) configurable as fallback and as comparison condition in the evaluation. *(As shipped since ADR-0021 the roles are inverted by default — `llm.DEFAULT_MODEL` is `ollama:qwen3.5:9b` and Claude is selected from the settings view; the model-agnostic requirement itself is unchanged.)*
 - **Acceptance criteria**:
-  - [ ] Switching backends is configuration-only (no code change); both run the extraction test suite.
+  - [x] Switching backends is configuration-only (no code change); both run the extraction test suite. *(ADR-0010 then ADR-0021: the backend is a `REVALID_LLM_MODEL` string, since made a DB-persisted, runtime-editable setting; unit + integration tests prove the switch, a `system`-marked test runs the extraction suite on a live Ollama, and the evaluation exercised both a local `qwen3.6` 27B and hosted Claude.)*
   - [x] The active backend is a **user-editable, DB-persisted setting** changeable at runtime (env vars seed a fresh DB; the stored row is then authoritative). Model discovery + a connection test surface in the SPA `/settings` view. (ADR-0021)
 
 ### FR-14 — Browser-based probes (Playwright)
@@ -214,7 +214,7 @@ non-lab targets, destructive exploitation.
   - [x] **AC1**: ingestion attaches `cvss` (`vector`, `base_score`, `inferred`) and `mitre` (`techniques`, `inferred`) to every finding; a stated code maps through with `inferred=false`, an absent one is derived with `inferred=true`. *(`ExtractedFinding`, `_to_finding`, extraction instructions.)*
   - [x] **AC2**: the fields persist as first-class columns and survive the FR-16 version round trip — not only inside the `raw` audit blob. *(`FindingVersionRecord.cvss`/`.mitre`, `from_domain`/`to_domain`.)*
   - [x] **AC3**: extraction + round-trip are unit-tested with a Pydantic AI stand-in (stated / inferred / absent), mypy `--strict`, ruff and coverage all green.
-  - [ ] **AC4**: the `/api` finding payload and the SPA finding view surface the CVSS code and ATT&CK techniques with their `inferred` provenance, and the evaluation ground truth is tagged with them. *(Follow-up slice.)*
+  - [~] **AC4**: the `/api` finding payload and the SPA finding view surface the CVSS code and ATT&CK techniques with their `inferred` provenance, and the evaluation ground truth is tagged with them. *(**Half met.** The surfacing landed in #176 — the payload carried both all along, and the finding view now shows them with a visible `inferred` badge and an em dash for absent values. Tagging `tests/data/eval/ground_truth.json` has **not** been done: the answer key is deliberately the author's own work, not an agent's, so it stays open rather than being auto-filled.)*
 - **Traces to**: issue #144, ADR-0037 (accepted), milestone M2.
 
 ## 3. Non-functional requirements
