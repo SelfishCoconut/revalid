@@ -1,0 +1,55 @@
+# revalid — one-command local deployment (ADR-0044).
+#
+#   make deploy        build the sandbox toolbox, then build and start the stack
+#   make deploy-down   stop and remove it (the database volume survives)
+#
+# Two services come up: the application (SPA + /api) and the pinned Juice Shop
+# lab it retests. Both publish to 127.0.0.1 only — revalid is a single-operator
+# local instrument (ADR-0008), never something to expose on a network (NFR-03).
+#
+# The LLM backend is deliberately NOT in this stack. It stays on the host, so no
+# model weights are pulled here and an existing Ollama is reused as-is.
+
+# The lab target is defined once, in lab/docker-compose.yml, and included rather
+# than copied: the pinned Juice Shop version is evaluation ground truth (FR-15),
+# so it must have exactly one source of truth.
+include:
+  - lab/docker-compose.yml
+
+services:
+  revalid:
+    build:
+      context: .
+    image: revalid:1.0.0
+    container_name: revalid-app
+    depends_on:
+      - juice-shop
+    ports:
+      # Override REVALID_PORT to run the stack alongside a `make run` dev server,
+      # which already holds 8000. Always loopback-bound whatever the port.
+      - "127.0.0.1:${REVALID_PORT:-8000}:8000"
+    volumes:
+      # The SQLite database and any run state. Survives `down` and a rebuild;
+      # remove the volume explicitly (`docker compose down -v`) to start clean.
+      - revalid-data:/data
+      # The agentic retest provisions its own per-session networks and sandbox
+      # containers, as siblings of this one, through the host daemon (ADR-0044).
+      #
+      # This grants the container full control of Docker on the host — which is
+      # root-equivalent. It is accepted under the single-operator threat model
+      # (ADR-0008) because the operator already runs the tool with exactly that
+      # authority; read ADR-0044 before changing it.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # These seed the settings row on a *fresh* database only (ADR-0021);
+      # afterwards whatever is saved in Settings wins. `host.docker.internal`
+      # resolves to the host via the extra_hosts entry below, so the container
+      # reaches the operator's own Ollama.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      REVALID_LLM_MODEL: ${REVALID_LLM_MODEL:-ollama:qwen3.6:27b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  revalid-data:

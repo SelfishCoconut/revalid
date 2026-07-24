@@ -1,4 +1,4 @@
-.PHONY: lint format typecheck test test-unit test-integration test-system test-demos sanity sandbox-image uml docs docs-serve thesis thesis-figs thesis-figs-check clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
+.PHONY: lint format typecheck test test-unit test-integration test-system test-demos sanity sandbox-image uml docs docs-serve thesis thesis-figs thesis-figs-check clean demo-ingest demo-ingest-pdf demo-extract demo-audit demo-export export-schema demo-eval eval ground-truth-skeleton demo-retest-session lab-up lab-down deploy deploy-down deploy-logs run reset-db ui-install ui-lint ui-test build-ui dev-ui demo-ui demo-settings
 
 lint:
 	uv run ruff check src tests scripts
@@ -98,6 +98,25 @@ demo-settings:
 sandbox-image:
 	docker build -t revalid-sandbox:1.0 -f lab/sandbox/Dockerfile lab/sandbox/
 	@echo "built revalid-sandbox:1.0 — override with REVALID_SANDBOX_IMAGE"
+
+# --- Deployment (ADR-0044) ---
+# The whole tool as containers: the app (SPA + /api) on 127.0.0.1:8000 plus the
+# pinned lab. The sandbox toolbox is built first because the app launches it as a
+# sibling container through the host daemon — a missing image would only fail
+# later, when the operator starts their first retest.
+#
+# The LLM backend stays on the host: set OLLAMA_BASE_URL / REVALID_LLM_MODEL to
+# point a fresh database elsewhere (they seed Settings once; see ADR-0021).
+deploy: sandbox-image
+	docker compose up -d --build
+	@echo "revalid is up on http://127.0.0.1:8000 (lab on http://127.0.0.1:3000)"
+
+# Stop the stack. The database volume survives; `docker compose down -v` drops it.
+deploy-down:
+	docker compose down
+
+deploy-logs:
+	docker compose logs -f revalid
 
 # Retest lab (retest-lab skill) — intentionally vulnerable targets, localhost only
 lab-up:

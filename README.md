@@ -133,6 +133,42 @@ flowchart LR
 
 ## 🚀 Getting started
 
+### Deploy it (one command)
+
+> **Prerequisites:** Docker · an LLM backend on the host — a local
+> [Ollama](https://ollama.com/) server (default) or an `ANTHROPIC_API_KEY` set in Settings.
+
+```bash
+make deploy                    # build the toolbox image, then bring up the whole stack
+```
+
+That builds the app image (SPA + backend), starts it on <http://127.0.0.1:8000> and brings up the
+pinned Juice Shop lab on <http://127.0.0.1:3000>. No Python or Node toolchain needed — only Docker.
+
+```bash
+make deploy-logs               # follow the app's logs
+make deploy-down               # stop the stack (the database volume survives)
+docker compose down -v         # …and drop the database too
+```
+
+The LLM stays **on your host**: the container reaches it through `host.docker.internal`, so no model
+weights are pulled into the stack. Override the seed values (they apply to a fresh database only —
+after that, Settings wins) or the published port:
+
+```bash
+REVALID_PORT=8001 REVALID_LLM_MODEL=ollama:qwen3:14b make deploy
+```
+
+> [!WARNING]
+> The app container mounts the host Docker socket, because the retest sandbox provisions its own
+> per-session networks and containers as siblings. That is **root-equivalent access to the host**.
+> It is accepted here under the single-operator threat model
+> ([ADR-0008](docs/adr/0008-single-user-threat-model.md)) — you already run the tool with that
+> authority — and it is why revalid is not something to host for others. The reasoning, and the
+> alternatives weighed, are in [ADR-0044](docs/adr/0044-containerised-deployment.md).
+
+### Or run it from a checkout (development)
+
 > **Prerequisites:** [uv](https://docs.astral.sh/uv/) · Docker (sandbox + lab target) · Node 22+
 > (to build the SPA) · an LLM backend — a local [Ollama](https://ollama.com/) server (default) or an
 > `ANTHROPIC_API_KEY`.

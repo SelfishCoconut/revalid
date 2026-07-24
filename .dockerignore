@@ -1,0 +1,43 @@
+# Build context for the revalid image (ADR-0044).
+#
+# Only what the runtime needs is sent to the daemon: the Python package, the
+# SPA sources, and the metadata `uv_build` reads (pyproject/uv.lock/README/
+# LICENSE). Everything else is excluded so the context stays small and local
+# state — a dev database, a virtualenv, node_modules — can never leak into a
+# layer of a published image.
+
+.git
+.github
+.claude
+.venv
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Installed and built by the image's own stages, never copied from the host:
+# a stale host build would silently ship instead of the one just built.
+node_modules
+frontend/node_modules
+frontend/dist
+
+# Documentation, memoir and the test/demo tree are development artefacts.
+docs
+thesis
+site
+tests
+scripts
+
+# The lab and sandbox images are separate images the *host* daemon runs as
+# siblings (ADR-0044); the app image never contains them.
+lab
+
+# Local operator state.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/private
