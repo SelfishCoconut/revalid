@@ -80,3 +80,38 @@ conservative, and the label is marked as inferred either way.
 - **Surfacing is staged.** This slice covers ingestion + persistence + tests; the
   API `Finding` output and the SPA finding view still need to expose the two
   fields (follow-up), as does tagging the evaluation ground truth with them.
+
+## Update (2026-07-25, issue #226) — the operator sets the taxonomy by hand
+
+The consequence above said inferred codes "ride the FR-16 edit lifecycle like any
+other finding field". They did not. `FindingEditIn.to_finding()` never carried
+`cvss`/`mitre` across, so both fell back to their empty defaults and **every
+operator edit silently destroyed the taxonomy** — the exact opposite of the
+"operator's to accept or correct" claim.
+
+Worse, correcting was impossible in the first place: only the extraction path
+ever populates these fields. A finding that arrived through the FR-02 structured
+importer or through manual entry (ADR-0020) had none, and nothing backfilled it.
+For a manually-entered corpus — which is how the FR-15 evaluation was ingested —
+the taxonomy was simply unreachable.
+
+**Decision.** The finding editor owns the taxonomy. `FindingEditIn` gains optional
+`cvss` and `mitre` objects: omitted leaves the current values untouched, supplied
+sets them. This is the one place a CVSS code or technique mapping can be entered
+by hand, which makes it the answer for every non-extraction ingestion path.
+
+**Provenance stays the server's to decide, and the client cannot assert it.**
+The request carries no `inferred` flag. The server compares the submitted value
+against the current version:
+
+- **omitted** → keep the current value, provenance included;
+- **supplied and identical** → likewise. This matters: the editor always posts the
+  form's contents, so a round-trip of an untouched inferred value must not launder
+  a model guess into an author-stated fact;
+- **supplied and different** → the operator authored it, so `inferred` becomes
+  `false`.
+
+This preserves the property the original decision rests on — that a reader can
+always tell an estimate from a stated value — while making the correction path
+real. The rest of ADR-0037 is unchanged: the taxonomy remains classificatory
+metadata that never feeds a verdict, which is what justified inferring it at all.

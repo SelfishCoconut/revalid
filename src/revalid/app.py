@@ -53,8 +53,10 @@ from revalid.db import (
 from revalid.deltas import DELTAS
 from revalid.domain import (
     AgenticEvidence,
+    CvssCode,
     Finding,
     FindingStage,
+    MitreMapping,
     ReportStatus,
     RetestSessionStatus,
     SessionEventKind,
@@ -172,6 +174,24 @@ class FindingVersionOut(Finding):
         )
 
 
+class CvssIn(BaseModel):
+    """An operator-supplied CVSS code on a finding edit (FR-19).
+
+    Carries no ``inferred`` flag: provenance is not the client's to assert. The
+    server derives it by comparing against the current version — a value the
+    operator changed is author-stated, not model-derived.
+    """
+
+    vector: str = ""
+    base_score: float | None = Field(default=None, ge=0.0, le=10.0)
+
+
+class MitreIn(BaseModel):
+    """An operator-supplied MITRE ATT&CK mapping on a finding edit (FR-19)."""
+
+    techniques: tuple[str, ...] = ()
+
+
 class FindingEditIn(BaseModel):
     """An operator edit of a finding's content → a new immutable version (FR-16)."""
 
@@ -182,13 +202,19 @@ class FindingEditIn(BaseModel):
     attack_vector: str = ""
     affected_endpoints: tuple[str, ...] = ()
     reproduction_steps: tuple[str, ...] = ()
+    #: Omit to leave the taxonomy untouched; send a value to set it (FR-19).
+    cvss: CvssIn | None = None
+    mitre: MitreIn | None = None
     reason: str = ""
 
-    def to_finding(self, base_raw: dict[str, Any]) -> Finding:
+    def to_finding(self, current: Finding) -> Finding:
         """Build the domain finding for this edit, carrying forward prior lineage.
 
-        ``base_raw`` is the current version's ``raw`` (extraction lineage), kept so
-        editing never discards how the finding was originally produced (FR-10).
+        ``current`` is the version being edited. Its ``raw`` (extraction lineage)
+        is kept so editing never discards how the finding was originally produced
+        (FR-10), and so are its CVSS/ATT&CK values when the payload omits them —
+        without that, every edit silently wiped the taxonomy an extraction had
+        derived, because the fields simply were not carried across.
         """
         return Finding(
             title=self.title,
@@ -198,8 +224,36 @@ class FindingEditIn(BaseModel):
             attack_vector=self.attack_vector,
             affected_endpoints=self.affected_endpoints,
             reproduction_steps=self.reproduction_steps,
-            raw=base_raw,
+            cvss=self._resolved_cvss(current.cvss),
+            mitre=self._resolved_mitre(current.mitre),
+            raw=current.raw,
         )
+
+    def _resolved_cvss(self, current: CvssCode) -> CvssCode:
+        """Resolve the edit's CVSS against the current one, deriving provenance.
+
+        Omitted → keep the current value untouched, provenance included. Supplied
+        and identical → likewise (a round-trip of an inferred value must not
+        launder it into an author-stated one). Supplied and different → the
+        operator authored it, so ``inferred`` becomes ``False``.
+        """
+        if self.cvss is None:
+            return current
+        proposed = CvssCode(
+            vector=self.cvss.vector, base_score=self.cvss.base_score, inferred=current.inferred
+        )
+        if proposed == current:
+            return current
+        return proposed.model_copy(update={"inferred": False})
+
+    def _resolved_mitre(self, current: MitreMapping) -> MitreMapping:
+        """Resolve the edit's ATT&CK mapping against the current one (see above)."""
+        if self.mitre is None:
+            return current
+        proposed = MitreMapping(techniques=self.mitre.techniques, inferred=current.inferred)
+        if proposed == current:
+            return current
+        return proposed.model_copy(update={"inferred": False})
 
 
 class NoteIn(BaseModel):
@@ -1344,7 +1398,9 @@ def _register_finding_routes(router: APIRouter, sessions: sessionmaker[Session])
         """Record an operator edit as a new immutable finding version (FR-16)."""
         current = _current_or_404(session, finding_id)
         identity = _get_finding_or_404(session, finding_id)
-        version = add_version(session, finding_id, body.to_finding(current.raw), reason=body.reason)
+        version = add_version(
+            session, finding_id, body.to_finding(current.to_domain()), reason=body.reason
+        )
         return _finding_out(identity, version)
 
     @router.get("/findings/{finding_id}/versions", response_model=list[FindingVersionOut])

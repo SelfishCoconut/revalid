@@ -133,6 +133,14 @@ export interface FindingEdit {
   attack_vector: string;
   affected_endpoints: string[];
   reproduction_steps: string[];
+  /**
+   * Taxonomy the operator entered by hand (FR-19). Omit to leave the finding's
+   * current values untouched — the server keeps them, provenance included.
+   * There is no `inferred` field: the server decides that by comparing against
+   * the current version, so the client cannot claim a model guess as its own.
+   */
+  cvss?: { vector: string; base_score: number | null };
+  mitre?: { techniques: string[] };
   reason: string;
 }
 

@@ -30,6 +30,14 @@ function fromLines(text: string): string[] {
     .filter(Boolean);
 }
 
+/** ATT&CK technique IDs are entered comma-separated; blanks are dropped. */
+function fromCsv(text: string): string[] {
+  return text
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
 /**
  * Editable form over a finding's current content. Saving appends a new immutable
  * version (FR-16) — it never overwrites. Keyed by the finding version upstream so
@@ -45,6 +53,9 @@ function FindingEditor({ finding }: { finding: Finding }) {
     attack_vector: finding.attack_vector,
     endpoints: toLines(finding.affected_endpoints),
     steps: toLines(finding.reproduction_steps),
+    cvssVector: finding.cvss.vector,
+    cvssScore: finding.cvss.base_score == null ? "" : String(finding.cvss.base_score),
+    mitre: finding.mitre.techniques.join(", "),
     reason: "",
   });
 
@@ -57,6 +68,14 @@ function FindingEditor({ finding }: { finding: Finding }) {
       attack_vector: form.attack_vector,
       affected_endpoints: fromLines(form.endpoints),
       reproduction_steps: fromLines(form.steps),
+      // Always sent, even untouched: the server compares against the current
+      // version, so resubmitting an inferred value unchanged keeps it marked
+      // inferred rather than laundering it into an author-stated one (FR-19).
+      cvss: {
+        vector: form.cvssVector.trim(),
+        base_score: form.cvssScore.trim() === "" ? null : Number(form.cvssScore),
+      },
+      mitre: { techniques: fromCsv(form.mitre) },
       reason: form.reason.trim(),
     };
     edit.mutate(body);
@@ -177,9 +196,63 @@ function FindingEditor({ finding }: { finding: Finding }) {
             className={`${inputClass} resize-y`}
           />
         </label>
-        <div className="rounded-lg border border-line bg-panel-2/40 p-3">
-          <FindingTaxonomy cvss={finding.cvss} mitre={finding.mitre} />
-        </div>
+        {/* Classification is editable here because it is often absent: only the
+            LLM extraction path derives it, so anything ingested from a
+            structured export or typed in by hand arrives with none (FR-19). */}
+        <fieldset className="space-y-3 rounded-lg border border-line bg-panel-2/40 p-3">
+          <legend className={`${fieldLabel} px-1`}>Classification</legend>
+          <div className="rounded-md bg-panel-2/60 p-2">
+            <FindingTaxonomy cvss={finding.cvss} mitre={finding.mitre} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
+            <label className={fieldLabel}>
+              CVSS vector
+              <input
+                aria-label="CVSS vector"
+                value={form.cvssVector}
+                disabled={edit.isPending}
+                placeholder="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+                onChange={(event) => {
+                  setForm((f) => ({ ...f, cvssVector: event.target.value }));
+                }}
+                className={`${inputClass} font-mono text-xs`}
+              />
+            </label>
+            <label className={fieldLabel}>
+              Base score
+              <input
+                aria-label="CVSS base score"
+                type="number"
+                min={0}
+                max={10}
+                step={0.1}
+                value={form.cvssScore}
+                disabled={edit.isPending}
+                placeholder="0.0–10.0"
+                onChange={(event) => {
+                  setForm((f) => ({ ...f, cvssScore: event.target.value }));
+                }}
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <label className={fieldLabel}>
+            ATT&amp;CK techniques (comma-separated)
+            <input
+              aria-label="MITRE ATT&CK techniques"
+              value={form.mitre}
+              disabled={edit.isPending}
+              placeholder="T1190, T1110"
+              onChange={(event) => {
+                setForm((f) => ({ ...f, mitre: event.target.value }));
+              }}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <p className="text-[11px] text-faint">
+            Values you change here are recorded as yours; the “inferred” tag is dropped.
+          </p>
+        </fieldset>
         <label className={fieldLabel}>
           Reason for this edit (optional)
           <input
