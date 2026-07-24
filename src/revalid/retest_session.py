@@ -61,6 +61,7 @@ from revalid.retest_agent import (
     format_observations,
 )
 from revalid.sandbox import CommandResult, Sandbox
+from revalid.scope import scope_hosts
 
 _TERMINAL: frozenset[RetestSessionStatus] = frozenset(
     {
@@ -911,7 +912,10 @@ def start_and_step(
         free_launch: Whether the agent's commands auto-run without a per-command
             human approval (FR-17 Slice 5). Plan changes stay gated regardless.
     """
-    sandbox.start()
+    # Provision against the session's scope (ADR-0041): the launch `target_set`
+    # endpoints parsed to their hosts. Lab scope keeps the unchanged internal
+    # network; an online host provisions the allowlisting egress proxy.
+    sandbox.start(scope_hosts(session_scope(session, session_id)))
     live = LiveSession(agent=agent, sandbox=sandbox, free_launch=free_launch)
     registry.put(session_id, live)
     set_status(session, session_id, RetestSessionStatus.THINKING)

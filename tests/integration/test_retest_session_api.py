@@ -812,3 +812,28 @@ def test_restart_model_endpoint_is_accepted_and_a_noop_at_the_gate() -> None:
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "awaiting_command"  # unchanged — nothing was in flight
         assert not [e for e in state["events"] if e["kind"] == "turn_restarted"]
+
+
+def test_session_provisions_the_sandbox_against_the_scope_host() -> None:
+    """The finding scope reaches the sandbox as its parsed host (ADR-0041, #208).
+
+    An online scope endpoint (`https://shop.example.com/#/login`) parses to its
+    host and is what the sandbox is provisioned for — the whole path from the
+    launch request through `start_and_step` to `Sandbox.start(scope_hosts)`.
+    """
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        streaming(script_run_then_conclude)
+    )
+    _override_goal_agent(app)
+    _override_qa_agent(app)
+    box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    with TestClient(app) as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        started = client.post(
+            "/api/findings/1/retest-session",
+            json={"target_endpoints": ["https://shop.example.com/#/login"]},
+        )
+        assert started.status_code == 202
+    assert box.scope_hosts == ("shop.example.com",)

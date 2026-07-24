@@ -36,6 +36,14 @@ DEFAULT_LAB_BASE_URL = "http://localhost:3000"
 #: it for overrunning its limit: 124 (coreutils), 143 (busybox SIGTERM), 137
 #: (SIGKILL). ``run_command`` maps these to a "timed out" note for the agent.
 TIMEOUT_EXIT_CODES = frozenset({124, 137, 143})
+#: Egress-proxy image for online-scope retests (ADR-0041): a deny-all-by-default
+#: allowlisting HTTP(S) proxy that the sandbox's *only* route to the internet
+#: passes through. Configurable so an operator can vendor their own; default Squid.
+DEFAULT_EGRESS_PROXY_IMAGE = "ubuntu/squid:latest"
+#: Env var overriding the egress-proxy image.
+EGRESS_PROXY_IMAGE_ENV = "REVALID_EGRESS_PROXY_IMAGE"
+#: Port the egress proxy listens on inside the session network.
+EGRESS_PROXY_PORT = 3128
 
 
 class CommandResult(BaseModel):
@@ -52,8 +60,12 @@ class CommandResult(BaseModel):
 class Sandbox(Protocol):
     """One ephemeral, egress-locked execution environment for a retest session."""
 
-    def start(self) -> None:
-        """Provision the environment (idempotent)."""
+    def start(self, scope_hosts: tuple[str, ...] = ()) -> None:
+        """Provision the environment for ``scope_hosts`` (idempotent).
+
+        ``scope_hosts`` is the session's parsed scope (ADR-0041): empty or the lab
+        host keeps lab provisioning; any other host provisions egress to it.
+        """
 
     def exec(self, command: str, *, timeout: float) -> CommandResult:
         """Run ``command`` and capture its result."""
@@ -97,6 +109,65 @@ def sandbox_image() -> str:
     return os.environ.get(SANDBOX_IMAGE_ENV, DEFAULT_SANDBOX_IMAGE)
 
 
+def egress_proxy_image() -> str:
+    """Return the egress-proxy image (``$REVALID_EGRESS_PROXY_IMAGE`` or default)."""
+    return os.environ.get(EGRESS_PROXY_IMAGE_ENV, DEFAULT_EGRESS_PROXY_IMAGE)
+
+
+def egress_proxy_name(session_id: int) -> str:
+    """Return the per-session egress-proxy container name (ADR-0041)."""
+    return f"revalid-retest-proxy-{session_id}"
+
+
+def lab_host() -> str:
+    """Return the lab target's host (``host`` or ``host:port``) from the lab base URL."""
+    from revalid.scope import scope_host
+
+    return scope_host(lab_base_url()) or ""
+
+
+def is_lab_scope(scope_hosts: tuple[str, ...]) -> bool:
+    """Whether a scope stays on the lab (empty, or every host is the lab host).
+
+    Lab scope keeps the unchanged ``--internal`` + attached-lab-container
+    provisioning; any other host is an online target that needs the egress
+    proxy (ADR-0041). An empty scope defaults to the lab.
+    """
+    lab = lab_host()
+    return all(host == lab for host in scope_hosts)
+
+
+def online_scope_hosts(scope_hosts: tuple[str, ...]) -> tuple[str, ...]:
+    """The non-lab hosts in a scope — the online targets to allowlist (ADR-0041)."""
+    lab = lab_host()
+    return tuple(host for host in scope_hosts if host != lab)
+
+
+def squid_allowlist_config(hosts: tuple[str, ...]) -> str:
+    """Build a deny-all-by-default Squid config allowing only ``hosts`` (ADR-0041).
+
+    Each scope host becomes an exact ``dstdomain`` ACL (the port, if any, is
+    dropped — Squid matches the hostname); everything not on the list is denied,
+    so the proxy is a closed allowlist, not an open relay.
+
+    Args:
+        hosts: The online scope hosts (``host`` or ``host:port``) to permit.
+
+    Returns:
+        A Squid configuration string.
+    """
+    domains = " ".join(sorted({host.rsplit(":", 1)[0] for host in hosts if host}))
+    return "\n".join(
+        [
+            f"http_port {EGRESS_PROXY_PORT}",
+            f"acl scoped dstdomain {domains}",
+            "http_access allow scoped",
+            "http_access deny all",
+            "shutdown_lifetime 1 second",
+        ]
+    )
+
+
 class FakeSandbox:
     """A scripted in-memory sandbox for unit/integration tests (no Docker)."""
 
@@ -109,10 +180,14 @@ class FakeSandbox:
         self.timeouts: list[float] = []
         self.started = False
         self.stopped = False
+        #: The scope hosts the orchestrator provisioned with — lets tests assert the
+        #: parsed finding scope reaches the sandbox (ADR-0041).
+        self.scope_hosts: tuple[str, ...] = ()
 
-    def start(self) -> None:
-        """Mark the fake as started."""
+    def start(self, scope_hosts: tuple[str, ...] = ()) -> None:
+        """Mark the fake as started, recording the scope it was provisioned for."""
         self.started = True
+        self.scope_hosts = scope_hosts
 
     def exec(self, command: str, *, timeout: float) -> CommandResult:
         """Return the next scripted result (or apply the callable)."""
@@ -144,10 +219,19 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         self._image = image if image is not None else sandbox_image()
         self._lab_container = lab_container
         self._container: Container | None = None
+        self._proxy: Container | None = None
         self._network_name = internal_network_name(session_id)
+        self._proxy_name = egress_proxy_name(session_id)
 
-    def start(self) -> None:
-        """Create the internal network, attach the lab container, and launch the container."""
+    def start(self, scope_hosts: tuple[str, ...] = ()) -> None:
+        """Provision the sandbox for this session's scope (ADR-0041).
+
+        Lab scope (empty, or every host is the lab host) keeps the unchanged
+        ``--internal`` network with the lab container attached. Any other host is an
+        online target: provision a deny-all-by-default egress proxy that allowlists
+        only the scoped host(s) and route the sandbox's HTTP(S) through it — the
+        sandbox has no other route out (the session network stays ``--internal``).
+        """
         try:
             import docker
         except ImportError as exc:
@@ -157,6 +241,13 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         client = docker.from_env()
         self._require_image(client)
         self._clear_stale_network(client)
+        if is_lab_scope(scope_hosts):
+            self._start_lab(client)
+        else:
+            self._start_online(client, online_scope_hosts(scope_hosts))
+
+    def _start_lab(self, client: docker.DockerClient) -> None:
+        """Lab provisioning (unchanged): internal network + attached lab container."""
         network = client.networks.create(self._network_name, driver="bridge", internal=True)
         network.connect(self._lab_container)  # allowlist == network membership (FR-06)
         self._container = client.containers.run(
@@ -166,6 +257,61 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             detach=True,
             auto_remove=False,
             network_disabled=False,
+        )
+
+    def _start_online(self, client: docker.DockerClient, hosts: tuple[str, ...]) -> None:
+        """Online provisioning (ADR-0041): an allowlisting egress proxy, fail-closed.
+
+        The session network stays ``--internal`` so the sandbox has no direct
+        internet route; a Squid proxy attached to *both* that network and the
+        internet-capable default ``bridge`` is its only way out, and Squid denies
+        every destination but ``hosts``. Any provisioning failure raises
+        ``SandboxUnavailableError`` — the sandbox is never left with open egress.
+        """
+        import docker.errors
+
+        try:
+            client.networks.create(self._network_name, driver="bridge", internal=True)
+            self._proxy = client.containers.run(
+                egress_proxy_image(),
+                name=self._proxy_name,
+                command=["sh", "-c", self._proxy_launch(hosts)],
+                network=self._network_name,
+                detach=True,
+                auto_remove=False,
+            )
+            client.networks.get("bridge").connect(self._proxy)  # the internet side
+            self._proxy.reload()
+            proxy_ip = self._proxy.attrs["NetworkSettings"]["Networks"][self._network_name][
+                "IPAddress"
+            ]
+            proxy_url = f"http://{proxy_ip}:{EGRESS_PROXY_PORT}"
+            self._container = client.containers.run(
+                self._image,
+                command="sleep infinity",
+                network=self._network_name,
+                detach=True,
+                auto_remove=False,
+                network_disabled=False,
+                environment={
+                    "http_proxy": proxy_url,
+                    "https_proxy": proxy_url,
+                    "HTTP_PROXY": proxy_url,
+                    "HTTPS_PROXY": proxy_url,
+                },
+            )
+        except (docker.errors.APIError, KeyError) as exc:
+            self.stop()  # fail closed: never leave a half-provisioned open route
+            raise SandboxUnavailableError(
+                f"online egress proxy provisioning failed: {exc}"
+            ) from exc
+
+    def _proxy_launch(self, hosts: tuple[str, ...]) -> str:
+        """A shell one-liner that writes the allowlist config and runs Squid in foreground."""
+        config = squid_allowlist_config(hosts)
+        return (
+            f"printf '%s' {config!r} > /etc/squid/squid.conf && "
+            "exec squid -N -f /etc/squid/squid.conf"
         )
 
     def _require_image(self, client: docker.DockerClient) -> None:
@@ -273,6 +419,14 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             except docker.errors.APIError:
                 pass
             self._container = None
+        # The online-scope egress proxy (ADR-0041), if any: remove it before the
+        # network so its dual attachment (session net + bridge) can't block removal.
+        if self._proxy is not None:
+            try:
+                self._proxy.remove(force=True)
+            except docker.errors.APIError:
+                pass
+            self._proxy = None
         client = docker.from_env()
         try:
             network = client.networks.get(self._network_name)
