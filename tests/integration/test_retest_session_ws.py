@@ -49,6 +49,15 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _is_handback(event: dict[str, Any]) -> bool:
+    """Is ``event`` the agent parking the session back with the operator?
+
+    Since ADR-0042 the hand-back has no dedicated event kind: it is a
+    ``state_change`` to ``awaiting_operator`` (which absorbed ``needs_guidance``).
+    """
+    return event["kind"] == "state_change" and event["payload"].get("to") == "awaiting_operator"
+
+
 def test_ws_streams_proposed_output_and_verdict() -> None:
     """The socket replays the transcript and tails it to a terminal verdict.
 
@@ -70,9 +79,12 @@ def test_ws_streams_proposed_output_and_verdict() -> None:
             cid = proposed["payload"]["tool_call_id"]
             client.post(f"/api/retest-sessions/{sid}/commands/{cid}/approve")
             # Guided mode (ADR-0040) is the default: the approved command runs and
-            # the agent hands back a recommendation (needs_guidance), not a verdict.
-            # The operator records the terminal verdict, which the socket then tails.
-            while not any(e["kind"] == "needs_guidance" for e in events):
+            # the agent hands back a recommendation, not a verdict. Since ADR-0042
+            # that hand-back is an ordinary ``agent_message`` plus a state change to
+            # ``awaiting_operator`` (the folded-in ``needs_guidance``) — there is no
+            # longer a dedicated event kind for it. The operator then records the
+            # terminal verdict, which the socket tails.
+            while not any(_is_handback(e) for e in events):
                 events.append(ws.receive_json())
             client.post(
                 f"/api/retest-sessions/{sid}/conclude",
@@ -82,7 +94,8 @@ def test_ws_streams_proposed_output_and_verdict() -> None:
                 events.append(ws.receive_json())
 
     kinds = {e["kind"] for e in events}
-    assert {"command_proposed", "command_output", "needs_guidance", "verdict"} <= kinds
+    assert {"command_proposed", "command_output", "agent_message", "verdict"} <= kinds
+    assert any(_is_handback(e) for e in events)
 
 
 def test_ws_closes_with_policy_violation_for_unknown_session() -> None:
