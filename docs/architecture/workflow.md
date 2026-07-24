@@ -134,8 +134,10 @@ but does not rewrite it behind the operator's back.
 ## Stage 3 — the agentic retest session
 
 This is the heart of the system. Launching (`POST
-/api/findings/{id}/retest-session`) creates a `starting` session row, returns
-`202` immediately, and schedules the first agent step as a background task.
+/api/findings/{id}/retest-session`) creates a `working` session row, returns
+`202` immediately, and schedules the first agent step as a background task — the
+sandbox is provisioned at the top of that first `working` turn (a *deferred*
+launch, or a `Restart`, instead lands on `idle` and waits for `Start`).
 
 ### Provisioning: the sandbox *is* the allowlist
 
@@ -178,28 +180,26 @@ a fresh attempt, or **Conclude** it themselves at any live point.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> idle: Restart (deferred)
-    [*] --> starting: launch
-    idle --> starting: operator Start
-    starting --> thinking: sandbox up, first agent step
-    thinking --> awaiting_command: proposes run_command (gated)
-    awaiting_command --> running_command: operator approves
-    awaiting_command --> thinking: operator rejects (agent reconsiders)
-    running_command --> thinking: output fed back to the agent
-    thinking --> needs_guidance: agent is out of ideas (ADR-0034)
-    needs_guidance --> thinking: operator steers → Keep going
-    thinking --> awaiting_operator: AwaitOperator (conversational reply, ADR-0039)
-    awaiting_operator --> thinking: operator messages back
-    thinking --> thinking: Restart model — abort + re-run a wedged turn (ADR-0039)
-    awaiting_command --> stopped: operator Stop
-    stopped --> awaiting_command: operator Resume
-    needs_guidance --> concluded: operator concludes manually
-    thinking --> concluded: ConcludeOutput(fixed | still_open)
+    [*] --> idle: deferred / Restart
+    [*] --> working: launch
+    idle --> working: operator Start (or a message)
+    working --> awaiting_command: proposes run_command (gated)
+    awaiting_command --> working: operator approves — the command runs inside the next turn
+    awaiting_command --> working: operator rejects (agent reconsiders)
+    awaiting_command --> working: operator message at the gate — withdraws the command, re-runs the agent (ADR-0042)
+    working --> awaiting_operator: agent hands back — reply, guided one-action report, verdict rec, or out of options (ADR-0040/0042)
+    awaiting_operator --> working: operator messages back
+    working --> working: Restart model — abort + re-run a wedged turn (ADR-0039)
+    working --> stopped: operator Stop
+    stopped --> working: operator Resume
+    stopped --> awaiting_command: a message picks it back up
+    awaiting_operator --> concluded: operator concludes manually
+    working --> concluded: ConcludeOutput(fixed | still_open) — free-launch only
     stopped --> concluded: operator concludes manually
-    thinking --> error: unhandled failure
+    working --> error: unhandled failure
     concluded --> [*]
     error --> [*]
-    thinking --> ended: operator ends the session
+    working --> ended: operator ends the session
     ended --> [*]
 ```
 
@@ -218,19 +218,29 @@ Two non-terminal states give the operator lifecycle control: **`idle`** (created
 but not started — a Restart lands here so the fresh attempt never auto-runs; the
 sandbox is provisioned only on Start) and **`stopped`** (an operator pause that
 keeps the sandbox alive so Resume can continue). Stop is *cooperative*: a command
-already running finishes and its output is recorded before the session parks. A
-third light non-terminal state, **`awaiting_operator`** (ADR-0039), is where the
-agent lands after a conversational reply — it answered the operator (a greeting, a
-small-talk answer) and handed back without running anything, sandbox kept alive; it
-is deliberately lighter than `needs_guidance` (no "needs your guidance" banner), and
-the operator's next message resumes it.
+already running finishes and its output is recorded before the session parks. The
+agent's own hand-back state is **`awaiting_operator`** (ADR-0039/0040/0042): the
+agent lands here whenever it hands control back without concluding — a
+conversational reply (a greeting, a small-talk answer), a guided one-action report
+("ran X — I'd try Y next"), a verdict *recommendation* for the operator to confirm,
+or an honest "I've exhausted my options". That last case folds in the retired
+`needs_guidance` state (ADR-0042): there is no longer a separate "needs your
+guidance" banner — every hand-back is the same lightweight "your move" prompt. The
+sandbox stays alive throughout, and the operator's next message resumes the agent.
 
 The agent has exactly two tools — `run_command` (gated) and `respond` (prose to the
 operator, runs nothing) — and three ways a turn can end: a gated command
-(`DeferredToolRequests`), a verdict (`ConcludeOutput`), or a conversational
-hand-back (`AwaitOperator`, ADR-0039). The instructions make the operator's live
-message the agent's priority and the goal its background context, so a plain "hi"
-gets a reply and a wait, not a dash for the goal.
+(`DeferredToolRequests`), a verdict (`ConcludeOutput`), or a hand-back to
+`awaiting_operator` (`AwaitOperator`, ADR-0039). The instructions make the
+operator's live message the agent's priority and the goal its background context,
+so a plain "hi" gets a reply and a wait, not a dash for the goal.
+
+There is **one agent and one chat** (ADR-0042): the earlier parallel read-only Q&A
+agent is gone. A question to a `working` agent is queued and answered by that same
+agent at the next turn boundary (a `messages_delivered` event marks the hand-off);
+a message sent while a command waits at the `awaiting_command` gate withdraws the
+proposal and steers the agent — "typing at the permission prompt" — rather than
+opening a second conversation.
 
 ### What the operator can do mid-session
 
@@ -238,24 +248,29 @@ gets a reply and a wait, not a dash for the goal.
 |---|---|---|
 | Approve / reject a command | `.../commands/{cid}/approve\|reject` | the only way anything executes |
 | Run their own command | `.../human-command` | executes in the *same* sandbox; the output is buffered and handed to the agent as an observation on its next turn |
-| Send a message | `.../message` | steers the agent, or asks it a question |
+| Send a message | `.../message` | steers or questions the *same* agent — queued to a `working` turn and delivered at the next boundary, or, at the `awaiting_command` gate, withdrawing the pending command and re-running the agent (ADR-0042) |
 | Change the goal | `.../goal`, `.../goal/regenerate` | the goal stays user-owned |
 | Free launch | `.../free-launch` | auto-approves the agent's commands so the loop runs unattended — the one deliberate relaxation of the gate (ADR-0029); the egress lock still holds |
 | **Start** | `.../start` | provisions the sandbox and runs the first step of an `idle` (deferred/Restarted) session |
 | **Stop / Resume** | `.../stop`, `.../resume` | cooperatively pause a running session (sandbox kept alive) and continue it (issue #150) |
 | **Restart model** | `.../restart-model` | aborts a wedged in-flight turn and re-runs it — unstick a frozen model (ADR-0039); keeps the session, sandbox, goal and history (distinct from Restart) |
 | **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
-| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes a `needs_guidance` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
+| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes an `awaiting_operator` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
 | End it | `.../end` | terminal; sandbox torn down |
 
 ### Concluding — and the honest "I don't know"
 
 The agent's structured output is a `ConcludeOutput(status, rationale)`. Only
-`fixed` and `still_open` become verdicts. An `inconclusive` result is **not**
-written as a verdict: the session pauses in `needs_guidance` with the agent's
-reason, keeps the sandbox alive, and asks the operator to steer or to conclude
-themselves (ADR-0034). A machine that has run out of ideas is not evidence that
-a vulnerability is fixed.
+`fixed` and `still_open` can become a verdict, and the agent authors one itself
+**only under free launch (Auto-run)**: there it drives the loop to a `concluded`
+verdict unattended. In **guided mode** the agent never self-concludes — after an
+approved command it parks in `awaiting_operator` with its next suggestion, and a
+determination is surfaced as a verdict *recommendation* for the operator to
+confirm, not self-recorded (ADR-0040). An `inconclusive` result is **never**
+written as a verdict in either mode: the session pauses in `awaiting_operator`
+with the agent's reason, keeps the sandbox alive, and asks the operator to steer
+or to conclude themselves (ADR-0034/0042). A machine that has run out of ideas is
+not evidence that a vulnerability is fixed.
 
 When a real determination is reached, `record_verdict` writes a `VerdictRecord`
 (actor = agent) plus `AgenticEvidence` assembled **from the transcript** — the

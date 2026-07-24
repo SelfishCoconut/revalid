@@ -55,13 +55,19 @@ either raise the limit or narrow the scope (e.g. scan fewer ports) — a bounded
 - The operator is in charge and is chatting with you. When they send a message, \
 that is your priority — read what they actually said and respond to *that*. The \
 goal is background context, not a script to rush through.
-- If the message is anything other than a clear instruction to run a verification \
-step — a question, a greeting, small talk, an acknowledgement — it is conversation: \
-answer it with a short `AwaitOperator` reply and STOP. Say what you know; if you \
-cannot answer (e.g. you don't know an internal IP), say so plainly and offer what \
-you *can* (the target host(s) you can reach), then hand back and wait. NEVER run a \
-command or conclude just because a question is hard — the operator will keep asking \
-and guiding, and expects a reply, not a verdict.
+- Respond to what the message *needs*, not to whether it looks like a command:
+  - Pure conversation — a greeting, an acknowledgement, an opinion, or a question \
+you can already answer from what you know — gets a short `AwaitOperator` reply, then \
+STOP and wait.
+  - A question whose answer you do NOT already have, but a command could reveal \
+(something about the target, the sandbox/environment, or the finding), is a request \
+to FIND OUT: work out which single command would answer it and propose that command \
+with a one-line rationale, then report what it shows. Do NOT reply "I can't" when one \
+command would tell you — find out and answer. (You still propose one command and wait \
+for approval, exactly as for any verification step.)
+  - Only when nothing you could run would get the answer, say so plainly and offer \
+what you *can* (e.g. the host(s) you can reach), then hand back. NEVER conclude just \
+because a question is hard — the operator expects a reply or a lookup, not a verdict.
 - `inconclusive` is only for a genuine *retest* dead-end: you have actually run \
 verification steps and still cannot determine the finding's outcome. It hands back \
 to the operator (it does not end the session); in the rationale say what you tried \
@@ -272,34 +278,3 @@ def build_retest_agent(
         return "Delivered to the operator."
 
     return agent
-
-
-_QA_INSTRUCTIONS = """\
-You are the penetration-test retester, replying in chat to the operator's question \
-about the retest in progress. Answer concisely and specifically, using only the \
-context you are given (the finding, the target scope, the current goal, and what has \
-happened so far). If the answer is not in the context, say so briefly. This is a \
-chat reply only — do NOT propose or run commands here.
-"""
-
-
-def build_qa_agent(model: Model | KnownModelName | str | None = None) -> Agent[None, str]:
-    """Build a lightweight prose Q&A agent for answering operator questions (FR-17).
-
-    Decoupled from the retest loop: it runs no tools and never touches the deferred
-    command state, so it can answer at any time — including while the main agent is
-    mid-turn — from a read-only view of the transcript.
-
-    Args:
-        model: A Pydantic AI model instance or name; the configured backend when
-            omitted (tests pass ``TestModel``/``FunctionModel``).
-
-    Returns:
-        An agent whose output is the plain-text answer to show the operator.
-    """
-    return Agent(
-        model if model is not None else resolve_model(),
-        output_type=str,
-        instructions=_QA_INSTRUCTIONS,
-        defer_model_check=True,
-    )

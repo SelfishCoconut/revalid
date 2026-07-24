@@ -26,7 +26,7 @@ def test_agentic_evidence_carries_command_proof() -> None:
 
 
 def test_retest_session_status_terminal_set() -> None:
-    assert RetestSessionStatus.STARTING.value == "starting"
+    assert RetestSessionStatus.WORKING.value == "working"
     terminal = {
         RetestSessionStatus.CONCLUDED,
         RetestSessionStatus.GIVEN_UP,

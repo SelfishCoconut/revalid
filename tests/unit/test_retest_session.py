@@ -81,14 +81,14 @@ def _pending_cid(registry: SessionRegistry, session_id: int) -> str:
     return live.pending_call_id
 
 
-def test_create_session_starts_in_starting_status() -> None:
+def test_create_session_starts_in_working_status() -> None:
     sessions = session_factory(create_db_engine(IN_MEMORY))
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="ollama:qwen3.6:27b")
         assert s.id is not None
         assert s.finding_id == fid
-        assert s.status == RetestSessionStatus.STARTING.value
+        assert s.status == RetestSessionStatus.WORKING.value
         assert s.model == "ollama:qwen3.6:27b"
         assert s.verdict_status is None
         assert s.ended_at is None
@@ -109,7 +109,7 @@ def test_append_event_assigns_monotonic_seq() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="ollama:qwen3.6:27b")
-        rs.append_event(session, s.id, SessionEventKind.STATE_CHANGE, {"to": "starting"})
+        rs.append_event(session, s.id, SessionEventKind.STATE_CHANGE, {"to": "working"})
         rs.append_event(session, s.id, SessionEventKind.COMMAND_PROPOSED, {"command": "id"})
         events = rs.load_events_after(session, s.id, after_seq=0)
     assert [e["seq"] for e in events] == [1, 2]
@@ -122,7 +122,7 @@ def test_load_events_after_filters_by_seq() -> None:
     with sessions() as session:
         fid = _seed_finding(session)
         s = rs.create_session(session, finding_id=fid, model="m")
-        rs.append_event(session, s.id, SessionEventKind.STATE_CHANGE, {"to": "starting"})
+        rs.append_event(session, s.id, SessionEventKind.STATE_CHANGE, {"to": "working"})
         rs.append_event(session, s.id, SessionEventKind.COMMAND_PROPOSED, {"command": "id"})
         events = rs.load_events_after(session, s.id, after_seq=1)
     assert [e["seq"] for e in events] == [2]
@@ -309,14 +309,19 @@ def test_adjudicate_unknown_session_is_a_noop() -> None:
 
 
 def _latest_guidance_reason(session: Session, session_id: int) -> str:
-    """The reason carried by the most recent needs_guidance pause (ADR-0034/0039)."""
-    guidance = [
+    """The text of the most recent agent hand-back message (ADR-0034/0039/0042).
+
+    Guided one-action reports, verdict recommendations, and "I'm stuck" hand-backs are
+    surfaced as ordinary ``agent_message`` events now (``needs_guidance`` folded into
+    ``awaiting_operator``), so the reason lives in the message text.
+    """
+    messages = [
         e
         for e in rs.load_events_after(session, session_id, 0)
-        if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value
+        if e["kind"] == SessionEventKind.AGENT_MESSAGE.value
     ]
-    assert guidance, "expected a needs_guidance pause"
-    return str(guidance[-1]["payload"]["reason"])
+    assert messages, "expected an agent hand-back message"
+    return str(messages[-1]["payload"]["text"])
 
 
 def test_guided_approve_runs_command_then_hands_back() -> None:
@@ -341,7 +346,7 @@ def test_guided_approve_runs_command_then_hands_back() -> None:
         session.refresh(s)
         # The command ran, but the agent's `still_open` is surfaced as a recommendation
         # at a guidance pause — no terminal verdict, sandbox kept alive for the operator.
-        assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+        assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
         assert s.verdict_status is None
         assert box.commands and not box.stopped  # ran once, NOT torn down
         assert "auth still bypassable" in _latest_guidance_reason(session, s.id)
@@ -354,7 +359,7 @@ def test_guided_approve_runs_command_then_hands_back() -> None:
         events_after = rs.load_events_after(session, s.id, 0)
     assert len(box.commands) == 1  # still exactly one execution, not two
     assert events_after == events_before
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
 
 
 def test_apply_decision_wrong_command_id_is_a_noop() -> None:
@@ -401,7 +406,7 @@ def test_apply_decision_reject_never_executes_but_still_hands_back() -> None:
         kinds = [e["kind"] for e in rs.load_events_after(session, s.id, 0)]
     assert "command_rejected" in kinds
     assert box.commands == []
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
 
 
 def test_free_launch_auto_runs_command_to_verdict() -> None:
@@ -414,7 +419,7 @@ def test_free_launch_auto_runs_command_to_verdict() -> None:
         box = FakeSandbox([CommandResult(stdout="{token}", stderr="", exit_code=0, elapsed_ms=5)])
         agent = build_retest_agent(streaming(script_run_then_conclude))
 
-        # start_and_step's own _drive_auto loop runs before this returns.
+        # start_and_step's own _advance loop runs before this returns.
         start_and_step(session, registry, s.id, agent, box, "Retest.", free_launch=True)
         session.refresh(s)
         events = rs.load_events_after(session, s.id, 0)
@@ -450,7 +455,7 @@ def test_guided_parks_after_one_command_discarding_the_next_proposal() -> None:
         reason = _latest_guidance_reason(session, s.id)
         events = rs.load_events_after(session, s.id, 0)
         proposed = [e for e in events if e["kind"] == "command_proposed"]
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # parked, not re-gated
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value  # parked, not re-gated
     assert len(box.commands) == 1  # exactly one command ran
     assert live is not None and live.pending_call_id is None  # the next proposal was discarded
     assert not box.stopped  # sandbox kept alive so the operator can keep steering
@@ -475,7 +480,9 @@ def test_continue_after_a_guided_discard_park_resumes_cleanly() -> None:
             session, registry, s.id, approved=True, command_id=_pending_cid(registry, s.id)
         )
         session.refresh(s)
-        assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # parked (proposal discarded)
+        assert (
+            s.status == RetestSessionStatus.AWAITING_OPERATOR.value
+        )  # parked (proposal discarded)
         rs.submit_message(session, registry, s.id, "keep going then")
         rs.continue_session(session, registry, s.id)  # re-run from the trimmed history
         session.refresh(s)
@@ -498,12 +505,12 @@ def test_agent_inconclusive_conclusion_pauses_for_guidance() -> None:
         session.refresh(s)
         rows = session.scalars(select(VerdictRecord)).all()
         events = rs.load_events_after(session, s.id, 0)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert s.verdict_status is None
     assert rows == []  # the agent cannot self-conclude inconclusive
     assert registry.get(s.id) is not None and not box.stopped  # asks with the sandbox alive
-    guidance = [e for e in events if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value]
-    assert guidance[-1]["payload"]["reason"] == "exhausted my options, need guidance"
+    messages = [e for e in events if e["kind"] == SessionEventKind.AGENT_MESSAGE.value]
+    assert messages[-1]["payload"]["text"] == "exhausted my options, need guidance"
 
 
 def test_continue_after_guidance_resumes_with_the_operators_steer() -> None:
@@ -519,12 +526,12 @@ def test_continue_after_guidance_resumes_with_the_operators_steer() -> None:
         agent = build_retest_agent(streaming(script_inconclusive_then_conclude_on_message))
         start_and_step(session, registry, s.id, agent, box, "Retest.")  # pauses (inconclusive)
         session.refresh(s)
-        assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+        assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
         rs.submit_message(session, registry, s.id, "try the admin endpoint")  # operator steer
         rs.continue_session(session, registry, s.id)  # re-runs the agent with the message
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value  # a recommendation, not a ruling
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value  # a recommendation, not a ruling
     assert s.verdict_status is None
     # The steer reached the agent: its second turn concluded citing the operator's steer.
     assert "with the operator's steer, confirmed open" in reason
@@ -636,7 +643,7 @@ def test_stop_halts_the_free_launch_auto_run_loop() -> None:
         assert live is not None
         live.free_launch = True
         live.stopped = True  # operator stopped
-        rs._drive_auto(session, registry, s.id)  # must respect the stop
+        rs._advance(session, registry, s.id)  # must respect the stop
     assert box.commands == []  # nothing auto-ran while stopped
 
 
@@ -724,9 +731,11 @@ def test_is_terminal_matches_the_terminal_statuses() -> None:
     assert rs.is_terminal(RetestSessionStatus.GIVEN_UP)
     assert rs.is_terminal(RetestSessionStatus.ENDED)
     assert rs.is_terminal(RetestSessionStatus.ERROR)
-    assert not rs.is_terminal(RetestSessionStatus.STARTING)
+    assert not rs.is_terminal(RetestSessionStatus.IDLE)
+    assert not rs.is_terminal(RetestSessionStatus.WORKING)
     assert not rs.is_terminal(RetestSessionStatus.AWAITING_COMMAND)
-    assert not rs.is_terminal(RetestSessionStatus.RUNNING_COMMAND)
+    assert not rs.is_terminal(RetestSessionStatus.AWAITING_OPERATOR)
+    assert not rs.is_terminal(RetestSessionStatus.STOPPED)
 
 
 def test_apply_decision_on_unknown_session_is_a_noop() -> None:
@@ -887,7 +896,7 @@ def test_agent_observes_human_command_on_next_turn() -> None:
 
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "saw-operator" in reason  # the agent read the operator activity, then handed back
 
 
@@ -909,7 +918,7 @@ def test_reject_folds_operator_activity_into_the_denial() -> None:
 
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "saw-operator" in reason
 
 
@@ -938,13 +947,22 @@ def test_submit_human_command_on_dead_session_is_a_noop() -> None:
         assert live.human_messages == ["focus on the login endpoint"]
 
 
-def test_submit_message_on_dead_session_is_a_noop() -> None:
-    """A chat message to a non-live session records nothing and does not raise."""
+def test_submit_message_records_even_when_not_live() -> None:
+    """A message to an existing but non-live session is still recorded, never lost.
+
+    A session that outlived a backend restart has no live agent, so the message cannot
+    be buffered for delivery — but it must still land on the transcript rather than be
+    silently dropped (ADR-0042).
+    """
     sessions = session_factory(create_db_engine(IN_MEMORY))
     registry = SessionRegistry()
     with sessions() as session:
-        rs.submit_message(session, registry, 999, "hello")  # never started
-        assert rs.load_events_after(session, 999, 0) == []
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")  # no LiveSession registered
+        rs.submit_message(session, registry, s.id, "hello")
+        events = rs.load_events_after(session, s.id, 0)
+    assert [e["kind"] for e in events] == ["human_message"]
+    assert events[-1]["payload"]["text"] == "hello"
 
 
 def test_agent_reads_queued_message_on_approve() -> None:
@@ -963,7 +981,7 @@ def test_agent_reads_queued_message_on_approve() -> None:
 
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "saw-message" in reason
 
 
@@ -983,7 +1001,7 @@ def test_agent_reads_queued_message_on_reject() -> None:
 
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "saw-message" in reason
 
 
@@ -1002,7 +1020,7 @@ def test_no_message_means_no_extra_user_turn() -> None:
 
         session.refresh(s)
         reason = _latest_guidance_reason(session, s.id)
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "no-message" in reason
 
 
@@ -1023,11 +1041,12 @@ def test_respond_emits_agent_message_through_the_orchestrator() -> None:
 
         session.refresh(s)
         events = rs.load_events_after(session, s.id, 0)
-    prose = [e for e in events if e["kind"] == "agent_message"]
-    assert len(prose) == 1
-    assert prose[0]["payload"]["text"] == "the 500 was the WAF rejecting the payload"
+    prose = [e["payload"]["text"] for e in events if e["kind"] == "agent_message"]
+    # The `respond` prose is recorded (guided mode then also surfaces the conclusion
+    # as a recommendation agent_message, ADR-0042 — so it is among the messages).
+    assert "the 500 was the WAF rejecting the payload" in prose
     # Guided (ADR-0039): the agent's `still_open` is a recommendation, so it hands back.
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
 
 
 def test_set_goal_records_plan_updated_and_queues_for_agent() -> None:
@@ -1098,7 +1117,7 @@ def test_queued_goal_is_injected_into_the_next_turn() -> None:
         reason = _latest_guidance_reason(session, s.id)
     # The goal injection is delivered as a user turn -> the model reports "saw-message",
     # surfaced in the guided hand-back reason (ADR-0039).
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert "saw-message" in reason
 
 
@@ -1122,8 +1141,6 @@ def test_await_operator_parks_and_replies() -> None:
     assert registry.get(s.id) is not None and not box.stopped  # replies with the sandbox alive
     messages = [e for e in events if e["kind"] == SessionEventKind.AGENT_MESSAGE.value]
     assert messages[-1]["payload"]["text"] == "Hi — ready when you are."
-    # No heavy "needs your guidance" banner for a conversational hand-back.
-    assert not [e for e in events if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value]
 
 
 def test_message_resumes_an_awaiting_operator_session() -> None:
@@ -1142,8 +1159,8 @@ def test_message_resumes_an_awaiting_operator_session() -> None:
         rs.continue_session(session, registry, s.id)
         session.refresh(s)
     # Guided mode (default): the resumed agent's conclusion is a recommendation,
-    # so it parks in needs_guidance rather than self-recording a verdict (ADR-0040).
-    assert s.status == RetestSessionStatus.NEEDS_GUIDANCE.value
+    # so it parks in awaiting_operator rather than self-recording a verdict (ADR-0040/0042).
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
     assert s.verdict_status is None
 
 

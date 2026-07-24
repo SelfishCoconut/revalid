@@ -61,12 +61,12 @@ describe("useRetestSession", () => {
     expect(result.current.connected).toBe(false);
   });
 
-  it("derives status from the latest state_change event, defaulting to starting", async () => {
+  it("derives status from the latest state_change event, defaulting to working", async () => {
     const socket = new FakeSocket();
     const makeSocket = () => socket as unknown as WebSocket;
     const { result } = renderHook(() => useRetestSession(1, makeSocket));
 
-    expect(result.current.status).toBe("starting");
+    expect(result.current.status).toBe("working");
 
     act(() => {
       socket.emit({ seq: 1, kind: "state_change", payload: { to: "awaiting_approval" } });
@@ -173,7 +173,7 @@ describe("useRetestSession", () => {
     // new id — before socket B has emitted anything — so no stale events
     // from session 1 leak into session 2's view.
     expect(result.current.events).toEqual([]);
-    expect(result.current.status).toBe("starting");
+    expect(result.current.status).toBe("working");
     expect(result.current.verdict).toBeNull();
 
     act(() => {

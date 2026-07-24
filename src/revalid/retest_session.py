@@ -11,7 +11,7 @@ Task 5 adds the orchestration layer that drives the Task 4 agent
 :class:`SessionRegistry` of :class:`LiveSession` state, ``start_and_step``/
 ``apply_decision`` to pause on each proposed command for human approval and
 resume it. When the agent exhausts the options it can think of, it hands back
-to the operator (``needs_guidance``, ADR-0034) rather than running forever.
+to the operator (``awaiting_operator``, ADR-0034/0042) rather than running forever.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic_ai import (
-    Agent,
     AgentRunResult,
     AgentRunResultEvent,
     DeferredToolRequests,
@@ -44,7 +43,6 @@ from revalid.db import RetestSessionRecord, SessionEventRecord, VerdictRecord
 from revalid.deltas import DELTAS, DeltaChannel
 from revalid.domain import (
     AgenticEvidence,
-    Finding,
     RetestSessionStatus,
     SessionEventKind,
     VerdictStatus,
@@ -105,7 +103,7 @@ def create_session(
             so it waits for an operator ``Start`` instead of auto-running — the
             Restart path (issue #150). Default ``False`` opens it ``starting``.
     """
-    status = RetestSessionStatus.IDLE if deferred else RetestSessionStatus.STARTING
+    status = RetestSessionStatus.IDLE if deferred else RetestSessionStatus.WORKING
     record = RetestSessionRecord(
         finding_id=finding_id,
         status=status.value,
@@ -376,11 +374,11 @@ class LiveSession:
     pending_call_id: str | None = None
     #: Whether the agent's commands auto-run without a per-command human approval
     #: (FR-17 Slice 5). Plan changes stay gated regardless. Toggled live by
-    #: ``set_free_launch``; the free-launch loop lives in ``_drive_auto``.
+    #: ``set_free_launch``; the free-launch loop lives in ``_advance``.
     free_launch: bool = False
-    #: Paused for operator guidance (ADR-0034): the agent exhausted its options and
-    #: handed back. Set by ``_pause_for_guidance``, cleared by ``continue_session``;
-    #: the free-launch loop stops while it is ``True``.
+    #: The agent handed control back (ADR-0034/0042): a reply, a guided report, a
+    #: recommendation, or "I'm stuck". Set by ``_await_operator``, cleared by
+    #: ``continue_session``; the free-launch loop stops while it is ``True``.
     awaiting_guidance: bool = False
     #: The operator pressed Stop (issue #150): a cooperative pause. Set by
     #: ``stop_session``, cleared by ``resume_session``. An in-flight step that
@@ -425,6 +423,15 @@ class LiveSession:
             drained = list(self.human_messages)
             self.human_messages.clear()
             return drained
+
+    def has_queued_messages(self) -> bool:
+        """Whether operator chat messages are waiting for the next turn (thread-safe).
+
+        Peeked (not drained) by :func:`_advance` to decide whether to deliver them at
+        a turn boundary — the actual drain happens inside the resume it then runs.
+        """
+        with self.lock:
+            return bool(self.human_messages)
 
     #: The current goal (FR-17 6b-ii) queued by an operator edit since the agent's
     #: last turn, delivered as a user turn on the next resume (like human_messages).
@@ -675,7 +682,7 @@ def _dispatch_output(
             # continue resumes from a clean state — and hand back, surfacing the
             # proposed command as an advisory suggestion rather than a demand.
             live.messages = result.all_messages()[:-1]
-            _pause_for_guidance(session, registry, session_id, _suggestion_reason(proposal))
+            _await_operator(session, registry, session_id, _suggestion_reason(proposal))
             return
         _emit_proposal(session, session_id, live, proposal)
         # If the operator pressed Stop while this step was thinking (issue #150),
@@ -692,47 +699,30 @@ def _dispatch_output(
             # The agent hands back rather than terminating: it has exhausted the
             # options it can think of and asks the operator to steer or conclude
             # (ADR-0034). No verdict is written; the sandbox stays alive.
-            _pause_for_guidance(session, registry, session_id, output.rationale)
+            _await_operator(session, registry, session_id, output.rationale)
         elif guided:
             # Guided mode never self-concludes (ADR-0039): the agent's `fixed`/
             # `still_open` is a *recommendation*, surfaced for the operator to
             # confirm (Conclude) — only the operator records a terminal verdict.
-            _pause_for_guidance(session, registry, session_id, _recommendation_reason(output))
+            _await_operator(session, registry, session_id, _recommendation_reason(output))
         else:
             record_verdict(session, session_id, output.status, output.rationale)
             _teardown(registry, session_id)
 
 
-def _pause_for_guidance(
-    session: Session, registry: SessionRegistry, session_id: int, reason: str
-) -> None:
-    """Pause a session for operator guidance (ADR-0034): no verdict, sandbox kept alive.
-
-    Records a ``needs_guidance`` event carrying the human-readable ``reason`` and
-    moves the session to the non-terminal ``NEEDS_GUIDANCE`` state, so the SPA
-    shows a pause banner (Keep going / Conclude) while the operator can still run
-    commands and steer via chat. The live session is retained (its sandbox is not
-    torn down); the free-launch loop halts on ``awaiting_guidance``.
-    """
-    append_event(session, session_id, SessionEventKind.NEEDS_GUIDANCE, {"reason": reason})
-    set_status(session, session_id, RetestSessionStatus.NEEDS_GUIDANCE)
-    live = registry.get(session_id)
-    if live is not None:
-        live.awaiting_guidance = True
-
-
 def _await_operator(
     session: Session, registry: SessionRegistry, session_id: int, message: str
 ) -> None:
-    """Park a session after a conversational reply — the agent handed back (issue #204).
+    """Park a session after the agent handed control back (ADR-0034/0039/0042).
 
-    The lighter sibling of :func:`_pause_for_guidance`: the agent answered the
-    operator (a greeting, small talk, an acknowledgement) rather than running a
-    command, so its reply is surfaced as an ordinary ``agent_message`` and the
-    session moves to the non-terminal ``AWAITING_OPERATOR`` state — no
-    "needs your guidance" banner. The sandbox stays alive; the free-launch loop
-    halts on ``awaiting_guidance`` (reused as the generic "handed back" flag); the
-    operator's next message resumes it (:func:`continue_session`).
+    The single hand-back path (ADR-0042 folded ``needs_guidance`` into here): the
+    agent answered conversationally, made a guided one-action report with a suggested
+    next step, recommended a verdict for the operator to confirm, or said it has
+    exhausted its options. ``message`` is surfaced as an ordinary ``agent_message``
+    and the session moves to the non-terminal ``AWAITING_OPERATOR`` state — the
+    sandbox stays alive, the free-launch loop halts on ``awaiting_guidance`` (reused
+    as the generic "handed back" flag), and the operator's next message resumes it
+    (:func:`continue_session`).
     """
     append_event(session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": message})
     set_status(session, session_id, RetestSessionStatus.AWAITING_OPERATOR)
@@ -918,7 +908,7 @@ def start_and_step(
     sandbox.start(scope_hosts(session_scope(session, session_id)))
     live = LiveSession(agent=agent, sandbox=sandbox, free_launch=free_launch)
     registry.put(session_id, live)
-    set_status(session, session_id, RetestSessionStatus.THINKING)
+    set_status(session, session_id, RetestSessionStatus.WORKING)
     deps = _make_deps(session, session_id, live)
     try:
         result = run_agent_step(agent, finding_prompt, session_id=session_id, deps=deps, live=live)
@@ -926,8 +916,8 @@ def start_and_step(
         _fail(session, registry, session_id, str(exc))
         return
     _dispatch_output(session, registry, session_id, result)
-    # In free-launch, drive the auto-approve loop from here; gated mode no-ops.
-    _drive_auto(session, registry, session_id)
+    # Deliver any queued message and, in free-launch, auto-approve; else parks.
+    _advance(session, registry, session_id)
 
 
 def _consume_pending_call(live: LiveSession, command_id: str) -> str | None:
@@ -997,7 +987,7 @@ def _resume_with_decision(
     agent's ``set_plan`` was removed in 6b-ii), so a resume either runs the
     approved command or folds a rejection into the tool's denial message.
     """
-    set_status(session, session_id, RetestSessionStatus.THINKING)
+    set_status(session, session_id, RetestSessionStatus.WORKING)
     results = DeferredToolResults()
     if approved:
         # Approved: the run_command tool runs and drains observations into its own
@@ -1030,20 +1020,72 @@ def _resume_with_decision(
     _dispatch_output(session, registry, session_id, result, after_command=approved)
 
 
-def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) -> None:
-    """Auto-approve successive command proposals while free-launch is on (FR-17 Slice 5).
+#: Recorded on the withdrawn command when an operator message pre-empts the approval
+#: gate — Claude Code's "type at the permission prompt" (a message steers instead of
+#: approving). The agent sees the command was not run and reads the message.
+_STEER_REASON = "Set aside — the operator sent a message instead of approving."
 
-    The free-launch loop. Iterative on purpose — one :func:`_resume_with_decision`
-    call per pass, never recursing through :func:`apply_decision` — so a long run
-    cannot blow the stack. Each auto-approval goes through the same compare-and-swap
-    (:func:`_consume_pending_call`) as a human approval, and is recorded as a
-    ``command_approved`` event flagged ``{"auto": True}`` so the transcript stays
-    honest about what a human vetted.
 
-    The loop stops when: the session is torn down (concluded / ended), free-launch
-    is turned off, or the session has paused for guidance (``awaiting_guidance`` —
-    the agent handed back, ADR-0034; the pending command is held, not auto-run). In
-    gated mode the first guard returns immediately, so callers can invoke this
+def _steer_pending_command(
+    session: Session, registry: SessionRegistry, session_id: int, live: LiveSession
+) -> bool:
+    """Withdraw the pending command and resume with the queued operator message(s).
+
+    The gate case of the message-routing rule (ADR-0042): a message while a command
+    awaits approval withdraws it (records a ``command_rejected``) and re-runs the
+    agent with the message delivered as a first-class user turn, so the agent answers
+    and re-decides. Returns ``False`` when a concurrent decision already took it.
+    """
+    pending = live.pending_call_id
+    if pending is None:
+        return False
+    call_id = _consume_pending_call(live, pending)
+    if call_id is None:
+        return False
+    append_event(session, session_id, SessionEventKind.COMMAND_REJECTED, {"reason": _STEER_REASON})
+    _resume_with_decision(
+        session, registry, session_id, live, call_id, approved=False, reason=_STEER_REASON
+    )
+    return True
+
+
+def _auto_approve(
+    session: Session, registry: SessionRegistry, session_id: int, live: LiveSession
+) -> bool:
+    """Auto-approve the pending command (free-launch, FR-17 Slice 5) — one pass.
+
+    Goes through the same compare-and-swap (:func:`_consume_pending_call`) as a human
+    approval and records a ``command_approved`` flagged ``{"auto": True}`` so the
+    transcript stays honest about what a human vetted. Returns ``False`` when a
+    concurrent human decision already took the command.
+    """
+    pending = live.pending_call_id
+    if pending is None:
+        return False
+    call_id = _consume_pending_call(live, pending)
+    if call_id is None:
+        return False
+    append_event(session, session_id, SessionEventKind.COMMAND_APPROVED, {"auto": True})
+    _resume_with_decision(session, registry, session_id, live, call_id, approved=True, reason="")
+    return True
+
+
+def _advance(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Drive the session forward at each turn boundary until it parks for the operator.
+
+    Called after every turn boundary. Realises the message-routing invariant
+    (ADR-0042): a queued operator message is always delivered at the next turn
+    boundary — and if that boundary is an approval gate, the gate is pre-empted (the
+    just-proposed command is set aside, :func:`_steer_pending_command`). In
+    free-launch, a gate with no waiting message is auto-approved
+    (:func:`_auto_approve`) instead — this subsumes the old free-launch loop.
+
+    Iterative on purpose — one :func:`_resume_with_decision`/:func:`_resume_run` call
+    per pass, never recursing — so a long run cannot blow the stack. Each resume
+    drains the queued messages, so the loop converges: the session parks at a gated
+    ``awaiting_command`` (no message, free-launch off), hands back in
+    ``awaiting_operator`` (no message), is stopped, or is torn down. In gated mode
+    with nothing queued the first pass returns immediately, so callers invoke it
     unconditionally.
 
     Args:
@@ -1053,21 +1095,28 @@ def _drive_auto(session: Session, registry: SessionRegistry, session_id: int) ->
     """
     while True:
         live = registry.get(session_id)
-        if (
-            live is None
-            or not live.free_launch
-            or live.pending_call_id is None
-            or live.awaiting_guidance
-            or live.stopped  # operator pressed Stop (issue #150): halt auto-run
-        ):
+        if live is None or live.stopped:
+            return  # torn down (concluded / ended) or operator-paused: do not advance
+        record = session.get(RetestSessionRecord, session_id)
+        if record is None:
             return
-        call_id = _consume_pending_call(live, live.pending_call_id)
-        if call_id is None:
-            return  # a concurrent human decision took the pending command
-        append_event(session, session_id, SessionEventKind.COMMAND_APPROVED, {"auto": True})
-        _resume_with_decision(
-            session, registry, session_id, live, call_id, approved=True, reason=""
-        )
+        status = RetestSessionStatus(record.status)
+        if status is RetestSessionStatus.AWAITING_COMMAND:
+            if live.has_queued_messages():
+                if not _steer_pending_command(session, registry, session_id, live):
+                    return
+                continue
+            if live.free_launch:
+                if not _auto_approve(session, registry, session_id, live):
+                    return
+                continue
+            return  # gated, nothing queued: park at the gate for the operator
+        if status is RetestSessionStatus.AWAITING_OPERATOR and live.has_queued_messages():
+            # A message arrived while the turn was in flight and the agent handed
+            # back: deliver it now rather than stranding it (answer-when-done).
+            _resume_run(session, registry, session_id, live)
+            continue
+        return  # working / handed back with nothing queued: nothing to advance
 
 
 def apply_decision(
@@ -1116,9 +1165,9 @@ def apply_decision(
     _resume_with_decision(
         session, registry, session_id, live, call_id, approved=approved, reason=reason
     )
-    # In free-launch, a human decision that yields a new command proposal is then
-    # auto-driven; in gated mode _drive_auto returns immediately (unchanged path).
-    _drive_auto(session, registry, session_id)
+    # Drive the boundary: deliver a queued message, or (free-launch) auto-approve a
+    # new proposal; in gated mode with nothing queued this returns immediately.
+    _advance(session, registry, session_id)
 
 
 def set_free_launch(
@@ -1128,7 +1177,7 @@ def set_free_launch(
 
     Updates the persisted mode + the live flag, records a ``free_launch_changed``
     transcript event, and — when enabling with a command already pending —
-    auto-approves it (and any that follow) via :func:`_drive_auto`. A no-op if
+    auto-approves it (and any that follow) via :func:`_advance`. A no-op if
     the session is not live (already ended/concluded, or never started): there is
     nothing to steer once torn down, and the persisted mode is fixed at that point.
 
@@ -1149,7 +1198,7 @@ def set_free_launch(
     live.free_launch = enabled
     append_event(session, session_id, SessionEventKind.FREE_LAUNCH_CHANGED, {"enabled": enabled})
     if enabled:
-        _drive_auto(session, registry, session_id)
+        _advance(session, registry, session_id)
 
 
 def _summarize_human_command(command: str, result: CommandResult) -> str:
@@ -1209,18 +1258,14 @@ def submit_human_command(
 
 
 def submit_message(session: Session, registry: SessionRegistry, session_id: int, text: str) -> None:
-    """Queue a free-text operator chat message for the agent (FR-17 Slice 4).
+    """Record an operator chat message and buffer it for the agent's next turn (FR-17).
 
-    Recorded as a ``HUMAN_MESSAGE`` transcript event (so the chat shows it and it
-    replays) and buffered on the live session; delivered to the agent as a
-    first-class user turn on the next approve/reject resume
-    (:func:`_resume_with_decision`) — the pure-queue model (the agent is never
-    idle, so a message can only land at the next turn boundary). Distinct from the
-    `!` command path (:func:`submit_human_command`): a chat message is the
-    operator's *voice*, not an observed command result.
-
-    A no-op if the session is not live (already ended/concluded, or never
-    started) — there is nothing to steer once torn down.
+    Always recorded as a ``HUMAN_MESSAGE`` transcript event (so the chat shows it and
+    it replays) — even for a session that outlived a backend restart and has no live
+    agent, so a message is never silently lost (ADR-0042). When the session is live it
+    is also buffered for delivery to the agent as a first-class user turn at the next
+    turn boundary (:func:`_advance` / :func:`_resume_with_decision`) — the operator's
+    *voice*, distinct from the `!` command path (:func:`submit_human_command`).
 
     Args:
         session: Active DB session for this call.
@@ -1228,81 +1273,10 @@ def submit_message(session: Session, registry: SessionRegistry, session_id: int,
         session_id: The retest session to message.
         text: The exact operator message.
     """
-    live = registry.get(session_id)
-    if live is None:
-        return
     append_event(session, session_id, SessionEventKind.HUMAN_MESSAGE, {"text": text})
-    live.receive_message(text)
-
-
-def _activity_line(event: dict[str, Any]) -> str:
-    """One compact transcript line for the Q&A context, or '' to skip this event."""
-    kind, payload = event["kind"], event["payload"]
-    if kind == SessionEventKind.COMMAND_OUTPUT:
-        return f"ran: {payload.get('command', '')} -> exit {payload.get('exit_code')}"
-    if kind == SessionEventKind.COMMAND_PROPOSED:
-        return f"proposed: {payload.get('command', '')}"
-    if kind == SessionEventKind.AGENT_MESSAGE:
-        return f"you said: {payload.get('text', '')}"
-    if kind == SessionEventKind.HUMAN_MESSAGE:
-        return f"operator said: {payload.get('text', '')}"
-    if kind == SessionEventKind.VERDICT:
-        return f"verdict: {payload.get('status')} — {payload.get('rationale', '')}"
-    return ""
-
-
-def _qa_context(events: list[dict[str, Any]], finding: Finding) -> str:
-    """Render a compact, read-only context for the Q&A agent from the transcript (FR-17).
-
-    Pulls the finding identity, the launch scope, the current goal, and a short tail
-    of recent activity — enough to answer "what are we retesting?", "what have you
-    tried?", "why that command?" without replaying the deferred-command history.
-    """
-    lines = [f"Finding: {finding.title}"]
-    if finding.description:
-        lines.append(f"Description: {finding.description}")
-    target = next(
-        (
-            e["payload"].get("endpoints")
-            for e in reversed(events)
-            if e["kind"] == SessionEventKind.TARGET_SET
-        ),
-        None,
-    )
-    if target:
-        lines.append("Target scope: " + ", ".join(str(t) for t in target))
-    goal = next(
-        (
-            e["payload"].get("steps")
-            for e in reversed(events)
-            if e["kind"] == SessionEventKind.PLAN_UPDATED
-        ),
-        None,
-    )
-    if goal:
-        lines.append("Current goal:\n" + "\n".join(f"- {s}" for s in goal))
-    activity = [line for e in events[-14:] if (line := _activity_line(e))]
-    if activity:
-        lines.append("Recent activity:\n" + "\n".join(activity))
-    return "\n".join(lines)
-
-
-def answer_operator_question(
-    qa_agent: Agent[None, str],
-    session: Session,
-    session_id: int,
-    finding: Finding,
-    question: str,
-) -> str:
-    """Answer an operator's chat question from a read-only view of the transcript (FR-17).
-
-    Reads the persisted events + finding and runs the prose Q&A agent. Never mutates
-    live session state or the deferred-command history, so it is safe to call while
-    the main agent is mid-turn — the reply is additive to the transcript.
-    """
-    context = _qa_context(load_events_after(session, session_id, 0), finding)
-    result = qa_agent.run_sync(f"{context}\n\nOperator's question: {question}")
-    return result.output.strip()
+    live = registry.get(session_id)
+    if live is not None:
+        live.receive_message(text)
 
 
 def set_goal(
@@ -1384,13 +1358,13 @@ def restart_model(session: Session, registry: SessionRegistry, session_id: int) 
 def _resume_run(
     session: Session, registry: SessionRegistry, session_id: int, live: LiveSession
 ) -> None:
-    """Re-run the agent to continue after an exhausted-options pause (ADR-0034).
+    """Re-run the agent to continue after a hand-back (ADR-0034), one turn.
 
-    Used by :func:`continue_session` when no command is held pending — the agent
-    ended its turn handing back to the operator, so we resume it with any queued
-    goal/chat steering (or a plain nudge) and dispatch its next output.
+    Used by :func:`continue_session` and :func:`_advance` to resume the agent with
+    any queued goal/chat steering (or a plain nudge) and dispatch its next output. A
+    single turn: the caller runs :func:`_advance` to drive the boundary that follows.
     """
-    set_status(session, session_id, RetestSessionStatus.THINKING)
+    set_status(session, session_id, RetestSessionStatus.WORKING)
     deps = _make_deps(session, session_id, live)
     goal, messages = live.drain_goal(), live.drain_messages()
     _mark_delivered(session, session_id, messages)
@@ -1408,27 +1382,27 @@ def _resume_run(
         _fail(session, registry, session_id, str(exc))
         return
     _dispatch_output(session, registry, session_id, result)
-    _drive_auto(session, registry, session_id)
 
 
-#: States a session resumes from when the operator messages it: the agent handed
-#: control back (``needs_guidance`` after exhausting options, ADR-0034; or
-#: ``awaiting_operator`` after a conversational reply, issue #204). Both keep the
-#: sandbox alive and re-run the agent on the operator's next message.
+#: The state a session resumes from when the operator messages it: the agent handed
+#: control back (``awaiting_operator`` — a reply, a guided report, a recommendation,
+#: or "I'm stuck", ADR-0034/0042). The sandbox stays alive and the operator's next
+#: message re-runs the agent. ``stopped`` and ``awaiting_command`` resume by their own
+#: paths (:func:`resume_session` / :func:`_steer_pending_command`).
 _RESUMABLE_ON_MESSAGE: frozenset[RetestSessionStatus] = frozenset(
-    {RetestSessionStatus.NEEDS_GUIDANCE, RetestSessionStatus.AWAITING_OPERATOR}
+    {RetestSessionStatus.AWAITING_OPERATOR}
 )
 
 
 def continue_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
     """Resume a session the agent handed back — ADR-0034 "Keep going" / reply (#204).
 
-    A no-op unless the session is paused in one of :data:`_RESUMABLE_ON_MESSAGE`
-    (``needs_guidance`` or ``awaiting_operator``) with a live agent — a paused
-    session that outlived a backend restart has no sandbox to resume, so the
-    operator restarts it instead. The agent only ever hands back between turns
-    (never with a command still pending), so continuing re-runs it, folding in any
-    queued goal/chat steering.
+    A no-op unless the session is handed back in :data:`_RESUMABLE_ON_MESSAGE`
+    (``awaiting_operator``) with a live agent — a handed-back session that outlived a
+    backend restart has no sandbox to resume, so the operator restarts it instead. The
+    agent only ever hands back between turns (never with a command still pending), so
+    continuing re-runs it, folding in any queued goal/chat steering, then drives the
+    boundary that follows (:func:`_advance`).
 
     Args:
         session: Active DB session for this call.
@@ -1443,6 +1417,7 @@ def continue_session(session: Session, registry: SessionRegistry, session_id: in
         return
     live.awaiting_guidance = False
     _resume_run(session, registry, session_id, live)
+    _advance(session, registry, session_id)
 
 
 def stop_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
@@ -1452,7 +1427,7 @@ def stop_session(session: Session, registry: SessionRegistry, session_id: int) -
     non-terminal ``STOPPED`` state, keeping the sandbox alive. A command already
     running finishes (its output is recorded) and an in-flight agent step, on
     completion, parks in ``stopped`` rather than advancing (see
-    :func:`_dispatch_output`); the free-launch loop halts (:func:`_drive_auto`).
+    :func:`_dispatch_output`); the free-launch loop halts (:func:`_advance`).
     A no-op if the session is not live or is already terminal or stopped.
     """
     record = session.get(RetestSessionRecord, session_id)
@@ -1484,9 +1459,33 @@ def resume_session(session: Session, registry: SessionRegistry, session_id: int)
     live.stopped = False
     if live.pending_call_id is not None:
         set_status(session, session_id, RetestSessionStatus.AWAITING_COMMAND)
-        _drive_auto(session, registry, session_id)
+        _advance(session, registry, session_id)
     else:
         _resume_run(session, registry, session_id, live)
+        _advance(session, registry, session_id)
+
+
+def resume_with_message_at_gate(
+    session: Session, registry: SessionRegistry, session_id: int
+) -> None:
+    """Steer a command awaiting approval with an operator message (Claude-Code gate).
+
+    The message-routing rule's gate case (ADR-0042): a message sent instead of
+    approving withdraws the pending command and re-runs the agent with the message as
+    a first-class user turn, then drives the boundary that follows. A no-op if the
+    session is not live or a concurrent approve/reject already took the command — the
+    message stays buffered (recorded by :func:`submit_message`) for the next boundary.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The retest session whose gate the message steers.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    if _steer_pending_command(session, registry, session_id, live):
+        _advance(session, registry, session_id)
 
 
 def conclude_session(
@@ -1499,7 +1498,7 @@ def conclude_session(
     """Operator manually concludes a session with a determination — ADR-0034.
 
     The operator's own verdict, recordable at ANY live point in the retest (issue
-    #150) — not only at a ``needs_guidance`` pause: while a command awaits approval,
+    #150) — not only at an ``awaiting_operator`` hand-back: while a command awaits approval,
     or even while the agent is mid-step. Writes the verdict (``actor="operator"``,
     the only path that can record ``inconclusive``) and tears down the sandbox. A
     no-op if the session is already terminal. Works on an orphaned session too (the
@@ -1532,7 +1531,7 @@ def _fail(session: Session, registry: SessionRegistry, session_id: int, detail: 
     """Record an ``error`` event, set status ``error``, and tear down (orchestration boundary).
 
     Guards the conclude-anytime race (issue #150): the operator may conclude or end
-    a session while an agent step is still in flight (``thinking``/``running_command``).
+    a session while an agent step is still in flight (``working``).
     Concluding tears the sandbox down, which makes the in-flight ``run_command`` raise —
     and that exception must NOT overwrite the operator's just-recorded verdict with an
     ``error``. So if the row is already terminal (a conclude/end committed on another

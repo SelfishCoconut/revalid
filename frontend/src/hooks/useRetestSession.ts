@@ -36,7 +36,7 @@ const defaultSocketFactory: SocketFactory = (url) => new WebSocket(url);
  * `makeSocket`, e.g. a fake in tests), accumulates ordered `SessionEvent`s
  * deduped by `seq`, and derives the session's current lifecycle `status`
  * (from the latest `state_change` event's `payload.to`, defaulting to
- * `"starting"`) and terminal `verdict` (from the latest `verdict` event).
+ * `"working"`) and terminal `verdict` (from the latest `verdict` event).
  * The socket is closed on unmount and reopened whenever `id` changes.
  */
 export function useRetestSession(id: number, makeSocket: SocketFactory = defaultSocketFactory) {
@@ -105,7 +105,7 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
     events,
     connected,
     thinking,
-    status: (stateEvent?.payload.to as string | undefined) ?? "starting",
+    status: (stateEvent?.payload.to as string | undefined) ?? "working",
     verdict: verdictEvent ? (verdictEvent.payload as unknown as Verdict) : null,
   };
 }

@@ -105,7 +105,7 @@ erDiagram
         int id PK
         int session_id FK
         int seq "monotonic per session"
-        string kind "15 event kinds"
+        string kind "16 event kinds"
         json payload
         datetime created_at
     }
@@ -190,46 +190,58 @@ Notes are tagged with the stage they were written on. The enum keeps the legacy
 tags its notes `plan` — and `general` marks a note left from the finding
 overview rather than a specific stage.
 
-## Retest session lifecycle (FR-17, ADR-0034)
+## Retest session lifecycle (FR-17, ADR-0034/0042)
+
+Five live states, one agent. A turn — the LLM call *and* any command it runs —
+happens inside `working`; there is no separate `running_command`, because the
+command executes within the working turn (ADR-0042). The old `thinking`,
+`starting` and `running_command` states collapsed into `working`, and
+`needs_guidance` folded into `awaiting_operator`.
 
 <!-- thesis-fig: session-lifecycle -->
 ```mermaid
 stateDiagram-v2
     direction TB
-    [*] --> starting
+    [*] --> working: launch
+    [*] --> idle: deferred / Restart
 
-    starting --> thinking: sandbox provisioned, first agent step
-    starting --> ended: operator ends it
-    starting --> error: provisioning failed
+    idle --> working: operator Start (or a message)
 
-    thinking --> awaiting_command: proposes run_command (gated)
-    awaiting_command --> running_command: operator approves
-    awaiting_command --> thinking: operator rejects (ToolDenied)
-    running_command --> thinking: output appended, fed back
+    working --> awaiting_command: proposes run_command (gated)
+    awaiting_command --> working: approve — the command runs inside the next turn
+    awaiting_command --> working: reject (ToolDenied), or a message at the gate (ADR-0042)
 
-    thinking --> needs_guidance: agent hands back (out of ideas)
-    needs_guidance --> thinking: operator steers, Keep going
-    needs_guidance --> concluded: operator concludes manually
+    working --> awaiting_operator: agent hands back — reply, guided one-action report, verdict rec, or out of options
+    awaiting_operator --> working: operator messages back
+    awaiting_operator --> concluded: operator concludes manually
 
-    thinking --> awaiting_operator: replies (AwaitOperator, ADR-0039)
-    awaiting_operator --> thinking: operator messages back
+    working --> concluded: ConcludeOutput(fixed / still_open) — free-launch only
+    working --> stopped: operator Stop
+    stopped --> working: Resume (or a message)
+    stopped --> concluded: operator concludes manually
 
-    thinking --> concluded: ConcludeOutput(fixed / still_open)
-    thinking --> error: unhandled failure
+    working --> working: Restart model — abort + re-run a wedged turn (ADR-0039)
+    working --> error: unhandled failure
+    working --> ended: operator ends it
 
     concluded --> [*]
     ended --> [*]
     error --> [*]
 
-    note right of needs_guidance
-        Non-terminal, and the sandbox stays alive.
-        An agent that has run out of ideas is not
-        evidence that a vulnerability is fixed.
+    note right of awaiting_operator
+        Non-terminal; the sandbox stays alive. In guided mode the
+        agent parks here after one approved action ("ran X — I'd
+        try Y next") and never self-records a verdict; only the
+        operator concludes (ADR-0034/0040/0042). An agent out of
+        ideas is not evidence a vulnerability is fixed.
     end note
 ```
 
-`given_up` exists in the enum but is **retired** — kept only so any legacy row
-stays terminal. Nothing writes it.
+A verdict the agent authors itself (`working --> concluded`) is reachable **only
+under free launch / Auto-run**; in guided mode the agent never self-concludes and
+never self-records `inconclusive` — it hands back through `awaiting_operator` and
+lets the operator conclude (ADR-0034/0040). `given_up` exists in the enum but is
+**retired** — kept only so any legacy row stays terminal. Nothing writes it.
 
 ## Transcript event kinds
 
@@ -255,7 +267,6 @@ flowchart TB
         S1["command_output"]
         S2["state_change"]
         S3["target_set — scope, emitted once"]
-        S4["needs_guidance"]
         S5["free_launch_changed"]
         S6["error"]
         S7["messages_delivered — queued msg read (ADR-0039)"]
@@ -272,6 +283,11 @@ flowchart TB
     style T fill:#fff4e6,stroke:#e8590c
     style V fill:#ebfbee,stroke:#2f9e44
 ```
+
+There is no `needs_guidance` event kind (removed in ADR-0042): an agent hand-back
+to `awaiting_operator` is recorded like any other turn — an `agent_message`
+carrying its words plus a `state_change` — so the transcript needs no special
+"stuck" marker.
 
 `verdict_adjudicated` is the operator's override. Once present, the **latest**
 one is the authoritative event for audit purposes — not the agent's original

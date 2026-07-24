@@ -135,7 +135,7 @@ describe("RetestSession", () => {
           payload: { command: "id", rationale: "check user", tool_call_id: "abc" },
         },
       ],
-      status: "running_command",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -210,7 +210,7 @@ describe("RetestSession", () => {
   it("ends the session", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
-      status: "starting",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -226,7 +226,7 @@ describe("RetestSession", () => {
   it("surfaces an error when endRetestSession fails", async () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
-      status: "starting",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -244,7 +244,7 @@ describe("RetestSession", () => {
   it("renders an agent_message as a chat turn", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [{ seq: 1, kind: "agent_message", payload: { text: "checking the login flow first" } }],
-      status: "thinking",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -265,7 +265,7 @@ describe("RetestSession", () => {
         },
         { seq: 2, kind: "command_rejected", payload: { reason: "too destructive" } },
       ],
-      status: "thinking",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -287,7 +287,7 @@ describe("RetestSession", () => {
           payload: { command: "curl -s http://lab/rest", stdout: '{"ok":true}', stderr: "", exit_code: 0 },
         },
       ],
-      status: "thinking",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -356,7 +356,7 @@ describe("RetestSession", () => {
     vi.mocked(client.startRetestSession).mockResolvedValue({
       id: 2,
       finding_id: 1,
-      status: "starting",
+      status: "working",
       model: "test",
       verdict_status: null,
       verdict_rationale: null,
@@ -468,7 +468,7 @@ describe("RetestSession", () => {
   it("shows a placeholder in the goal panel before any goal exists", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
-      status: "starting",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -530,7 +530,7 @@ describe("RetestSession", () => {
   it("shows a live thinking indicator while the agent computes a turn", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],
-      status: "thinking",
+      status: "working",
       verdict: null,
       connected: true,
       thinking: "",
@@ -600,21 +600,26 @@ describe("RetestSession", () => {
     expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
   });
 
-  function mockPaused(reason = "Reached the 8-command budget."): void {
+  function mockPaused(reason = "ran that — I'd try /rest next"): void {
     vi.mocked(hook.useRetestSession).mockReturnValue({
-      events: [{ seq: 1, kind: "needs_guidance", payload: { reason } }],
-      status: "needs_guidance",
+      // The hand-back (guided report, recommendation, or "I'm stuck") is an ordinary
+      // agent message now, in awaiting_operator — one agent, one voice (ADR-0042).
+      events: [{ seq: 1, kind: "agent_message", payload: { text: reason } }],
+      status: "awaiting_operator",
       verdict: null,
       connected: true,
       thinking: "",
     });
   }
 
-  it("renders the pause banner with its guidance reason (ADR-0034)", () => {
+  it("surfaces the hand-back message in the chat and prompts a verdict (ADR-0042)", () => {
     mockPaused("exhausted my options, need guidance");
     renderAt(1);
-    expect(screen.getByLabelText(/needs guidance/i)).toBeInTheDocument();
+    // No heavy old "needs your guidance" banner — the agent's message carries it,
+    expect(screen.queryByLabelText(/needs guidance/i)).not.toBeInTheDocument();
     expect(screen.getByText(/exhausted my options/)).toBeInTheDocument();
+    // but the operator is prompted (your move) to steer on or record the verdict.
+    expect(screen.getByLabelText(/handed back/i)).toBeInTheDocument();
   });
 
   it("offers no Keep going button — replying is what resumes it (#163)", async () => {
@@ -640,10 +645,10 @@ describe("RetestSession", () => {
     expect(client.concludeSession).toHaveBeenCalledWith(1, "fixed", "patched by hand");
   });
 
-  it("keeps the composer and terminal usable while paused for guidance", () => {
+  it("keeps the composer and terminal usable while the agent has handed back", () => {
     mockPaused();
     renderAt(1);
-    // needs_guidance is non-terminal: the operator steers by chatting and running
+    // awaiting_operator is non-terminal: the operator steers by chatting and running
     // commands, so neither input is disabled.
     expect(screen.getByLabelText(/message the agent/i)).not.toBeDisabled();
     expect(screen.getByLabelText(/terminal command input/i)).not.toBeDisabled();

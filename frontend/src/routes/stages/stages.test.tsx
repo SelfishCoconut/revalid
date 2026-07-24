@@ -70,7 +70,7 @@ describe("RetestStage", () => {
     const s: RetestSessionSummary = {
       id: 9,
       finding_id: 7,
-      status: "thinking",
+      status: "working",
       verdict_status: null,
       created_at: "",
     };
