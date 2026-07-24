@@ -56,7 +56,7 @@ def test_ws_streams_proposed_output_and_verdict() -> None:
     (not a placeholder cid): since the final-review Fix 1, ``apply_decision``
     validates the URL ``cid`` against the session's pending call and no-ops on
     a mismatch, so a wrong id here would silently never approve and the
-    "verdict" wait below would hang.
+    hand-back wait below would hang.
     """
     with _client() as client:
         client.post("/api/findings/import", json=_IMPORT)
@@ -69,11 +69,20 @@ def test_ws_streams_proposed_output_and_verdict() -> None:
             proposed = next(e for e in events if e["kind"] == "command_proposed")
             cid = proposed["payload"]["tool_call_id"]
             client.post(f"/api/retest-sessions/{sid}/commands/{cid}/approve")
+            # Guided mode (ADR-0040) is the default: the approved command runs and
+            # the agent hands back a recommendation (needs_guidance), not a verdict.
+            # The operator records the terminal verdict, which the socket then tails.
+            while not any(e["kind"] == "needs_guidance" for e in events):
+                events.append(ws.receive_json())
+            client.post(
+                f"/api/retest-sessions/{sid}/conclude",
+                json={"status": "still_open", "rationale": "confirmed by hand"},
+            )
             while not any(e["kind"] == "verdict" for e in events):
                 events.append(ws.receive_json())
 
     kinds = {e["kind"] for e in events}
-    assert {"command_proposed", "command_output", "verdict"} <= kinds
+    assert {"command_proposed", "command_output", "needs_guidance", "verdict"} <= kinds
 
 
 def test_ws_closes_with_policy_violation_for_unknown_session() -> None:
