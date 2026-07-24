@@ -40,7 +40,7 @@ Three transports carry data to the browser, by need:
 
 ```mermaid
 flowchart LR
-    R[Report<br/>extracting → ready / failed] --> F[Finding<br/>identity row]
+    R[Report<br/>extracting → ready / failed / cancelled] --> F[Finding<br/>identity row]
     F --> V[Finding versions<br/>append-only, v1 = extraction]
     F --> N[Notes<br/>stage-tagged]
     F --> S[Retest session<br/>one per attempt]
@@ -78,9 +78,13 @@ flowchart TD
 ```
 
 The PDF path is the only asynchronous one. `run_extraction` guarantees the report
-always leaves `extracting` — to `ready` with findings persisted, or to `failed`
-with the error recorded — so the SPA's status poll is guaranteed to terminate.
-Document metadata extraction is best-effort and can never fail the report.
+always leaves `extracting` — to `ready` with findings persisted, to `failed` with
+the error recorded, or to `cancelled` when the operator stops it mid-run (keeping
+whatever was extracted, ADR-0039) — so the SPA's status poll is guaranteed to
+terminate. Extraction runs one model call per finding candidate on a cancellable
+loop, so a Stop (or a delete) interrupts the in-flight call immediately — not just
+between candidates, which never helped when a single call wedged (#206). Document
+metadata extraction is best-effort and can never fail the report.
 
 Every finding, whichever door it came through, is enriched with a CVSS code and a
 MITRE ATT&CK mapping, inferred when the source report does not state them
@@ -184,6 +188,9 @@ stateDiagram-v2
     running_command --> thinking: output fed back to the agent
     thinking --> needs_guidance: agent is out of ideas (ADR-0034)
     needs_guidance --> thinking: operator steers → Keep going
+    thinking --> awaiting_operator: AwaitOperator (conversational reply, ADR-0039)
+    awaiting_operator --> thinking: operator messages back
+    thinking --> thinking: Restart model — abort + re-run a wedged turn (ADR-0039)
     awaiting_command --> stopped: operator Stop
     stopped --> awaiting_command: operator Resume
     needs_guidance --> concluded: operator concludes manually
@@ -211,10 +218,19 @@ Two non-terminal states give the operator lifecycle control: **`idle`** (created
 but not started — a Restart lands here so the fresh attempt never auto-runs; the
 sandbox is provisioned only on Start) and **`stopped`** (an operator pause that
 keeps the sandbox alive so Resume can continue). Stop is *cooperative*: a command
-already running finishes and its output is recorded before the session parks.
+already running finishes and its output is recorded before the session parks. A
+third light non-terminal state, **`awaiting_operator`** (ADR-0039), is where the
+agent lands after a conversational reply — it answered the operator (a greeting, a
+small-talk answer) and handed back without running anything, sandbox kept alive; it
+is deliberately lighter than `needs_guidance` (no "needs your guidance" banner), and
+the operator's next message resumes it.
 
-The agent has exactly two tools: `run_command` (gated) and `respond` (prose to
-the operator, runs nothing).
+The agent has exactly two tools — `run_command` (gated) and `respond` (prose to the
+operator, runs nothing) — and three ways a turn can end: a gated command
+(`DeferredToolRequests`), a verdict (`ConcludeOutput`), or a conversational
+hand-back (`AwaitOperator`, ADR-0039). The instructions make the operator's live
+message the agent's priority and the goal its background context, so a plain "hi"
+gets a reply and a wait, not a dash for the goal.
 
 ### What the operator can do mid-session
 
@@ -227,6 +243,7 @@ the operator, runs nothing).
 | Free launch | `.../free-launch` | auto-approves the agent's commands so the loop runs unattended — the one deliberate relaxation of the gate (ADR-0029); the egress lock still holds |
 | **Start** | `.../start` | provisions the sandbox and runs the first step of an `idle` (deferred/Restarted) session |
 | **Stop / Resume** | `.../stop`, `.../resume` | cooperatively pause a running session (sandbox kept alive) and continue it (issue #150) |
+| **Restart model** | `.../restart-model` | aborts a wedged in-flight turn and re-runs it — unstick a frozen model (ADR-0039); keeps the session, sandbox, goal and history (distinct from Restart) |
 | **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
 | Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes a `needs_guidance` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
 | End it | `.../end` | terminal; sandbox torn down |

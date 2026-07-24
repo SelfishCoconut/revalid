@@ -148,14 +148,19 @@ class ReportStatus(enum.StrEnum):
     """Lifecycle state of an uploaded report's ingest job (FR-01/FR-11).
 
     A report starts ``EXTRACTING`` when uploaded and always settles on exactly
-    one terminal state — ``READY`` once its findings are persisted, or
-    ``FAILED`` (with the error recorded) if extraction never completes — so the
-    UI's status poll is guaranteed to terminate.
+    one terminal state — ``READY`` once its findings are persisted, ``FAILED``
+    (with the error recorded) if extraction never completes, or ``CANCELLED``
+    when the operator stops it mid-run (issue #205) — so the UI's status poll is
+    guaranteed to terminate. A ``CANCELLED`` report keeps whatever findings had
+    already been extracted before the stop, so it is re-runnable or deletable.
     """
 
     EXTRACTING = "extracting"
     READY = "ready"
     FAILED = "failed"
+    #: The operator stopped extraction mid-run (issue #205). Terminal like
+    #: ``READY``/``FAILED``: any findings extracted before the stop are kept.
+    CANCELLED = "cancelled"
 
 
 class RetestSessionStatus(enum.StrEnum):
@@ -187,6 +192,13 @@ class RetestSessionStatus(enum.StrEnum):
     #: handed back to the operator (ADR-0034). Non-terminal — the sandbox stays
     #: alive; the operator steers and keeps going, or concludes.
     NEEDS_GUIDANCE = "needs_guidance"
+    #: The agent replied conversationally and handed control back without a command
+    #: or verdict (issue #204): a greeting, a small-talk answer, an acknowledgement.
+    #: Non-terminal and *lighter* than ``NEEDS_GUIDANCE`` — no "needs your guidance"
+    #: banner, just the agent's reply and an open composer — the sandbox stays alive
+    #: and the operator's next message resumes it. Lets the agent focus on the
+    #: operator's messages (goal as context) instead of bolting for the goal.
+    AWAITING_OPERATOR = "awaiting_operator"
     #: The operator paused a running session (issue #150). Non-terminal — the
     #: sandbox stays alive; ``Resume`` continues, ``Restart``/``Conclude`` end it.
     STOPPED = "stopped"
@@ -206,6 +218,14 @@ class SessionEventKind(enum.StrEnum):
     COMMAND_OUTPUT = "command_output"
     HUMAN_COMMAND = "human_command"
     HUMAN_MESSAGE = "human_message"
+    #: Queued operator message(s) were handed to the agent for this turn (issue
+    #: #204). Marks the delivery boundary so the console can stop showing a
+    #: "queued" hint on a message the agent has now received.
+    MESSAGES_DELIVERED = "messages_delivered"
+    #: The operator aborted the in-flight turn and had it re-run to unstick a wedged
+    #: model (issue #204). A transcript marker only — the retried turn's real events
+    #: follow it.
+    TURN_RESTARTED = "turn_restarted"
     # The current guiding goal (FR-17 6b-ii: user-owned; formerly the agent's set_plan).
     PLAN_UPDATED = "plan_updated"
     #: The retest scope set at launch (FR-17): payload ``endpoints`` is the exact

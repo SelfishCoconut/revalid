@@ -14,6 +14,10 @@ FR-13/ADR-0010).
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from collections.abc import Callable
+
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
@@ -171,12 +175,81 @@ class ExtractionReport(BaseModel):
     Attributes:
         findings: Schema-valid findings, safe to persist.
         failures: Candidates that failed the validation gate, for review.
+        cancelled: Whether extraction stopped early because the operator asked it
+            to (issue #205). ``findings``/``failures`` then hold only the candidates
+            processed before the stop — a partial, still-persistable result.
     """
 
     model_config = ConfigDict(frozen=True)
 
     findings: tuple[Finding, ...]
     failures: tuple[ExtractionFailure, ...]
+    cancelled: bool = False
+
+
+class ExtractionRegistry:
+    """Process-local cancel flags for in-flight extractions (issue #205).
+
+    Extraction runs one model call per finding candidate as a background task
+    (:func:`~revalid.app.run_extraction`). This lets the request thread flag a
+    report so that worker settles cooperatively — the loop checks the flag between
+    candidates. Thread-safe: the flag is written by the request thread and read by
+    the extraction worker.
+
+    A flag carries a *reason*: ``"operator"`` (a Stop — keep whatever was extracted)
+    or ``"deleted"`` (the report is being removed — discard the partial result). A
+    pending delete always wins over a Stop, since the row is going away.
+
+    Beyond the flag, the registry holds the event loop + task of an in-flight
+    extraction (attached by the worker) so a cancel can *interrupt* the current
+    model call cross-thread — polling the flag alone would only stop between
+    candidates, which never helps when a single candidate's call wedges.
+    """
+
+    def __init__(self) -> None:
+        """Start with no extraction flagged."""
+        self._lock = threading.Lock()
+        self._reasons: dict[int, str] = {}
+        self._runs: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Task[ExtractionReport]]] = {}
+
+    def request_cancel(self, report_id: int, reason: str = "operator") -> None:
+        """Flag ``report_id`` for cancellation and interrupt its in-flight call.
+
+        Records the reason (a ``"deleted"`` flag always wins over an operator Stop)
+        and, if an extraction task is attached, cancels it cross-thread so the
+        current model call aborts immediately rather than at the next candidate.
+        """
+        with self._lock:
+            if self._reasons.get(report_id) != "deleted":
+                self._reasons[report_id] = reason
+            run = self._runs.get(report_id)
+        if run is not None:
+            loop, task = run
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:  # the loop is already closing — the run is ending anyway
+                pass
+
+    def cancel_reason(self, report_id: int) -> str | None:
+        """Return the cancel reason flagged for ``report_id``, or ``None`` if not flagged."""
+        with self._lock:
+            return self._reasons.get(report_id)
+
+    def attach(
+        self,
+        report_id: int,
+        loop: asyncio.AbstractEventLoop,
+        task: asyncio.Task[ExtractionReport],
+    ) -> None:
+        """Register the loop + task of the extraction now running for ``report_id``."""
+        with self._lock:
+            self._runs[report_id] = (loop, task)
+
+    def clear(self, report_id: int) -> None:
+        """Drop any flag + run handle for ``report_id`` (the worker settled)."""
+        with self._lock:
+            self._reasons.pop(report_id, None)
+            self._runs.pop(report_id, None)
 
 
 def build_extraction_agent(
@@ -202,28 +275,53 @@ def build_extraction_agent(
     )
 
 
-def extract_report(
-    agent: Agent[None, list[ExtractedFinding]], report: PdfReport
-) -> ExtractionReport:
-    """Extract structured findings from every candidate in a report (FR-03).
+def _never_cancel() -> bool:
+    """Default ``should_cancel``: extraction always runs to completion."""
+    return False
 
-    Runs one model call per FR-01 finding candidate. Valid output is mapped to
-    domain findings; a candidate whose output never passes the schema gate is
-    flagged instead of persisted.
+
+async def extract_report_async(
+    agent: Agent[None, list[ExtractedFinding]],
+    report: PdfReport,
+    should_cancel: Callable[[], bool] = _never_cancel,
+) -> ExtractionReport:
+    """Extract structured findings from every candidate in a report (FR-03), async.
+
+    Runs one model call per FR-01 finding candidate via ``await agent.run`` — the
+    async path — so the run can be *interrupted* mid-call (issue #205): cancelling
+    the task cancels the in-flight HTTP request, which is what makes Stop work even
+    when a local model wedges on one candidate. ``should_cancel`` is also polled
+    between candidates for the graceful case. Either way, the candidates processed
+    so far are returned with ``cancelled=True`` so the caller keeps the partial
+    result. Valid output is mapped to domain findings; output that never passes the
+    schema gate is flagged instead of persisted.
 
     Args:
         agent: The extraction agent (from :func:`build_extraction_agent`).
         report: An extracted report from :func:`revalid.pdf.read_pdf`.
+        should_cancel: Returns ``True`` when the operator has asked to stop; polled
+            between candidates. The task may also be cancelled mid-call.
 
     Returns:
-        The valid findings and the flagged failures.
+        The valid findings and the flagged failures, with ``cancelled`` set when the
+        run stopped early.
     """
     model_name = agent_model_name(agent)
     findings: list[Finding] = []
     failures: list[ExtractionFailure] = []
     for candidate in segment_findings(report):
+        if should_cancel():
+            return ExtractionReport(
+                findings=tuple(findings), failures=tuple(failures), cancelled=True
+            )
         try:
-            result = agent.run_sync(candidate.text)
+            result = await agent.run(candidate.text)
+        except asyncio.CancelledError:
+            # The operator interrupted this candidate's model call (Stop / delete):
+            # keep what completed and report the stop.
+            return ExtractionReport(
+                findings=tuple(findings), failures=tuple(failures), cancelled=True
+            )
         except UnexpectedModelBehavior as exc:
             failures.append(
                 ExtractionFailure(
@@ -233,6 +331,20 @@ def extract_report(
             continue
         findings.extend(_to_finding(item, candidate, model_name) for item in result.output)
     return ExtractionReport(findings=tuple(findings), failures=tuple(failures))
+
+
+def extract_report(
+    agent: Agent[None, list[ExtractedFinding]],
+    report: PdfReport,
+    should_cancel: Callable[[], bool] = _never_cancel,
+) -> ExtractionReport:
+    """Synchronous wrapper over :func:`extract_report_async` (tests, offline demos).
+
+    The production path (:func:`~revalid.app.run_extraction`) drives the async form
+    directly on a cancellable loop so a Stop can interrupt it; this wrapper runs it
+    to completion on a throwaway loop for callers that do not need cancellation.
+    """
+    return asyncio.run(extract_report_async(agent, report, should_cancel))
 
 
 def _to_finding(

@@ -41,9 +41,13 @@ flowchart TB
 ```
 
 `run_extraction` guarantees the report always leaves `extracting` — to `ready`
-with findings persisted, or to `failed` with the error recorded — so the SPA's
-status poll is guaranteed to terminate. Document metadata extraction is
-best-effort and can never fail a report.
+with findings persisted, to `failed` with the error recorded, or to `cancelled`
+when the operator stops it mid-run keeping the partial findings (ADR-0039) — so the
+SPA's status poll is guaranteed to terminate. Extraction runs one model call per
+finding candidate on a cancellable loop, so a Stop (or a delete) interrupts the
+in-flight call immediately — not just between candidates, which never helped when a
+single call wedged (#206). Document metadata extraction is best-effort and can never
+fail a report.
 
 For development and demos, seed through **manual entry**: it skips the LLM, so
 seeding is deterministic, instant and free, and the result is indistinguishable

@@ -25,7 +25,12 @@ from revalid.db import (
     session_factory,
 )
 from revalid.domain import ReportStatus
-from revalid.extract import ExtractedFinding, ReportMetadata, build_metadata_agent
+from revalid.extract import (
+    ExtractedFinding,
+    ExtractionRegistry,
+    ReportMetadata,
+    build_metadata_agent,
+)
 
 FIXTURE = Path(__file__).parents[1] / "data" / "juice_shop_report_synthetic.pdf"
 
@@ -124,8 +129,15 @@ def test_run_extraction_records_unexpected_error(
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("model exploded")
 
-    monkeypatch.setattr(app_module, "extract_report", boom)
-    run_extraction(sessions, report_id, FIXTURE.read_bytes(), extraction_agent, metadata_agent)
+    monkeypatch.setattr(app_module, "_run_cancellable_extraction", boom)
+    run_extraction(
+        sessions,
+        report_id,
+        FIXTURE.read_bytes(),
+        extraction_agent,
+        metadata_agent,
+        ExtractionRegistry(),
+    )
 
     with sessions() as session:
         settled = session.get(ReportRecord, report_id)
@@ -133,3 +145,74 @@ def test_run_extraction_records_unexpected_error(
         assert settled.status == ReportStatus.FAILED.value
         assert "extraction failed" in (settled.error or "")
         assert session.scalars(select(FindingRecord)).all() == []
+
+
+def _extracting_report(sessions: Any) -> int:
+    """Insert a report row in ``extracting`` and return its id."""
+    with sessions() as session:
+        report = ReportRecord(
+            filename="r.pdf", status=ReportStatus.EXTRACTING.value, model="test", finding_count=0
+        )
+        session.add(report)
+        session.commit()
+        return int(report.id)
+
+
+def test_run_extraction_operator_cancel_marks_cancelled(
+    extraction_agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
+) -> None:
+    """An operator Stop settles the report to ``cancelled`` and clears the flag (#205)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    report_id = _extracting_report(sessions)
+    extractions = ExtractionRegistry()
+    extractions.request_cancel(report_id, reason="operator")  # flagged before the worker looks
+
+    run_extraction(
+        sessions, report_id, FIXTURE.read_bytes(), extraction_agent, metadata_agent, extractions
+    )
+
+    with sessions() as session:
+        settled = session.get(ReportRecord, report_id)
+        assert settled is not None
+        assert settled.status == ReportStatus.CANCELLED.value
+        assert "stopped by operator" in (settled.error or "")
+    assert extractions.cancel_reason(report_id) is None  # flag cleared on settle
+
+
+def test_run_extraction_deleted_cancel_persists_nothing(
+    extraction_agent: Agent[None, list[ExtractedFinding]],
+    metadata_agent: Agent[None, ReportMetadata],
+) -> None:
+    """A ``deleted`` flag means the row is going away, so extraction writes nothing (#205)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    report_id = _extracting_report(sessions)
+    extractions = ExtractionRegistry()
+    extractions.request_cancel(report_id, reason="deleted")
+
+    run_extraction(
+        sessions, report_id, FIXTURE.read_bytes(), extraction_agent, metadata_agent, extractions
+    )
+
+    with sessions() as session:
+        # The row is left for the delete cascade to remove; no findings were persisted.
+        assert session.scalars(select(FindingRecord)).all() == []
+    assert extractions.cancel_reason(report_id) is None
+
+
+def test_cancel_endpoint_404_for_unknown_report(
+    extraction_agent: Agent[None, list[ExtractedFinding]],
+) -> None:
+    assert _client(extraction_agent).post("/api/reports/999/cancel").status_code == 404
+
+
+def test_cancel_endpoint_is_a_noop_on_a_settled_report(
+    extraction_agent: Agent[None, list[ExtractedFinding]],
+) -> None:
+    """Cancelling a report that already finished extracting returns it unchanged (#205)."""
+    client = _client(extraction_agent)
+    report_id = _upload(client, FIXTURE.read_bytes()).json()["id"]
+    assert client.get(f"/api/reports/{report_id}").json()["status"] == "ready"
+    resp = client.post(f"/api/reports/{report_id}/cancel")
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "ready"  # not extracting -> unchanged

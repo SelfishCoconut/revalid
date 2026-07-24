@@ -7,6 +7,11 @@ plus the Task 5 orchestration layer that drives the Task 4 agent step-by-step.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from typing import Any
+
+import pytest
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -20,6 +25,8 @@ from sqlalchemy.orm import Session
 from tests._retest_helpers import (
     has_command_result,
     script_always_propose,
+    script_await_operator,
+    script_await_then_conclude_on_message,
     script_conclude_inconclusive,
     script_inconclusive_then_conclude_on_message,
     script_respond_then_conclude,
@@ -30,6 +37,7 @@ from tests._retest_helpers import (
 
 from revalid import retest_session as rs
 from revalid.db import IN_MEMORY, VerdictRecord, create_db_engine, session_factory
+from revalid.deltas import DeltaChannel
 from revalid.domain import (
     Finding,
     RetestSessionStatus,
@@ -1030,3 +1038,142 @@ def test_queued_goal_is_injected_into_the_next_turn() -> None:
         session.refresh(s)
     # The goal injection is delivered as a user turn -> the model reports "saw-message".
     assert s.verdict_rationale == "saw-message"
+
+
+# --- issue #204: conversational hand-back, delivered marker, turn cancel/retry ---
+
+
+def test_await_operator_parks_and_replies() -> None:
+    """A conversational reply parks in awaiting_operator, sandbox alive, no guidance banner."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(streaming(script_await_operator))
+        start_and_step(session, registry, s.id, agent, box, "hi")
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+    assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
+    assert s.verdict_status is None
+    assert registry.get(s.id) is not None and not box.stopped  # replies with the sandbox alive
+    messages = [e for e in events if e["kind"] == SessionEventKind.AGENT_MESSAGE.value]
+    assert messages[-1]["payload"]["text"] == "Hi — ready when you are."
+    # No heavy "needs your guidance" banner for a conversational hand-back.
+    assert not [e for e in events if e["kind"] == SessionEventKind.NEEDS_GUIDANCE.value]
+
+
+def test_message_resumes_an_awaiting_operator_session() -> None:
+    """The operator's next message resumes a session parked in awaiting_operator (#204)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(streaming(script_await_then_conclude_on_message))
+        start_and_step(session, registry, s.id, agent, box, "hi")  # parks awaiting_operator
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.AWAITING_OPERATOR.value
+        rs.submit_message(session, registry, s.id, "yes, keep going")
+        rs.continue_session(session, registry, s.id)
+        session.refresh(s)
+    assert s.status == RetestSessionStatus.CONCLUDED.value
+    assert s.verdict_status == "still_open"
+
+
+def test_queued_message_emits_messages_delivered_on_resume() -> None:
+    """A message queued while the agent is busy is marked delivered when it is read (#204)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        box = _echo_box()
+        agent = build_retest_agent(streaming(script_run_then_conclude))
+        start_and_step(session, registry, s.id, agent, box, "Retest.")  # -> awaiting_command
+        cid = _pending_cid(registry, s.id)
+        rs.submit_message(session, registry, s.id, "please note this")  # queued while busy
+        apply_decision(session, registry, s.id, approved=True, command_id=cid)  # drains + delivers
+        events = rs.load_events_after(session, s.id, 0)
+    delivered = [e for e in events if e["kind"] == SessionEventKind.MESSAGES_DELIVERED.value]
+    human = [e for e in events if e["kind"] == SessionEventKind.HUMAN_MESSAGE.value]
+    assert len(delivered) == 1
+    assert delivered[0]["seq"] > human[0]["seq"]  # the marker follows the queued message
+
+
+def test_run_cancellable_turn_reruns_on_unstick() -> None:
+    """An operator unstick cancels the in-flight turn and re-runs it from the top (#204)."""
+    live = rs.LiveSession(
+        agent=build_retest_agent(streaming(script_await_operator)), sandbox=_echo_box()
+    )
+    calls = {"n": 0}
+    sentinel = object()
+
+    async def drive() -> Any:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            live.abort_retry = True  # stands in for request_restart() having fired
+            raise asyncio.CancelledError
+        return sentinel
+
+    result = rs._run_cancellable_turn(drive, session_id=1, channel=DeltaChannel(), live=live)
+    assert result is sentinel
+    assert calls["n"] == 2  # the turn ran twice: the wedged one, then the retry
+
+
+def test_run_cancellable_turn_raises_on_teardown_cancel() -> None:
+    """A cancel that was not an unstick surfaces as _TurnAbortedError, not a retry (#204)."""
+    live = rs.LiveSession(
+        agent=build_retest_agent(streaming(script_await_operator)), sandbox=_echo_box()
+    )
+
+    async def drive() -> Any:
+        raise asyncio.CancelledError
+
+    with pytest.raises(rs._TurnAbortedError):
+        rs._run_cancellable_turn(drive, session_id=1, channel=DeltaChannel(), live=live)
+
+
+def test_live_session_cancel_primitives_no_op_without_a_turn() -> None:
+    """With no turn attached, the cancel primitives report nothing to do (#204)."""
+    live = rs.LiveSession(
+        agent=build_retest_agent(streaming(script_await_operator)), sandbox=_echo_box()
+    )
+    assert live.request_restart() is False
+    assert live.request_cancel() is False
+    assert live.consume_restart() is False
+
+
+def test_request_restart_schedules_cancel_on_an_attached_turn() -> None:
+    """request_restart cancels the attached task cross-loop and flags a retry (#204)."""
+    live = rs.LiveSession(
+        agent=build_retest_agent(streaming(script_await_operator)), sandbox=_echo_box()
+    )
+    loop = asyncio.new_event_loop()
+
+    async def forever() -> None:
+        await asyncio.sleep(3600)
+
+    task = loop.create_task(forever())
+    live.attach_run(loop, task)
+    assert live.request_restart() is True
+    assert live.consume_restart() is True  # the retry flag was set
+    with contextlib.suppress(asyncio.CancelledError):
+        loop.run_until_complete(task)
+    assert task.cancelled()
+    live.detach_run()
+    loop.close()
+
+
+def test_restart_model_no_op_when_not_live() -> None:
+    """restart_model does nothing (no TURN_RESTARTED marker) when the session is not live (#204)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.restart_model(session, registry, s.id)  # no live session -> no-op
+        events = rs.load_events_after(session, s.id, 0)
+    assert not [e for e in events if e["kind"] == SessionEventKind.TURN_RESTARTED.value]

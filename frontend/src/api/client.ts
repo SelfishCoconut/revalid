@@ -93,6 +93,14 @@ export function deleteReport(id: number): Promise<void> {
   return request<void>(`/reports/${String(id)}`, { method: "DELETE" });
 }
 
+/**
+ * Stop an in-flight extraction, keeping whatever was already extracted (issue
+ * #205). The report settles to `cancelled`. A no-op if it is no longer extracting.
+ */
+export function cancelReport(id: number): Promise<Report> {
+  return request<Report>(`/reports/${String(id)}/cancel`, { method: "POST" });
+}
+
 /** Replace a report's document metadata with operator edits (#133). */
 export function updateReportMetadata(id: number, metadata: ReportMetadata): Promise<Report> {
   return request<Report>(`/reports/${String(id)}/metadata`, jsonInit("PUT", metadata));
@@ -391,6 +399,17 @@ export function stopSession(id: number): Promise<{ status: string }> {
 /** Resume a stopped session — Resume (issue #150). May drive further agent turns. */
 export function resumeSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/resume`, { method: "POST" });
+}
+
+/**
+ * Restart the model on a session — abort the in-flight turn and re-run it to
+ * unstick a wedged model (issue #204). A no-op server-side unless a turn is
+ * actually in flight.
+ */
+export function restartModel(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/restart-model`, {
+    method: "POST",
+  });
 }
 
 /**

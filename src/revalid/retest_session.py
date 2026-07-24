@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,7 +52,10 @@ from revalid.domain import (
 from revalid.retest_agent import (
     DEFAULT_COMMAND_TIMEOUT,
     MAX_COMMAND_TIMEOUT,
+    AwaitOperator,
     ConcludeOutput,
+    RetestAgent,
+    RetestOutput,
     RetestSessionDeps,
     clamp_timeout,
     format_observations,
@@ -365,7 +369,7 @@ class LiveSession:
             observe the same pending call and both resume the agent run.
     """
 
-    agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
+    agent: RetestAgent
     sandbox: Sandbox
     messages: list[ModelMessage] = field(default_factory=list)
     pending_call_id: str | None = None
@@ -437,6 +441,81 @@ class LiveSession:
             drained = self.pending_goal
             self.pending_goal = None
             return drained
+
+    #: The event loop + task driving the in-flight agent turn, when one is running
+    #: (issue #204). Held so another thread — the ``restart-model`` endpoint or a
+    #: teardown — can cancel a wedged turn cross-thread via
+    #: ``loop.call_soon_threadsafe(task.cancel)``. Both ``None`` between turns.
+    #: Guarded by ``lock``; the run thread attaches on start, detaches on completion.
+    _run_loop: asyncio.AbstractEventLoop | None = None
+    _run_task: asyncio.Task[Any] | None = None
+    #: Set when the operator asked to abort-and-*retry* the in-flight turn (unstick,
+    #: issue #204). The run thread, on catching the cancellation, consumes this and
+    #: re-runs the same turn instead of failing. A plain cancel (teardown) leaves it
+    #: ``False`` so the cancellation settles the session. Guarded by ``lock``.
+    abort_retry: bool = False
+
+    def attach_run(self, loop: asyncio.AbstractEventLoop, task: asyncio.Task[Any]) -> None:
+        """Register the loop + task of the turn now starting (thread-safe).
+
+        Resets ``abort_retry`` so a stale flag from a prior turn never bleeds into
+        this one — each turn starts with clean cancellation state.
+        """
+        with self.lock:
+            self._run_loop = loop
+            self._run_task = task
+            self.abort_retry = False
+
+    def detach_run(self) -> None:
+        """Clear the in-flight-turn handle once the turn completes (thread-safe)."""
+        with self.lock:
+            self._run_loop = None
+            self._run_task = None
+
+    def request_restart(self) -> bool:
+        """Abort the in-flight turn and mark it to be re-run — unstick (issue #204).
+
+        Cancels the run's asyncio task from this (foreign) thread and flags the run
+        thread to retry the same turn rather than fail. Returns whether a turn was
+        actually in flight to abort (``False`` = nothing to unstick).
+        """
+        with self.lock:
+            loop, task = self._run_loop, self._run_task
+            if loop is None or task is None:
+                return False
+            self.abort_retry = True
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:  # the loop is already closing — the turn is ending anyway
+            with self.lock:
+                self.abort_retry = False
+            return False
+        return True
+
+    def request_cancel(self) -> bool:
+        """Abort the in-flight turn WITHOUT a retry — teardown (issues #204/#205).
+
+        Like :meth:`request_restart` but leaves ``abort_retry`` ``False`` so the
+        cancellation propagates out of the run thread (which then settles the
+        already-terminal session) instead of re-running. Used when ending or
+        deleting a session so a wedged turn's thread does not linger on a hung call.
+        """
+        with self.lock:
+            loop, task = self._run_loop, self._run_task
+        if loop is None or task is None:
+            return False
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:  # the loop is already closing — nothing to cancel
+            return False
+        return True
+
+    def consume_restart(self) -> bool:
+        """Return + clear whether the aborted turn should be re-run (thread-safe)."""
+        with self.lock:
+            requested = self.abort_retry
+            self.abort_retry = False
+            return requested
 
 
 class SessionRegistry:
@@ -527,7 +606,7 @@ def _dispatch_output(
     session: Session,
     registry: SessionRegistry,
     session_id: int,
-    result: AgentRunResult[ConcludeOutput | DeferredToolRequests],
+    result: AgentRunResult[RetestOutput],
 ) -> None:
     """Persist the outcome of one agent step: a proposed command or a verdict.
 
@@ -549,6 +628,10 @@ def _dispatch_output(
         # opening the gate; Resume re-opens it. The pending call is retained.
         park = RetestSessionStatus.STOPPED if live.stopped else RetestSessionStatus.AWAITING_COMMAND
         set_status(session, session_id, park)
+    elif isinstance(output, AwaitOperator):
+        # The agent replied conversationally and handed back (issue #204): a
+        # greeting, a small-talk answer, an acknowledgement. Park lightly and wait.
+        _await_operator(session, registry, session_id, output.message)
     elif isinstance(output, ConcludeOutput):
         if output.status is VerdictStatus.INCONCLUSIVE:
             # The agent hands back rather than terminating: it has exhausted the
@@ -578,6 +661,37 @@ def _pause_for_guidance(
         live.awaiting_guidance = True
 
 
+def _await_operator(
+    session: Session, registry: SessionRegistry, session_id: int, message: str
+) -> None:
+    """Park a session after a conversational reply — the agent handed back (issue #204).
+
+    The lighter sibling of :func:`_pause_for_guidance`: the agent answered the
+    operator (a greeting, small talk, an acknowledgement) rather than running a
+    command, so its reply is surfaced as an ordinary ``agent_message`` and the
+    session moves to the non-terminal ``AWAITING_OPERATOR`` state — no
+    "needs your guidance" banner. The sandbox stays alive; the free-launch loop
+    halts on ``awaiting_guidance`` (reused as the generic "handed back" flag); the
+    operator's next message resumes it (:func:`continue_session`).
+    """
+    append_event(session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": message})
+    set_status(session, session_id, RetestSessionStatus.AWAITING_OPERATOR)
+    live = registry.get(session_id)
+    if live is not None:
+        live.awaiting_guidance = True
+
+
+def _mark_delivered(session: Session, session_id: int, messages: list[str]) -> None:
+    """Record that queued operator messages reached the agent this turn (issue #204).
+
+    Emitted at each turn boundary that drains and delivers queued chat messages, so
+    the console can stop flagging a delivered message as still "queued". A no-op
+    when nothing was queued (the common case).
+    """
+    if messages:
+        append_event(session, session_id, SessionEventKind.MESSAGES_DELIVERED, {})
+
+
 def _teardown(registry: SessionRegistry, session_id: int) -> None:
     """Stop the sandbox (if live) and drop the session from the registry."""
     live = registry.get(session_id)
@@ -586,8 +700,55 @@ def _teardown(registry: SessionRegistry, session_id: int) -> None:
         registry.drop(session_id)
 
 
+class _TurnAbortedError(Exception):
+    """An in-flight turn was cancelled for teardown, not to retry (issue #204).
+
+    Raised out of :func:`run_agent_step` when a session's turn is cancelled via
+    :meth:`LiveSession.request_cancel` (end/delete). It is a plain ``Exception``
+    (not ``asyncio.CancelledError``, which is a ``BaseException`` the step sites'
+    ``except Exception`` would miss) so the orchestration boundary catches it and
+    routes to :func:`_fail`, which no-ops on the already-terminal session.
+    """
+
+
+def _run_cancellable_turn(
+    drive: Callable[[], Coroutine[Any, Any, AgentRunResult[RetestOutput]]],
+    *,
+    session_id: int,
+    channel: DeltaChannel,
+    live: LiveSession | None,
+) -> AgentRunResult[RetestOutput]:
+    """Run one turn on a fresh event loop, re-running it on an operator unstick (#204).
+
+    The loop is built by hand (not :func:`asyncio.run`) so ``live`` can hold its
+    handle and another thread can cancel a wedged turn cross-thread. A cancel that
+    was an operator *unstick* (:meth:`LiveSession.request_restart`) re-runs ``drive``
+    from the top; a cancel for teardown re-raises as :class:`_TurnAbortedError`.
+    """
+    while True:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            task = loop.create_task(drive())
+            if live is not None:
+                live.attach_run(loop, task)
+            return loop.run_until_complete(task)
+        except asyncio.CancelledError:
+            if live is not None and live.consume_restart():
+                continue  # operator unstick: re-run the same turn on a fresh loop
+            raise _TurnAbortedError("agent turn cancelled for teardown") from None
+        finally:
+            if live is not None:
+                live.detach_run()
+            # The turn is over: whatever it was thinking is superseded by the
+            # transcript events it just produced, so the console stops showing it.
+            channel.clear(session_id)
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
 def run_agent_step(
-    agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests],
+    agent: RetestAgent,
     user_prompt: str | None,
     *,
     session_id: int,
@@ -595,7 +756,8 @@ def run_agent_step(
     message_history: list[ModelMessage] | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     channel: DeltaChannel = DELTAS,
-) -> AgentRunResult[ConcludeOutput | DeferredToolRequests]:
+    live: LiveSession | None = None,
+) -> AgentRunResult[RetestOutput]:
     """Run one agent turn, streaming its live tokens to the console (issue #140).
 
     Replaces ``agent.run_sync`` at every step site. The turn's *result* is
@@ -617,10 +779,13 @@ def run_agent_step(
     arrive as partial JSON (``{"rationale": "I will che``), and rendering that
     would show the operator half-escaped syntax rather than a sentence.
 
-    Runs the async stream on its own event loop via :func:`asyncio.run`. Step
-    sites are already background/worker threads with no loop running, and the
-    orchestrator around them is synchronous — converting the whole state machine
-    to async would be a far larger change for no behavioural gain here.
+    Runs the async stream on its own event loop via :func:`_run_cancellable_turn`,
+    which also carries the issue #204 cancel/retry: an operator *unstick*
+    (:meth:`LiveSession.request_restart`) re-runs the same turn from the top, while
+    a cancel for teardown surfaces as :class:`_TurnAbortedError`. Step sites are
+    already background/worker threads with no loop running, and the orchestrator
+    around them is synchronous — converting the whole state machine to async would
+    be a far larger change for no behavioural gain here.
 
     Args:
         agent: The retest agent to run.
@@ -630,6 +795,8 @@ def run_agent_step(
         message_history: Prior turns, when continuing a run.
         deferred_tool_results: Approvals/denials resuming a gated call.
         channel: The live-token channel (injectable for tests).
+        live: The live session, when its turn should be cancellable (issue #204).
+            ``None`` (agent-unit tests) runs a plain, non-cancellable turn.
 
     Returns:
         The completed run result, exactly as ``run_sync`` would have returned it.
@@ -637,10 +804,11 @@ def run_agent_step(
     Raises:
         RuntimeError: If the stream ends without producing a run result, which
             would otherwise surface as a confusing ``None`` far from here.
+        _TurnAbortedError: If the turn was cancelled for teardown (not to retry).
     """
 
-    async def drive() -> AgentRunResult[ConcludeOutput | DeferredToolRequests]:
-        result: AgentRunResult[ConcludeOutput | DeferredToolRequests] | None = None
+    async def drive() -> AgentRunResult[RetestOutput]:
+        result: AgentRunResult[RetestOutput] | None = None
         async with agent.run_stream_events(
             user_prompt,
             deps=deps,
@@ -658,19 +826,14 @@ def run_agent_step(
             raise RuntimeError("agent stream ended without a result")
         return result
 
-    try:
-        return asyncio.run(drive())
-    finally:
-        # The turn is over: whatever it was thinking is superseded by the
-        # transcript events it just produced, so the console stops showing it.
-        channel.clear(session_id)
+    return _run_cancellable_turn(drive, session_id=session_id, channel=channel, live=live)
 
 
 def start_and_step(
     session: Session,
     registry: SessionRegistry,
     session_id: int,
-    agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests],
+    agent: RetestAgent,
     sandbox: Sandbox,
     finding_prompt: str,
     *,
@@ -695,7 +858,7 @@ def start_and_step(
     set_status(session, session_id, RetestSessionStatus.THINKING)
     deps = _make_deps(session, session_id, live)
     try:
-        result = run_agent_step(agent, finding_prompt, session_id=session_id, deps=deps)
+        result = run_agent_step(agent, finding_prompt, session_id=session_id, deps=deps, live=live)
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
         return
@@ -782,7 +945,9 @@ def _resume_with_decision(
         # message here — the agent still observes what the human did.
         results.approvals[call_id] = ToolDenied(reason + format_observations(live.drain()))
     deps = _make_deps(session, session_id, live)
-    user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages())
+    goal, messages = live.drain_goal(), live.drain_messages()
+    _mark_delivered(session, session_id, messages)
+    user_prompt = _resume_prompt(goal, messages)
     try:
         result = run_agent_step(
             live.agent,
@@ -791,6 +956,7 @@ def _resume_with_decision(
             deps=deps,
             message_history=live.messages,
             deferred_tool_results=results,
+            live=live,
         )
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
@@ -1111,7 +1277,10 @@ def end_session(session: Session, registry: SessionRegistry, session_id: int) ->
 
     Acquires ``live.lock`` around the teardown for consistency with
     ``apply_decision``'s registry-mutating critical section, even though
-    ``end_session`` doesn't touch ``pending_call_id`` itself.
+    ``end_session`` doesn't touch ``pending_call_id`` itself. Cancels any in-flight
+    turn first (issue #204) so a wedged model call does not leave the run thread
+    lingering after the session is gone; the row is already ``ended`` (terminal), so
+    the cancelled turn's :class:`_TurnAbortedError` is swallowed by :func:`_fail`.
     """
     record = session.get(RetestSessionRecord, session_id)
     if record is None or RetestSessionStatus(record.status) in _TERMINAL:
@@ -1120,8 +1289,30 @@ def end_session(session: Session, registry: SessionRegistry, session_id: int) ->
     live = registry.get(session_id)
     if live is None:
         return
+    live.request_cancel()
     with live.lock:
         _teardown(registry, session_id)
+
+
+def restart_model(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Abort the in-flight turn and re-run it to unstick a wedged model (issue #204).
+
+    The "restart model" console action. Asks the live session to cancel its current
+    turn and re-run it (:meth:`LiveSession.request_restart`); a ``turn_restarted``
+    marker is appended so the transcript shows the operator intervened. A no-op when
+    the session is not live or no turn is in flight (nothing to unstick) — the
+    console only offers the action while the agent is working.
+
+    Args:
+        session: Active DB session for this call.
+        registry: The live-session registry.
+        session_id: The retest session whose turn to restart.
+    """
+    live = registry.get(session_id)
+    if live is None:
+        return
+    if live.request_restart():
+        append_event(session, session_id, SessionEventKind.TURN_RESTARTED, {})
 
 
 def _resume_run(
@@ -1135,12 +1326,17 @@ def _resume_run(
     """
     set_status(session, session_id, RetestSessionStatus.THINKING)
     deps = _make_deps(session, session_id, live)
-    user_prompt = _resume_prompt(live.drain_goal(), live.drain_messages()) or (
-        "Continue the retest toward a determination."
-    )
+    goal, messages = live.drain_goal(), live.drain_messages()
+    _mark_delivered(session, session_id, messages)
+    user_prompt = _resume_prompt(goal, messages) or "Continue the retest toward a determination."
     try:
         result = run_agent_step(
-            live.agent, user_prompt, session_id=session_id, deps=deps, message_history=live.messages
+            live.agent,
+            user_prompt,
+            session_id=session_id,
+            deps=deps,
+            message_history=live.messages,
+            live=live,
         )
     except Exception as exc:  # broad on purpose: orchestration boundary, records + tears down
         _fail(session, registry, session_id, str(exc))
@@ -1149,14 +1345,24 @@ def _resume_run(
     _drive_auto(session, registry, session_id)
 
 
-def continue_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
-    """Resume a paused session — ADR-0034 "Keep going".
+#: States a session resumes from when the operator messages it: the agent handed
+#: control back (``needs_guidance`` after exhausting options, ADR-0034; or
+#: ``awaiting_operator`` after a conversational reply, issue #204). Both keep the
+#: sandbox alive and re-run the agent on the operator's next message.
+_RESUMABLE_ON_MESSAGE: frozenset[RetestSessionStatus] = frozenset(
+    {RetestSessionStatus.NEEDS_GUIDANCE, RetestSessionStatus.AWAITING_OPERATOR}
+)
 
-    A no-op unless the session is paused in ``needs_guidance`` with a live agent (a
-    paused session that outlived a backend restart has no sandbox to resume — the
-    operator restarts it instead). A session only ever pauses when the agent hands
-    back a conclusion (never with a command still pending), so continuing re-runs
-    the agent, folding in any queued goal/chat guidance.
+
+def continue_session(session: Session, registry: SessionRegistry, session_id: int) -> None:
+    """Resume a session the agent handed back — ADR-0034 "Keep going" / reply (#204).
+
+    A no-op unless the session is paused in one of :data:`_RESUMABLE_ON_MESSAGE`
+    (``needs_guidance`` or ``awaiting_operator``) with a live agent — a paused
+    session that outlived a backend restart has no sandbox to resume, so the
+    operator restarts it instead. The agent only ever hands back between turns
+    (never with a command still pending), so continuing re-runs it, folding in any
+    queued goal/chat steering.
 
     Args:
         session: Active DB session for this call.
@@ -1164,10 +1370,7 @@ def continue_session(session: Session, registry: SessionRegistry, session_id: in
         session_id: The paused retest session to resume.
     """
     record = session.get(RetestSessionRecord, session_id)
-    if (
-        record is None
-        or RetestSessionStatus(record.status) is not RetestSessionStatus.NEEDS_GUIDANCE
-    ):
+    if record is None or RetestSessionStatus(record.status) not in _RESUMABLE_ON_MESSAGE:
         return
     live = registry.get(session_id)
     if live is None:

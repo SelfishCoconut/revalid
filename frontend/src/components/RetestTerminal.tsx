@@ -13,8 +13,17 @@ import "@xterm/xterm/css/xterm.css";
  * construction, `open`, and `writeln` can all throw there. Each is guarded
  * with try/catch so the component still renders its host div and never
  * crashes a test — only the terminal's own rendering is skipped.
+ *
+ * `className` sets the host's height (Tailwind sizing utility): the parent picks
+ * how tall the visible window is — xterm scrolls its own buffer within it.
  */
-export function RetestTerminal({ lines }: { lines: string[] }) {
+export function RetestTerminal({
+  lines,
+  className = "h-52",
+}: {
+  lines: string[];
+  className?: string;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const written = useRef(0);
@@ -69,6 +78,10 @@ export function RetestTerminal({ lines }: { lines: string[] }) {
   }, [lines]);
 
   return (
-    <div ref={host} data-testid="retest-terminal" className="h-52 overflow-hidden rounded-md" />
+    <div
+      ref={host}
+      data-testid="retest-terminal"
+      className={`overflow-hidden rounded-md ${className}`}
+    />
   );
 }

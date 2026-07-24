@@ -129,6 +129,56 @@ def script_always_propose(messages: list[ModelMessage], info: AgentInfo) -> Mode
     )
 
 
+def output_tool(info: AgentInfo, suffix: str) -> str:
+    """Return the synthesized output-tool name ending in ``suffix`` (multi-output, #204).
+
+    With ``output_type=[ConcludeOutput, AwaitOperator, DeferredToolRequests]`` the
+    agent has two output tools — ``final_result_ConcludeOutput`` and
+    ``final_result_AwaitOperator`` — so a script selects by class suffix rather than
+    index.
+    """
+    return next(tool.name for tool in info.output_tools if tool.name.endswith(suffix))
+
+
+def script_await_operator(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """Reply conversationally and hand back — an ``AwaitOperator`` turn (issue #204).
+
+    Never runs a command or concludes: the agent answered the operator and is now
+    waiting for them (the console parks in ``awaiting_operator``).
+    """
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=output_tool(info, "AwaitOperator"),
+                args={"message": "Hi — ready when you are."},
+            )
+        ]
+    )
+
+
+def script_await_then_conclude_on_message(
+    messages: list[ModelMessage], info: AgentInfo
+) -> ModelResponse:
+    """Hand back with ``AwaitOperator`` until the operator replies, then conclude (#204).
+
+    Exercises the resume path from ``awaiting_operator``: the first turn parks
+    conversationally; once a second user turn (the delivered reply) arrives it
+    concludes ``still_open``.
+    """
+    if operator_message_count(messages) > 1:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=output_tool(info, "ConcludeOutput"),
+                    args={"status": "still_open", "rationale": "resumed and confirmed open"},
+                )
+            ]
+        )
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name=output_tool(info, "AwaitOperator"), args={"message": "hi"})]
+    )
+
+
 def has_tool_result(messages: list[ModelMessage], tool_name: str) -> bool:
     """Return True once a ``ToolReturnPart`` for ``tool_name`` is in history."""
     return any(

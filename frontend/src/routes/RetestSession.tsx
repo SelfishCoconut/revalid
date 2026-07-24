@@ -11,6 +11,7 @@ import {
   getRetestSession,
   regenerateSessionGoal,
   rejectCommand,
+  restartModel,
   setFreeLaunch,
   setSessionGoal,
   startRetestSession,
@@ -138,6 +139,7 @@ function statusLabel(status: string): string {
     running_command: "Working",
     awaiting_command: "Awaiting your approval",
     needs_guidance: "Paused — needs you",
+    awaiting_operator: "Waiting for you",
     stopped: "Paused by you",
     concluded: "Concluded",
     given_up: "Ended",
@@ -228,18 +230,21 @@ function HumanTurn({ text, queued }: { text: string; queued: boolean }) {
     <div className="flex justify-end">
       <div className="min-w-0 max-w-[85%] rounded-lg border border-iris/40 bg-iris/10 px-4 py-3">
         <p className="whitespace-pre-wrap text-sm text-fg">{text}</p>
-        {queued && (
-          <p className="mt-1 text-[11px] text-faint">queued — sent on your next approve/reject</p>
-        )}
+        {queued && <p className="mt-1 text-[11px] text-faint">queued</p>}
       </div>
     </div>
   );
 }
 
-/** Seq of the latest approve/reject; a human_message after it hasn't been delivered yet. */
-function lastDecisionSeq(events: SessionEvent[]): number {
-  const decisions = new Set(["command_approved", "command_rejected"]);
-  const latest = [...events].reverse().find((event) => decisions.has(event.kind));
+/**
+ * Seq of the latest `messages_delivered` marker (#204): the agent emits one each
+ * turn it drains queued operator messages, so a `human_message` with a *higher*
+ * seq is still waiting to be read, and any below it has been delivered. This is
+ * what clears the "queued" hint the moment the agent actually has the message —
+ * on any resume path, not only approve/reject.
+ */
+function latestDeliveredSeq(events: SessionEvent[]): number {
+  const latest = [...events].reverse().find((event) => event.kind === "messages_delivered");
   return latest ? latest.seq : 0;
 }
 
@@ -307,6 +312,10 @@ export function RetestSession({
   // the operator messages it (#163), so `POST …/message` is the only resume path
   // the console needs. The lifecycle routes themselves remain as programmatic API.
   const stopMutation = useMutation({ mutationFn: () => stopSession(id) });
+  // Restart-model aborts the in-flight turn and re-runs it to unstick a wedged
+  // model (issue #204) — distinct from Restart (a fresh session). Session, sandbox,
+  // goal and history are all kept; only the frozen turn is thrown away and retried.
+  const restartModelMutation = useMutation({ mutationFn: () => restartModel(id) });
   // The operator's own commands (`!`) run ungated in the same sandbox; separate
   // mutation so its pending/error state is independent of the gate buttons.
   const humanCommandMutation = useMutation({
@@ -362,7 +371,7 @@ export function RetestSession({
   const terminalLines = toTerminalLines(events);
   const planSteps = currentPlan(events);
   const targetEndpoints = currentTarget(events);
-  const decisionSeq = lastDecisionSeq(events);
+  const deliveredSeq = latestDeliveredSeq(events);
   // A pending approval is for either a command or a plan change; both gate on the
   // same tool_call_id, so they share the approve/reject mutations below.
   const latestProposal = [...events].reverse().find((event) => event.kind === "command_proposed");
@@ -456,7 +465,7 @@ export function RetestSession({
         <HumanTurn
           key={event.seq}
           text={String(event.payload.text ?? "")}
-          queued={event.seq > decisionSeq && !sessionOver}
+          queued={event.seq > deliveredSeq && !sessionOver}
         />,
       ];
     }
@@ -497,14 +506,18 @@ export function RetestSession({
   });
 
   return (
-    // A *fixed* height, not a floor (#163): with `min-h` the console grew with the
-    // transcript, so the page scrolled, the conversation's own `overflow-y-auto`
-    // never engaged and the composer walked off the bottom of the viewport. Pinning
-    // the height makes the thread scroll inside its panel with the composer welded
-    // to its edge, the way a chat app behaves.
+    // Viewport-*minimum* flex column (#204/#206): the console is at least tall
+    // enough to fill the viewport, so the conversation grows to fill the space
+    // between the goal (top) and the docked terminal (bottom) instead of floating.
+    // Crucially it is a `min-h`, not a fixed `h`: when the terminal is expanded and
+    // goal + terminal + conversation exceed the viewport, the column *grows* and the
+    // page scrolls — rather than a fixed height crushing the flex-1 conversation to
+    // nothing and letting the terminal overlap it (the #206 bug). The conversation
+    // panel keeps its own min-height floor so it is always usable. The embedded
+    // finding stage reserves more chrome above (identity + pipeline).
     <div
       className={`flex flex-col gap-3 ${
-        embedded ? "h-[calc(100dvh-20rem)]" : "h-[calc(100dvh-9rem)]"
+        embedded ? "min-h-[calc(100dvh-19rem)]" : "min-h-[calc(100dvh-8rem)]"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -556,6 +569,22 @@ export function RetestSession({
                 Stop
               </Button>
             )}
+            {/* Restart model — abort a wedged turn and re-run it (#204). Only while a
+                turn is actually in flight (thinking); at the gate there is nothing to
+                unstick. Distinct from Restart below, which opens a fresh session. */}
+            {isThinking(status) && (
+              <Button
+                variant="ghost"
+                title="Abort the current turn and re-run it — use if the model is stuck"
+                disabled={restartModelMutation.isPending}
+                onClick={() => {
+                  restartModelMutation.mutate();
+                }}
+              >
+                <PowerIcon />
+                Restart model
+              </Button>
+            )}
             {/* Conclude is reachable from any live state (#150). In needs_guidance the
                 pause banner carries its own Conclude button, so skip it here to keep
                 a single entry point. */}
@@ -599,6 +628,7 @@ export function RetestSession({
             endMutation.error,
             restartMutation.error,
             stopMutation.error,
+            restartModelMutation.error,
           ]
             .filter(Boolean)
             .map((err, i) => (
@@ -609,7 +639,9 @@ export function RetestSession({
         </div>
       </div>
 
-      {/* main: the goal (full width, right below the stages bar) then the boxed chat */}
+      {/* main: the goal (full width, right below the stages bar) then the boxed chat.
+          `flex-1 min-h-0` so it claims the height left by the header + terminal and
+          passes it down to the conversation, which flexes to fill it (#204). */}
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Current goal — the user-owned checklist, full width below the stages bar (FR-17 6b-ii). */}
         <Panel className="shrink-0">
@@ -716,13 +748,14 @@ export function RetestSession({
         {/* Conversation — one chat panel (#157): the scrolling transcript with the
             composer welded to its bottom edge, so the agent's turns, the operator's
             turns, the gate, and the box you type into all read as a single thread
-            rather than a stack of disconnected boxes. A min-height keeps it usable
-            so the docked terminal can never squeeze the approval gate to nothing on
-            a short viewport (the page scrolls instead). */}
-        {/* A modest floor, not 20rem: the root is now a fixed height (#163), so an
-            over-tall floor here would push the composer out of the console when the
-            terminal is expanded. The thread scrolls internally instead. */}
-        <Panel className="flex min-h-[12rem] flex-1 flex-col overflow-hidden">
+            rather than a stack of disconnected boxes. */}
+        {/* `flex-1` grows the panel to fill the space its parent hands down (#204),
+            while a real `min-h` floor (#206) stops it collapsing when the terminal
+            is expanded — a crushed panel let the terminal overlap it. Its inner
+            `overflow-y-auto` keeps the transcript scrolling with the composer welded
+            to the bottom edge; the page scrolls only once even this floor + the
+            terminal exceed the viewport. */}
+        <Panel className="flex min-h-[18rem] flex-1 flex-col overflow-hidden">
           <PanelHeader eyebrow="Conversation" />
           <div
             ref={chatRef}
@@ -1088,7 +1121,7 @@ export function RetestSession({
         </button>
         {terminalOpen && (
           <div className="space-y-2 p-3">
-            <RetestTerminal lines={terminalLines} />
+            <RetestTerminal lines={terminalLines} className="h-80" />
             <form
               onSubmit={(event) => {
                 event.preventDefault();

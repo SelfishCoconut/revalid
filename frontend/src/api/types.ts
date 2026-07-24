@@ -1,7 +1,7 @@
 // Hand-typed mirror of the backend Pydantic models (no codegen). Keep in sync
 // with the FastAPI schemas that back the `/api` endpoints.
 
-export type ReportStatus = "extracting" | "ready" | "failed";
+export type ReportStatus = "extracting" | "ready" | "failed" | "cancelled";
 
 export interface Report {
   id: number;

@@ -37,6 +37,7 @@ from tests._retest_helpers import (
 from revalid.domain import VerdictStatus
 from revalid.retest_agent import (
     MAX_COMMAND_TIMEOUT,
+    AwaitOperator,
     ConcludeOutput,
     RetestSessionDeps,
     build_retest_agent,
@@ -44,8 +45,8 @@ from revalid.retest_agent import (
 )
 from revalid.sandbox import CommandResult, FakeSandbox
 
-_RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
-_RetestRun = AgentRunResult[ConcludeOutput | DeferredToolRequests]
+_RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | AwaitOperator | DeferredToolRequests]
+_RetestRun = AgentRunResult[ConcludeOutput | AwaitOperator | DeferredToolRequests]
 _Script = Callable[[list[ModelMessage], AgentInfo], ModelResponse]
 
 

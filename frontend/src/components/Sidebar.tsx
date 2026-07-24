@@ -14,6 +14,7 @@ const STATUS_DOT: Record<ReportStatus, string> = {
   extracting: "bg-iris",
   ready: "bg-ok",
   failed: "bg-danger",
+  cancelled: "bg-warn",
 };
 
 function navItemClass({ isActive }: { isActive: boolean }): string {
