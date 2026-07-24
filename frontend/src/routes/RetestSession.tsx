@@ -11,6 +11,7 @@ import {
   getRetestSession,
   regenerateSessionGoal,
   rejectCommand,
+  reopenSession,
   restartModel,
   setFreeLaunch,
   setSessionGoal,
@@ -357,6 +358,15 @@ export function RetestSession({
   const concludeMutation = useMutation({
     mutationFn: (v: { status: string; rationale: string }) =>
       concludeSession(id, v.status, v.rationale),
+  });
+  // Reopen a concluded session (issue #214): withdraw the verdict and return to
+  // `idle` so the operator can wake it and keep testing. The WS stream is already
+  // closed at conclusion, so refetch the session to pick up the idle state.
+  const reopenMutation = useMutation({
+    mutationFn: () => reopenSession(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.retestSession(id) });
+    },
   });
   const [concluding, setConcluding] = useState(false);
   const [concludeStatus, setConcludeStatus] = useState<VerdictStatus>("inconclusive");
@@ -969,6 +979,29 @@ export function RetestSession({
                     )}
                   </>
                 )}
+                {/* Reopen (issue #214): withdraw this verdict and return the session
+                    to idle so the operator can wake it and keep testing — for when
+                    the verdict feels premature. Available whether or not adjudicated. */}
+                <div className="mt-3 border-t border-line pt-3">
+                  <Button
+                    variant="ghost"
+                    disabled={reopenMutation.isPending}
+                    onClick={() => {
+                      reopenMutation.mutate();
+                    }}
+                  >
+                    <RestartIcon />
+                    Reopen &amp; keep testing
+                  </Button>
+                  <p className="mt-1 text-xs text-faint">
+                    Withdraws this verdict and reopens the session — wake it to continue.
+                  </p>
+                  {reopenMutation.isError && (
+                    <p className="mt-1 text-xs text-danger">
+                      {errorMessage(reopenMutation.error)}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
             {/* Conclude — the operator writes their own verdict, available at any

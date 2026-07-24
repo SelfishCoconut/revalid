@@ -1258,3 +1258,51 @@ def test_restart_model_no_op_when_not_live() -> None:
         rs.restart_model(session, registry, s.id)  # no live session -> no-op
         events = rs.load_events_after(session, s.id, 0)
     assert not [e for e in events if e["kind"] == SessionEventKind.TURN_RESTARTED.value]
+
+
+# --- issue #214: reopen a concluded session, keep testing ---
+
+
+def test_reopen_withdraws_the_verdict_and_returns_to_idle() -> None:
+    """Reopen a concluded session: verdict withdrawn from the projection, kept in the
+    transcript, status back to idle so the operator can wake it and continue (#214)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")
+        rs.record_verdict(session, s.id, VerdictStatus.STILL_OPEN, "reproduced")
+        session.refresh(s)
+        assert s.status == RetestSessionStatus.CONCLUDED.value
+        rs.reopen_session(session, s.id)
+        session.refresh(s)
+        events = rs.load_events_after(session, s.id, 0)
+        verdicts = list(
+            session.scalars(select(VerdictRecord).where(VerdictRecord.session_id == s.id))
+        )
+    assert s.status == RetestSessionStatus.IDLE.value
+    assert s.verdict_status is None
+    assert s.verdict_rationale is None
+    # Withdrawn from the queryable projection, so the finding shows no determination...
+    assert verdicts == []
+    # ...but the transcript keeps the full history: VERDICT + VERDICT_CANCELLED.
+    kinds = [e["kind"] for e in events]
+    assert SessionEventKind.VERDICT.value in kinds
+    cancelled = [e for e in events if e["kind"] == SessionEventKind.VERDICT_CANCELLED.value]
+    assert len(cancelled) == 1
+    assert cancelled[0]["payload"]["status"] == "still_open"
+
+
+def test_reopen_is_a_noop_when_not_concluded() -> None:
+    """Reopening a session that has no verdict is a safe no-op (#214)."""
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m")  # never concluded
+        before = rs.load_events_after(session, s.id, 0)
+        rs.reopen_session(session, s.id)
+        session.refresh(s)
+        after = rs.load_events_after(session, s.id, 0)
+    assert after == before
+    # ADR-0042 collapsed `starting` into `working`; a non-deferred session is
+    # created straight into it, and a no-op reopen must leave that untouched.
+    assert s.status == RetestSessionStatus.WORKING.value

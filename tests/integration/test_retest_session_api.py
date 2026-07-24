@@ -788,3 +788,22 @@ def test_session_provisions_the_sandbox_against_the_scope_host() -> None:
         )
         assert started.status_code == 202
     assert box.scope_hosts == ("shop.example.com",)
+
+
+def test_reopen_endpoint_returns_a_concluded_session_to_idle() -> None:
+    """POST reopen on a concluded session -> idle, verdict withdrawn from /verdicts (#214)."""
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session", json={"free_launch": True}).json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "concluded"
+        assert client.get("/api/verdicts").json()  # a verdict was recorded
+
+        assert client.post(f"/api/retest-sessions/{sid}/reopen").status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "idle"  # reopened — the operator can wake it and continue
+        assert state["verdict_status"] is None
+        # The verdict is withdrawn from the queryable projection...
+        assert client.get("/api/verdicts").json() == []
+        # ...but kept in the transcript as VERDICT + VERDICT_CANCELLED (the audit).
+        kinds = [e["kind"] for e in state["events"]]
+        assert "verdict" in kinds and "verdict_cancelled" in kinds

@@ -527,6 +527,38 @@ describe("RetestSession", () => {
     expect(screen.queryByRole("button", { name: /edit goal/i })).not.toBeInTheDocument();
   });
 
+  it("reopens a concluded session to withdraw the verdict and keep testing", async () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "concluded",
+      verdict: { status: "fixed", rationale: "looked patched" },
+      connected: true,
+      thinking: "",
+    });
+    vi.mocked(client.reopenSession).mockResolvedValue({ status: "idle" });
+
+    renderAt(1);
+
+    await userEvent.click(screen.getByRole("button", { name: /reopen & keep testing/i }));
+    expect(client.reopenSession).toHaveBeenCalledWith(1);
+  });
+
+  it("offers no reopen control while the session is still live", () => {
+    vi.mocked(hook.useRetestSession).mockReturnValue({
+      events: [],
+      status: "awaiting_command",
+      verdict: null,
+      connected: true,
+      thinking: "",
+    });
+
+    renderAt(1);
+
+    expect(
+      screen.queryByRole("button", { name: /reopen & keep testing/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a live thinking indicator while the agent computes a turn", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [],

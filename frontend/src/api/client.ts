@@ -386,6 +386,14 @@ export function endRetestSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/end`, { method: "POST" });
 }
 
+/**
+ * Reopen a concluded session — withdraw the verdict and keep testing (issue #214).
+ * The session returns to `idle`; wake it to re-provision the sandbox and continue.
+ */
+export function reopenSession(id: number): Promise<{ status: string }> {
+  return request<{ status: string }>(`/retest-sessions/${String(id)}/reopen`, { method: "POST" });
+}
+
 /** Start an `idle` (deferred) session — the operator's Start (issue #150). */
 export function startSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/start`, { method: "POST" });
