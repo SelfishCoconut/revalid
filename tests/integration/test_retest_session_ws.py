@@ -55,7 +55,9 @@ def _is_handback(event: dict[str, Any]) -> bool:
     Since ADR-0042 the hand-back has no dedicated event kind: it is a
     ``state_change`` to ``awaiting_operator`` (which absorbed ``needs_guidance``).
     """
-    return event["kind"] == "state_change" and event["payload"].get("to") == "awaiting_operator"
+    return bool(
+        event["kind"] == "state_change" and event["payload"].get("to") == "awaiting_operator"
+    )
 
 
 def test_ws_streams_proposed_output_and_verdict() -> None:
