@@ -6,9 +6,10 @@ import { SeverityBadge } from "../components/SeverityBadge";
 import { SeverityMeter } from "../components/SeverityMeter";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
+import { Button } from "../components/ui/Button";
 import { Eyebrow, Panel, PanelHeader } from "../components/ui/Panel";
 import { useFindings } from "../hooks/useFindings";
-import { useReport } from "../hooks/useReports";
+import { useCancelReport, useReport } from "../hooks/useReports";
 import { useVerdicts } from "../hooks/useVerdicts";
 import { errorMessage } from "../lib/format";
 import { latestVerdict, severityCounts, verdictCounts, verdictsFor } from "../lib/selectors";
@@ -29,9 +30,14 @@ export function ReportDetail() {
   const { id } = useParams();
   const reportId = Number(id);
   const report = useReport(reportId);
+  const cancel = useCancelReport();
   const ready = report.data?.status === "ready";
+  // A cancelled report (issue #205) keeps the findings extracted before the stop,
+  // so its findings list is worth showing even though it never reached `ready`.
+  const kept = report.data?.status === "cancelled";
+  const showFindings = ready || kept;
 
-  const findings = useFindings(reportId, ready);
+  const findings = useFindings(reportId, showFindings);
   const verdicts = useVerdicts(ready);
 
   if (report.isPending) {
@@ -68,13 +74,30 @@ export function ReportDetail() {
           <StatusBadge status={data.status} />
         </div>
         {data.status === "extracting" && (
-          <div className="mt-4 border-t border-line pt-4">
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
             <Spinner label="Extracting findings" />
+            {/* Stop extraction (issue #205): the run settles to `cancelled` at the
+                next finding candidate, keeping whatever was extracted so far. */}
+            <Button
+              variant="ghost"
+              disabled={cancel.isPending}
+              onClick={() => {
+                cancel.mutate(reportId);
+              }}
+            >
+              Stop
+            </Button>
           </div>
         )}
         {data.status === "failed" && (
           <p role="alert" className="mt-4 border-t border-line pt-4 text-sm text-danger-fg">
             Extraction failed: {data.error ?? "unknown error"}
+          </p>
+        )}
+        {kept && (
+          <p className="mt-4 border-t border-line pt-4 text-sm text-warn-fg">
+            Extraction stopped by you — kept {data.finding_count}{" "}
+            {data.finding_count === 1 ? "finding" : "findings"} extracted before the stop.
           </p>
         )}
       </Panel>
@@ -100,7 +123,7 @@ export function ReportDetail() {
         </Panel>
       )}
 
-      {ready && (
+      {showFindings && (
         <Panel>
           <PanelHeader
             eyebrow="Findings"

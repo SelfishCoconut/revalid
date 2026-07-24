@@ -26,9 +26,9 @@ erDiagram
     REPORTS {
         int id PK
         string filename
-        string status "extracting-ready-failed"
+        string status "extracting-ready-failed-cancelled"
         string model "LLM used for extraction"
-        string error "set only on failed"
+        string error "set only on failed / cancelled"
         int finding_count
         bool archived
         string content_hash "dedup of re-uploads"
@@ -186,6 +186,9 @@ stateDiagram-v2
     needs_guidance --> thinking: operator steers, Keep going
     needs_guidance --> concluded: operator concludes manually
 
+    thinking --> awaiting_operator: replies (AwaitOperator, ADR-0039)
+    awaiting_operator --> thinking: operator messages back
+
     thinking --> concluded: ConcludeOutput(fixed / still_open)
     thinking --> error: unhandled failure
 
@@ -230,6 +233,8 @@ flowchart TB
         S4["needs_guidance"]
         S5["free_launch_changed"]
         S6["error"]
+        S7["messages_delivered — queued msg read (ADR-0039)"]
+        S8["turn_restarted — operator unstick (ADR-0039)"]
     end
 
     A3 --> T[("session_events<br/>append-only, seq-ordered")]

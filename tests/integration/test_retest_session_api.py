@@ -737,3 +737,50 @@ def test_guidance_message_alone_resumes_the_agent_to_a_verdict() -> None:
         state = client.get(f"/api/retest-sessions/{sid}").json()
         assert state["status"] == "concluded"
         assert state["verdict_status"] == "still_open"
+
+
+def test_delete_report_ends_its_live_retest_session() -> None:
+    """Deleting a report tears down a live retest session under it (issue #204).
+
+    The agent + sandbox for a finding whose report is deleted must not keep
+    running: the delete ends the live session (torn down + dropped from the
+    registry) before cascading the rows away.
+    """
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        streaming(script_run_then_conclude)
+    )
+    _override_goal_agent(app)
+    box = FakeSandbox([CommandResult(stdout="ok", stderr="", exit_code=0, elapsed_ms=1)])
+    app.dependency_overrides[get_sandbox_factory] = lambda: lambda _sid: box
+    with TestClient(app) as client:
+        rid = client.post(
+            "/api/reports/manual",
+            json={"label": "R", "findings": [{"title": "SQLi", "severity": "Critical"}]},
+        ).json()["id"]
+        fid = client.get("/api/findings", params={"report_id": rid}).json()[0]["id"]
+        sid = client.post(f"/api/findings/{fid}/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+        assert app.state.registry.get(sid) is not None  # the session is live
+
+        assert client.delete(f"/api/reports/{rid}").status_code == 204
+        assert app.state.registry.get(sid) is None  # dropped from the registry
+        assert box.stopped is True  # its sandbox was torn down
+        assert client.get(f"/api/retest-sessions/{sid}").status_code == 404  # rows cascaded away
+
+
+def test_restart_model_endpoint_is_accepted_and_a_noop_at_the_gate() -> None:
+    """POST restart-model returns 202; with no turn in flight it does nothing (#204).
+
+    At `awaiting_command` the agent is parked at the gate, not mid-turn, so there is
+    nothing to unstick — no `turn_restarted` marker is written.
+    """
+    with _client() as client:
+        client.post("/api/findings/import", json=_IMPORT)
+        sid = client.post("/api/findings/1/retest-session").json()["id"]
+        assert client.get(f"/api/retest-sessions/{sid}").json()["status"] == "awaiting_command"
+
+        assert client.post(f"/api/retest-sessions/{sid}/restart-model").status_code == 202
+        state = client.get(f"/api/retest-sessions/{sid}").json()
+        assert state["status"] == "awaiting_command"  # unchanged — nothing was in flight
+        assert not [e for e in state["events"] if e["kind"] == "turn_restarted"]

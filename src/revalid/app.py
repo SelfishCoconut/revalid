@@ -30,7 +30,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic_ai import Agent, DeferredToolRequests
+from pydantic_ai import Agent
 from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
@@ -65,11 +65,13 @@ from revalid.domain import (
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import (
     ExtractedFinding,
+    ExtractionRegistry,
+    ExtractionReport,
     ReportMetadata,
     build_extraction_agent,
     build_metadata_agent,
     extract_metadata,
-    extract_report,
+    extract_report_async,
 )
 from revalid.findings import (
     add_note,
@@ -81,7 +83,7 @@ from revalid.findings import (
 )
 from revalid.ingest import IngestError, map_defectdojo_export
 from revalid.llm import agent_model_name, build_model
-from revalid.pdf import PdfError, read_pdf
+from revalid.pdf import PdfError, PdfReport, read_pdf
 from revalid.plan import (
     GeneratedGoal,
     build_goal_agent,
@@ -98,8 +100,7 @@ from revalid.reports_chat import (
     stream_answer,
 )
 from revalid.retest_agent import (
-    ConcludeOutput,
-    RetestSessionDeps,
+    RetestAgent,
     build_qa_agent,
     build_retest_agent,
 )
@@ -116,6 +117,7 @@ from revalid.retest_session import (
     end_session,
     is_terminal,
     load_events_after,
+    restart_model,
     resume_session,
     session_goal,
     session_scope,
@@ -129,9 +131,6 @@ from revalid.retest_session import (
 )
 from revalid.sandbox import DockerSandbox, Sandbox, SandboxFactory
 from revalid.settings import ProbeResult, discover_models, load_or_seed, probe_provider, save
-
-#: The retest agent's static output type: a verdict, or a deferred approval request.
-RetestAgent = Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]
 
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
@@ -639,21 +638,55 @@ ReportsChatAgentDep = Annotated[Agent[ReportsChatDeps, str], Depends(get_reports
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
 
 
+def _run_cancellable_extraction(
+    agent: Agent[None, list[ExtractedFinding]],
+    pdf: PdfReport,
+    report_id: int,
+    extractions: ExtractionRegistry,
+) -> ExtractionReport:
+    """Run async extraction on a fresh loop registered for cross-thread cancel (#205).
+
+    Mirrors the retest turn's cancellable run: the loop + task are held by the
+    ``extractions`` registry so a Stop or delete can cancel the in-flight model call
+    immediately (not just between candidates). A no-op factored out of
+    :func:`run_extraction` so the background worker stays a single try/except.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        task = loop.create_task(
+            extract_report_async(
+                agent, pdf, should_cancel=lambda: extractions.cancel_reason(report_id) is not None
+            )
+        )
+        extractions.attach(report_id, loop, task)
+        return loop.run_until_complete(task)
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
 def run_extraction(
     sessions: sessionmaker[Session],
     report_id: int,
     data: bytes,
     agent: Agent[None, list[ExtractedFinding]],
     metadata_agent: Agent[None, ReportMetadata],
+    extractions: ExtractionRegistry,
 ) -> None:
     """Extract findings from an uploaded PDF and persist them (FR-01/FR-03/FR-11).
 
     Runs as a FastAPI background task — a sync function Starlette dispatches to
     its threadpool, so it must open its **own** session (the request session is
     already closed once the ``202`` was sent) and it never blocks the event
-    loop. The report is always moved out of ``extracting``: to ``ready`` with
-    its findings persisted, or ``failed`` with the error recorded — so the UI's
-    status poll always terminates.
+    loop. The report is always moved out of ``extracting``: to ``ready`` with its
+    findings persisted, ``failed`` with the error recorded, or — when the operator
+    stopped it (issue #205) — ``cancelled`` keeping whatever was extracted, so the
+    UI's status poll always terminates.
+
+    Cancellation (issue #205): ``extractions`` is polled between finding candidates.
+    An operator Stop keeps the partial findings and lands ``cancelled``; a report
+    delete flags ``"deleted"`` so this persists nothing into the row being removed.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -661,21 +694,33 @@ def run_extraction(
         data: The uploaded PDF bytes.
         agent: The extraction agent (a stand-in model in tests).
         metadata_agent: The document-metadata agent (a stand-in model in tests).
+        extractions: The process-local extraction cancel registry.
     """
     with sessions() as session:
         report = session.get(ReportRecord, report_id)
         if report is None:  # pragma: no cover - the row was just committed
+            extractions.clear(report_id)
             return
         try:
             pdf = read_pdf(data)
-            result = extract_report(agent, pdf)
+            result = _run_cancellable_extraction(agent, pdf, report_id, extractions)
         except PdfError as exc:
             report.status, report.error = ReportStatus.FAILED.value, str(exc)
             session.commit()
+            extractions.clear(report_id)
             return
         except Exception as exc:
             report.status, report.error = ReportStatus.FAILED.value, f"extraction failed: {exc}"
             session.commit()
+            extractions.clear(report_id)
+            return
+        if result.cancelled:
+            _settle_cancelled_extraction(session, report_id, result.findings, extractions)
+            return
+        # The report may have been deleted mid-run (a concurrent delete on another
+        # session); re-check before writing so findings are never orphaned (#205).
+        if session.get(ReportRecord, report_id) is None:  # pragma: no cover - narrow race
+            extractions.clear(report_id)
             return
         _persist_findings(session, result.findings, report_id=report_id)
         # Best-effort document metadata (#133) — never fails the report.
@@ -683,6 +728,32 @@ def run_extraction(
         report.status = ReportStatus.READY.value
         report.finding_count = len(result.findings)
         session.commit()
+        extractions.clear(report_id)
+
+
+def _settle_cancelled_extraction(
+    session: Session,
+    report_id: int,
+    findings: Iterable[Finding],
+    extractions: ExtractionRegistry,
+) -> None:
+    """Land a stopped extraction (issue #205): keep partial findings unless deleting.
+
+    An operator Stop marks the report ``cancelled`` and persists the findings that
+    completed before the stop. A ``"deleted"`` flag means the report row is being
+    removed, so nothing is persisted. Clears the cancel flag either way.
+    """
+    reason = extractions.cancel_reason(report_id)
+    extractions.clear(report_id)
+    report = session.get(ReportRecord, report_id)
+    if reason == "deleted" or report is None:
+        return
+    materialised = list(findings)
+    _persist_findings(session, materialised, report_id=report_id)
+    report.status = ReportStatus.CANCELLED.value
+    report.finding_count = len(materialised)
+    report.error = "extraction stopped by operator"
+    session.commit()
 
 
 def _get_finding_or_404(session: Session, finding_id: int) -> FindingRecord:
@@ -909,9 +980,9 @@ def run_message(
 
     * ``idle`` — provision the sandbox and run the first turn, with the message
       folded into the opening prompt.
-    * ``stopped`` / ``needs_guidance`` — buffer the message and resume/continue;
-      :func:`~revalid.retest_session._resume_prompt` delivers it as that turn's
-      user message.
+    * ``stopped`` / ``needs_guidance`` / ``awaiting_operator`` — buffer the message
+      and resume/continue; :func:`~revalid.retest_session._resume_prompt` delivers
+      it as that turn's user message.
     * anything else (the agent is mid-run, or a command awaits approval) — buffer
       it for the next turn boundary as before, and answer it *now* with the
       read-only Q&A so the operator is not left hanging.
@@ -948,7 +1019,9 @@ def run_message(
         if status is RetestSessionStatus.STOPPED:
             resume_session(session, registry, session_id)
             return
-        if status is RetestSessionStatus.NEEDS_GUIDANCE:
+        if status in (RetestSessionStatus.NEEDS_GUIDANCE, RetestSessionStatus.AWAITING_OPERATOR):
+            # The agent handed control back (guidance pause or a conversational
+            # reply, issue #204); the operator's message resumes it (#163).
             continue_session(session, registry, session_id)
             return
         # Busy: the message is queued for the next turn boundary, so answer it now.
@@ -1082,6 +1155,9 @@ def _start_idle(
     prompt = _target_preamble(endpoints) + _goal_prompt(goal, finding)
     if steer:
         prompt += f"\n\nThe operator says:\n{steer}"
+        # The steer is delivered in this opening turn, so mark it received (#204):
+        # the console stops flagging it as "queued".
+        append_event(session, session_id, SessionEventKind.MESSAGES_DELIVERED, {})
     sandbox: Sandbox | None = None
     try:
         sandbox = make_sandbox(session_id)
@@ -1161,6 +1237,18 @@ def run_resume(sessions: sessionmaker[Session], registry: SessionRegistry, sessi
     """
     with sessions() as session:
         resume_session(session, registry, session_id)
+
+
+def run_restart_model(
+    sessions: sessionmaker[Session], registry: SessionRegistry, session_id: int
+) -> None:
+    """Abort + re-run the in-flight turn to unstick a wedged model (issue #204).
+
+    Runs as a background task: it cancels the current turn from a fresh thread while
+    the wedged turn's own thread re-runs it. A no-op when nothing is in flight.
+    """
+    with sessions() as session:
+        restart_model(session, registry, session_id)
 
 
 def _finding_prompt(finding: Finding) -> str:
@@ -1324,12 +1412,15 @@ def _register_finding_retest_routes(router: APIRouter, sessions: sessionmaker[Se
         return [RetestSessionSummary.from_record(r) for r in rows]
 
 
-def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+def _register_report_routes(
+    router: APIRouter, sessions: sessionmaker[Session], extractions: ExtractionRegistry
+) -> None:
     """Register the FR-01/FR-11 report-upload and status routes.
 
     Upload runs FR-01→FR-03 in a background task (:func:`run_extraction`); the
     two GET routes are the overview list and the poll target the SPA watches
-    until the report settles on ``ready``/``failed``.
+    until the report settles on ``ready``/``failed``/``cancelled``. ``extractions``
+    is the cancel registry the background task polls so a Stop takes effect (#205).
     """
 
     def get_session() -> Iterator[Session]:
@@ -1368,7 +1459,9 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         session.add(report)
         session.commit()
         session.refresh(report)
-        background.add_task(run_extraction, sessions, report.id, data, agent, metadata_agent)
+        background.add_task(
+            run_extraction, sessions, report.id, data, agent, metadata_agent, extractions
+        )
         return ReportOut.from_record(report)
 
     @router.post("/reports/manual", response_model=ReportOut, status_code=201)
@@ -1428,12 +1521,51 @@ def _register_report_routes(router: APIRouter, sessions: sessionmaker[Session]) 
         return ReportOut.from_record(report)
 
 
-def _register_report_admin_routes(router: APIRouter, sessions: sessionmaker[Session]) -> None:
+def _register_report_cancel_route(
+    router: APIRouter, sessions: sessionmaker[Session], extractions: ExtractionRegistry
+) -> None:
+    """Register the Stop-extraction route (issue #205).
+
+    Split from :func:`_register_report_routes` so that registrar stays under the
+    complexity gate. Flags an in-flight extraction so its background task settles to
+    ``cancelled``, keeping whatever was extracted.
+    """
+
+    def get_session() -> Iterator[Session]:
+        with sessions() as session:
+            yield session
+
+    SessionDep = Annotated[Session, Depends(get_session)]  # noqa: N806
+
+    @router.post("/reports/{report_id}/cancel", response_model=ReportOut, status_code=202)
+    def cancel_report(report_id: int, session: SessionDep) -> ReportOut:
+        """Stop an in-flight extraction, keeping whatever was extracted (issue #205).
+
+        Flags the report so the background task settles it to ``cancelled`` at the
+        next candidate boundary; the operator keeps any findings already extracted.
+        A no-op on a report that is no longer ``extracting`` (already settled) — the
+        current status is returned unchanged. 404 if the report does not exist.
+        """
+        report = session.get(ReportRecord, report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found")
+        if report.status == ReportStatus.EXTRACTING.value:
+            extractions.request_cancel(report_id, reason="operator")
+        return ReportOut.from_record(report)
+
+
+def _register_report_admin_routes(
+    router: APIRouter,
+    sessions: sessionmaker[Session],
+    registry: SessionRegistry,
+    extractions: ExtractionRegistry,
+) -> None:
     """Register the FR-11 report archive/delete routes (#128).
 
     Split from :func:`_register_report_routes` so each stays under the complexity
     gate; archiving soft-hides (reversible), deleting removes the report and all
-    its derived rows.
+    its derived rows. Delete also stops any in-flight work the report owns
+    (issues #204/#205): a mid-run extraction, and any live retest sessions.
     """
 
     def get_session() -> Iterator[Session]:
@@ -1461,10 +1593,17 @@ def _register_report_admin_routes(router: APIRouter, sessions: sessionmaker[Sess
         a report's findings own their version history, notes, verdicts and retest
         sessions, and each session owns its append-only transcript events. All of
         it is removed so no orphaned rows survive.
+
+        First stops any in-flight work the report owns (issues #204/#205): a report
+        still extracting is flagged so its background task settles without writing
+        into the deleted row, and every live retest session under it is ended so no
+        agent or sandbox keeps running for a report that is gone.
         """
         report = session.get(ReportRecord, report_id)
         if report is None:
             raise HTTPException(status_code=404, detail="report not found")
+        extractions.request_cancel(report_id, reason="deleted")
+        _end_live_sessions_for_report(session, registry, report_id)
         _cascade_delete_report(session, report)
 
     @router.put("/reports/{report_id}/metadata", response_model=ReportOut)
@@ -1805,6 +1944,16 @@ def _register_lifecycle_routes(
     def resume_session_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
         """Resume a stopped session — Resume (issue #150). May drive further agent turns."""
         background.add_task(run_resume, sessions, registry, session_id)
+        return {"status": "accepted"}
+
+    @router.post("/retest-sessions/{session_id}/restart-model", status_code=202)
+    def restart_model_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
+        """Abort the in-flight turn and re-run it to unstick a wedged model (issue #204).
+
+        The console's "restart model" action. A no-op unless a turn is actually in
+        flight — nothing to unstick otherwise.
+        """
+        background.add_task(run_restart_model, sessions, registry, session_id)
         return {"status": "accepted"}
 
 
@@ -2224,6 +2373,31 @@ def _reject_if_duplicate(session: Session, content_hash: str, *, force: bool) ->
     )
 
 
+def _end_live_sessions_for_report(
+    session: Session, registry: SessionRegistry, report_id: int
+) -> None:
+    """End every live retest session under a report before it is deleted (issue #204).
+
+    A report's findings may each have an in-flight agentic retest session (a running
+    agent + its sandbox) held in the process-local registry. Deleting the report
+    would leave those orphaned, so each live one is ended first — which cancels any
+    wedged turn and tears the sandbox down (:func:`~revalid.retest_session.end_session`).
+    Non-live sessions (already terminal, or never started) are skipped; the DB rows
+    are removed by :func:`_cascade_delete_report`.
+    """
+    finding_ids = list(
+        session.scalars(select(FindingRecord.id).where(FindingRecord.report_id == report_id))
+    )
+    if not finding_ids:
+        return
+    session_ids = session.scalars(
+        select(RetestSessionRecord.id).where(RetestSessionRecord.finding_id.in_(finding_ids))
+    )
+    for session_id in session_ids:
+        if registry.get(session_id) is not None:
+            end_session(session, registry, session_id)
+
+
 def _cascade_delete_report(session: Session, report: ReportRecord) -> None:
     """Delete a report and every row derived from it, in dependency order (#128).
 
@@ -2304,13 +2478,16 @@ def create_app(db_path: str = "revalid.db", engine: Engine | None = None) -> Fas
     app.state.sessions = sessions
     registry = SessionRegistry()
     app.state.registry = registry
+    extractions = ExtractionRegistry()
+    app.state.extractions = extractions
 
     api = APIRouter(prefix="/api")
     _register_core_routes(api, sessions)
     _register_finding_routes(api, sessions)
     _register_finding_retest_routes(api, sessions)
-    _register_report_routes(api, sessions)
-    _register_report_admin_routes(api, sessions)
+    _register_report_routes(api, sessions, extractions)
+    _register_report_cancel_route(api, sessions, extractions)
+    _register_report_admin_routes(api, sessions, registry, extractions)
     _register_verdict_routes(api, sessions)
     _register_session_routes(api, sessions, registry)
     _register_launch_route(api, sessions, registry)

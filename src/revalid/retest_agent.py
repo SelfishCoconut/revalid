@@ -60,10 +60,19 @@ the session; it hands back to the operator. In the rationale, say what you tried
 and exactly what guidance or access you need to continue. The operator will steer \
 you (a new message, a command they run, an edited goal) and resume you, or make \
 the final call themselves. Only the operator concludes `inconclusive`.
-- The operator may message you at any time; their message arrives as a new \
-turn. Always address it: answer questions with `respond`, then continue; fold \
-any steering into your plan and commands. Use `respond` sparingly — to answer \
-or for a brief status note, not to narrate every step.
+- The operator is in charge. When they message you, that message is your \
+priority — read what they actually said and answer *that*. The goal is background \
+context, not a script to rush through; do not ignore a message and press on toward \
+the goal.
+- If the operator's message is conversational — a greeting, small talk, a simple \
+question you can answer without running anything, or just acknowledging you — \
+reply with a short `AwaitOperator` message (e.g. "Hi — ready when you are.") and \
+STOP. Do NOT run a command or conclude just to make progress: hand control back \
+and wait for them.
+- Run a command only to make genuine retest progress, and when you do, fold in \
+whatever the operator asked for. To reply and keep working in the same turn, use \
+`respond` for the note and then propose your command. Use `respond` sparingly — a \
+brief answer or status note, never step-by-step narration.
 """
 
 
@@ -74,6 +83,22 @@ class ConcludeOutput(BaseModel):
 
     status: VerdictStatus
     rationale: str = Field(min_length=1)
+
+
+class AwaitOperator(BaseModel):
+    """The agent replied and is handing control back to the operator (issue #204).
+
+    The turn ends without a command or a verdict: the agent answered the operator
+    conversationally (a greeting, a small-talk reply, an acknowledgement) and is
+    now waiting for them, sandbox kept alive. Lighter than an ``inconclusive``
+    conclusion — it is not "I'm stuck, please guide me", just "your move". The
+    orchestrator surfaces ``message`` as an agent chat bubble and parks the session
+    in ``awaiting_operator``; the operator's next message resumes it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    message: str = Field(min_length=1)
 
 
 def _no_observations() -> list[str]:
@@ -127,9 +152,18 @@ def format_observations(observations: list[str]) -> str:
     return "\n\n--- operator activity while you waited ---\n" + "\n".join(observations)
 
 
+#: The retest agent's output union: a terminal verdict, a conversational hand-back
+#: (issue #204), or a gated command awaiting approval. Named once so the
+#: orchestrator's many step-site annotations stay in sync (mypy --strict).
+RetestOutput = ConcludeOutput | AwaitOperator | DeferredToolRequests
+#: The built retest agent's type — an :class:`~pydantic_ai.Agent` over the deps and
+#: the :data:`RetestOutput` union. Shared by the orchestrator and the app layer.
+RetestAgent = Agent[RetestSessionDeps, RetestOutput]
+
+
 def build_retest_agent(
     model: Model | KnownModelName | str | None = None,
-) -> Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests]:
+) -> RetestAgent:
     """Build the FR-17 retest agent: a gated ``run_command`` tool + a verdict.
 
     Args:
@@ -138,14 +172,15 @@ def build_retest_agent(
             default — FR-13); tests pass ``TestModel``/``FunctionModel``.
 
     Returns:
-        An agent whose output is either a :class:`ConcludeOutput` verdict or,
-        while a gated ``run_command`` call awaits human approval, a
+        An agent whose output is a :class:`ConcludeOutput` verdict, an
+        :class:`AwaitOperator` conversational hand-back, or — while a gated
+        ``run_command`` call awaits human approval — a
         :class:`~pydantic_ai.DeferredToolRequests`.
     """
-    agent: Agent[RetestSessionDeps, ConcludeOutput | DeferredToolRequests] = Agent(
+    agent: RetestAgent = Agent(
         model if model is not None else resolve_model(),
         deps_type=RetestSessionDeps,
-        output_type=[ConcludeOutput, DeferredToolRequests],
+        output_type=[ConcludeOutput, AwaitOperator, DeferredToolRequests],
         instructions=_INSTRUCTIONS,
         retries=_MAX_TOOL_RETRIES,
         defer_model_check=True,

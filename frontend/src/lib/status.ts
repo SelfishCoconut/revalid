@@ -17,10 +17,11 @@ export type Tone = "iris" | "ok" | "warn" | "danger" | "high" | "low" | "neutral
 export type KnownStatus = ReportStatus | VerdictStatus;
 
 export const STATUS_META: Record<KnownStatus, { tone: Tone; label: string }> = {
-  // Report — the system is extracting; then reality is ready/failed.
+  // Report — the system is extracting; then reality is ready/failed/cancelled.
   extracting: { tone: "iris", label: "extracting" },
   ready: { tone: "ok", label: "ready" },
   failed: { tone: "danger", label: "failed" },
+  cancelled: { tone: "warn", label: "cancelled" },
   // Verdict — reality's determination.
   still_open: { tone: "danger", label: "still open" },
   fixed: { tone: "ok", label: "fixed" },

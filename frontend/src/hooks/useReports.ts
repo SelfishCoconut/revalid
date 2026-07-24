@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  cancelReport,
   createManualReport,
   deleteReport,
   getReport,
@@ -26,6 +27,18 @@ export function useSetReportArchived() {
   return useMutation<Report, Error, { id: number; archived: boolean }>({
     mutationFn: ({ id, archived }) => setReportArchived(id, archived),
     onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.reports });
+    },
+  });
+}
+
+/** Stop an in-flight extraction (issue #205); on success refresh that report + lists. */
+export function useCancelReport() {
+  const client = useQueryClient();
+  return useMutation<Report, Error, number>({
+    mutationFn: cancelReport,
+    onSuccess: (report) => {
+      void client.invalidateQueries({ queryKey: queryKeys.report(report.id) });
       void client.invalidateQueries({ queryKey: queryKeys.reports });
     },
   });

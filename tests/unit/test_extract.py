@@ -5,20 +5,27 @@ outputs so we can prove the schema-validation gate (valid → mapped, invalid �
 flagged, never persisted).
 """
 
+import asyncio
+import contextlib
 from typing import Any
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.settings import ModelSettings
 
 from revalid.domain import Severity
 from revalid.extract import (
     ExtractedFinding,
+    ExtractionRegistry,
+    ExtractionReport,
     build_extraction_agent,
     extract_report,
+    extract_report_async,
 )
 from revalid.llm import DEFAULT_MODEL, agent_model_name
-from revalid.pdf import PdfPage, PdfReport
+from revalid.pdf import PdfPage, PdfReport, segment_findings
 
 _VALID: dict[str, Any] = {
     "title": "SQL Injection in Login",
@@ -85,6 +92,32 @@ def test_multiple_findings_from_one_candidate() -> None:
     agent = build_extraction_agent(_model_returning(_VALID, second))
     result = extract_report(agent, _report("two findings, no headings"))
     assert [f.title for f in result.findings] == ["SQL Injection in Login", "Reflected XSS"]
+
+
+def test_extract_report_cancels_before_the_first_candidate() -> None:
+    """A cancel requested up front stops before any model call — nothing extracted (#205)."""
+    agent = build_extraction_agent(_model_returning(_VALID))
+    result = extract_report(agent, _report("a finding"), should_cancel=lambda: True)
+    assert result.cancelled is True
+    assert result.findings == ()
+    assert result.failures == ()
+
+
+def test_extract_report_keeps_partial_findings_on_cancel() -> None:
+    """A cancel between candidates keeps the ones already extracted (#205)."""
+    text = "Finding 1: SQLi\nfirst body\n\nFinding 2: XSS\nsecond body"
+    report = PdfReport(page_count=1, pages=(PdfPage(number=1, text=text),), text=text)
+    assert len(segment_findings(report)) == 2  # sanity: two candidates, so mid-run cancel is real
+    agent = build_extraction_agent(_model_returning(_VALID))
+    checks = {"n": 0}
+
+    def should_cancel() -> bool:
+        checks["n"] += 1
+        return checks["n"] > 1  # allow the first candidate, then stop before the second
+
+    result = extract_report(agent, report, should_cancel=should_cancel)
+    assert result.cancelled is True
+    assert len(result.findings) == 1  # the first candidate's finding was kept
 
 
 def test_report_stated_cvss_and_mitre_mapped_verbatim() -> None:
@@ -171,3 +204,58 @@ def test_default_agent_targets_local_first_backend(monkeypatch: pytest.MonkeyPat
     assert agent.model == DEFAULT_MODEL
     # NFR-02: the model name recorded in lineage is the configured string.
     assert agent_model_name(agent) == DEFAULT_MODEL
+
+
+class _HangingModel(Model):
+    """A model whose request hangs until the task is cancelled (issue #205 interrupt test)."""
+
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        await asyncio.sleep(3600)
+        raise AssertionError("cancelled before returning")  # pragma: no cover - unreachable
+
+    @property
+    def model_name(self) -> str:
+        return "hanging"
+
+    @property
+    def system(self) -> str:
+        return "test"
+
+
+def test_extract_report_async_returns_cancelled_when_interrupted() -> None:
+    """A Stop that cancels the in-flight model call returns a cancelled result (#205)."""
+    agent = build_extraction_agent(_HangingModel())
+    report = _report("a candidate whose model call never finishes")
+
+    async def drive() -> ExtractionReport:
+        task = asyncio.ensure_future(extract_report_async(agent, report))
+        await asyncio.sleep(0.05)  # let it reach the awaiting model call
+        task.cancel()
+        return await task
+
+    result = asyncio.run(drive())
+    assert result.cancelled is True
+    assert result.findings == ()  # nothing completed before the interrupt
+
+
+def test_extraction_registry_cancel_interrupts_the_attached_task() -> None:
+    """request_cancel aborts the in-flight extraction task cross-thread (#205)."""
+    reg = ExtractionRegistry()
+    loop = asyncio.new_event_loop()
+
+    async def forever() -> ExtractionReport:
+        await asyncio.sleep(3600)
+        return ExtractionReport(findings=(), failures=())  # pragma: no cover - unreachable
+
+    task = loop.create_task(forever())
+    reg.attach(7, loop, task)
+    reg.request_cancel(7)  # schedules the cancel on the attached task
+    with contextlib.suppress(asyncio.CancelledError):
+        loop.run_until_complete(task)
+    assert task.cancelled()
+    loop.close()
