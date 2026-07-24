@@ -2,7 +2,7 @@
 
 Date: 2026-07-21
 
-Status: proposed
+Status: accepted (ratified 2026-07-25)
 
 Enhances FR-18 (ADR-0036). Realises the evolution ADR-0036 explicitly left open:
 its *Consequences* noted "latency is visible … if this becomes annoying, the turn

@@ -1,7 +1,7 @@
 # 0044. Containerised deployment: sibling sandbox containers over the host Docker socket
 
 Date: 2026-07-25
-Status: proposed
+Status: accepted (ratified 2026-07-25)
 
 ## Context
 

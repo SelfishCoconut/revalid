@@ -87,25 +87,20 @@ increasingly demands, and it would be perverse to ignore it --- but using it
 \section{Future work}
 \label{sec:future}
 
-Several directions remain open, from extending the measurement this work sets up to
-lifting the single-operator scope it deliberately adopted.
+Several directions remain open, from the workflow this tool would slot into, through
+the two capability limits the evaluation exposed, to lifting the single-operator
+scope the work deliberately adopted.
 
-\subsection{Strengthening the evaluation and the verdicts}
-\label{subsec:future-eval}
+\subsection{Closing the loop with automated remediation}
+\label{subsec:future-remediation}
 
-The most immediate is to widen the evaluation of Chapter~\ref{ch:evaluation}: to run
-the harness over a larger, independently established ground-truth set --- more
-findings, more report formats and lab targets with genuinely \emph{fixed} findings
-among them, not only vulnerable ones --- so that verdict accuracy and time saved are
-measured at scale rather than on a first sample. Verdict quality then rests chiefly on
-the language-model backend and the guidance it is given: the preliminary run shows a
-small local model straining at endpoint discovery and long transcripts, so a stronger
-reasoning model --- the hosted Claude backend over a local one --- is the most direct
-lever on reliability. Further out, the tightest opportunity is to close the loop
-between remediation and revalidation: as automated code-fixing agents such as
-CodeMender~\cite{codemender} begin to \emph{apply} fixes, an automated, human-gated
-tool to \emph{confirm} those fixes becomes a natural complement rather than a
-curiosity.
+The tightest opportunity is to close the loop between remediation and revalidation.
+As automated code-fixing agents such as CodeMender~\cite{codemender} begin to
+\emph{apply} fixes, an automated, human-gated tool to \emph{confirm} those fixes
+becomes a natural complement rather than a curiosity: the fix and its verification
+are the two halves of the same workflow, and only one of them is being automated
+today. A revalidation tool that already refuses to declare anything fixed without
+evidence is the right shape for that second half.
 
 \subsection{Verifying browser-observable findings}
 \label{subsec:future-browser}
