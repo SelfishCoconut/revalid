@@ -11,11 +11,17 @@ from __future__ import annotations
 import pytest
 
 from revalid.sandbox import (
+    EGRESS_PROXY_PORT,
     CommandResult,
     FakeSandbox,
     SandboxUnavailableError,
     egress_probe_command,
+    egress_proxy_name,
     internal_network_name,
+    is_lab_scope,
+    lab_host,
+    online_scope_hosts,
+    squid_allowlist_config,
 )
 
 
@@ -52,3 +58,48 @@ def test_egress_probe_command_targets_a_host() -> None:
     # weaker test anyway. The host is interpolated, so no host string literal is
     # compared.
     assert cmd == f"curl --max-time 5 --silent --show-error --output /dev/null https://{host}"
+
+
+# --- scope-based provisioning (ADR-0041, issue #208) ---
+
+
+def test_lab_host_is_the_lab_base_url_host() -> None:
+    # Default lab base url is http://localhost:3000.
+    assert lab_host() == "localhost:3000"
+
+
+def test_is_lab_scope_for_empty_and_lab_only() -> None:
+    assert is_lab_scope(()) is True  # no scope defaults to the lab
+    assert is_lab_scope(("localhost:3000",)) is True
+
+
+def test_is_lab_scope_false_for_an_online_host() -> None:
+    assert is_lab_scope(("domain.com",)) is False
+    assert is_lab_scope(("localhost:3000", "domain.com")) is False  # any online host -> online
+
+
+def test_online_scope_hosts_drops_the_lab_host() -> None:
+    assert online_scope_hosts(("localhost:3000", "domain.com", "api.x.com")) == (
+        "domain.com",
+        "api.x.com",
+    )
+
+
+def test_fake_sandbox_records_the_scope_it_was_started_with() -> None:
+    box = FakeSandbox([])
+    box.start(("domain.com",))
+    assert box.scope_hosts == ("domain.com",)
+
+
+def test_egress_proxy_name_is_session_scoped() -> None:
+    assert egress_proxy_name(7) == "revalid-retest-proxy-7"
+
+
+def test_squid_allowlist_denies_all_but_the_scoped_domains() -> None:
+    conf = squid_allowlist_config(("domain.com", "api.example.com:8443"))
+    assert f"http_port {EGRESS_PROXY_PORT}" in conf
+    # Ports are dropped for the dstdomain match; both hosts are allowlisted.
+    assert "acl scoped dstdomain api.example.com domain.com" in conf
+    assert "http_access allow scoped" in conf
+    # The closed default — anything not scoped is denied (no open relay).
+    assert "http_access deny all" in conf

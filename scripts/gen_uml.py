@@ -41,7 +41,7 @@ SRC = Path("src/revalid")
 LAYERS: dict[str, tuple[str, ...]] = {
     "domain": ("domain",),
     "ingestion": ("ingest", "pdf", "llm", "extract", "findings"),
-    "retest": ("plan", "sandbox", "retest_agent", "retest_session", "deltas"),
+    "retest": ("plan", "sandbox", "scope", "retest_agent", "retest_session", "deltas"),
     "verdicts": ("audit", "export", "eval"),
     "platform": ("reports_chat", "settings", "db"),
     "api": ("app",),
