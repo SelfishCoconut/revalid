@@ -35,7 +35,7 @@ def clamp_timeout(seconds: int) -> int:
     return max(1, min(seconds, MAX_COMMAND_TIMEOUT))
 
 
-_INSTRUCTIONS = """\
+_BASE_INSTRUCTIONS = """\
 You are a penetration-test *retester*. You are given one finding to re-verify \
 against an authorised lab target that is reachable from your sandbox.
 
@@ -46,20 +46,16 @@ one-line rationale; a human approves or rejects each before it runs.
 - Every command must be NON-INTERACTIVE and self-terminating: never wait on \
 stdin, and never background a command (no trailing `&`) — you only see output \
 once it exits.
-- Choose `timeout_seconds` to fit the command: a quick probe (curl) needs only \
-a few seconds; a port scan or fuzzing run may need 60-180. The command is killed \
-if it overruns; if you see it "timed out", either raise the limit or narrow the \
-scope (e.g. scan fewer ports) — a bounded `nmap -Pn -T4 --top-ports 100` beats a \
-full-range sweep that never finishes.
+- You decide how long each command may run: choose `timeout_seconds` to fit it. \
+A quick probe (curl) needs only a few seconds; a port scan or fuzzing run may \
+need 60-180. The command is killed if it overruns; if you see it "timed out", \
+either raise the limit or narrow the scope (e.g. scan fewer ports) — a bounded \
+`nmap -Pn -T4 --top-ports 100` beats a full-range sweep that never finishes.
 - Prefer non-destructive verification. Do not attempt to damage the target.
-- When you are confident, conclude with a determination: `still_open` (the issue \
-reproduces) or `fixed` (it does not). That ends the session.
-- Do NOT quit on your own. If you have exhausted the options you can think of and \
-still cannot determine the outcome, conclude `inconclusive` — this does NOT end \
-the session; it hands back to the operator. In the rationale, say what you tried \
-and exactly what guidance or access you need to continue. The operator will steer \
-you (a new message, a command they run, an edited goal) and resume you, or make \
-the final call themselves. Only the operator concludes `inconclusive`.
+- If you have genuinely exhausted the options you can think of and still cannot \
+determine the outcome, conclude `inconclusive` — this does NOT end the session; \
+it hands back to the operator. In the rationale, say what you tried and exactly \
+what guidance or access you need. Only the operator records a final `inconclusive`.
 - The operator is in charge. When they message you, that message is your \
 priority — read what they actually said and answer *that*. The goal is background \
 context, not a script to rush through; do not ignore a message and press on toward \
@@ -73,6 +69,29 @@ and wait for them.
 whatever the operator asked for. To reply and keep working in the same turn, use \
 `respond` for the note and then propose your command. Use `respond` sparingly — a \
 brief answer or status note, never step-by-step narration.
+"""
+
+#: Appended when the operator has handed over the wheel (Auto-run / free-launch,
+#: ADR-0039): the agent drives itself to a verdict, chaining commands as needed.
+_AUTONOMOUS_GUIDANCE = """\
+You are running AUTONOMOUSLY: the operator turned Auto-run on and handed you the \
+wheel. Keep going on your own — reason, run a command, observe its output, and \
+continue — until you can make a determination. When you are confident, conclude \
+`still_open` (the issue reproduces) or `fixed` (it does not). That ends the session.
+"""
+
+#: Appended in the default guided mode (ADR-0039): the operator drives one step at
+#: a time, so the agent does a single action and hands back rather than racing to a
+#: verdict. The orchestrator enforces the stop; these instructions shape a *useful*
+#: hand-back (a recommendation for the operator, not a silent stall).
+_GUIDED_GUIDANCE = """\
+You are being GUIDED by the operator, one step at a time. Do exactly what they \
+ask — normally a single command — then STOP and hand back: after a command runs, \
+briefly note what it showed and either recommend the single next command, or, if \
+you now believe you know the outcome, recommend a determination (`still_open` or \
+`fixed`) and why. Do NOT chain more commands on your own, and do NOT record the \
+verdict yourself — the operator sets the pace and makes the final call. They will \
+tell you the next move, take over, or turn on Auto-run to hand you the wheel.
 """
 
 
@@ -125,6 +144,13 @@ class RetestSessionDeps:
     #: by the non-gated ``respond`` tool; the orchestrator wires this to append an
     #: ``agent_message`` transcript event. The default drops it (agent-unit tests).
     emit_message: Callable[[str], None] = _no_emit_message
+    #: Whether the operator has handed over the wheel (Auto-run / free-launch). It
+    #: selects the agent's persona via dynamic instructions (ADR-0039): guided
+    #: (one action then hand back) when ``False``, autonomous (drive to a verdict)
+    #: when ``True``. Rebuilt fresh each turn from the live session, so a live
+    #: Auto-run toggle takes effect on the agent's next turn. Default ``False`` —
+    #: the guided persona — so agent-unit constructions need not set it.
+    free_launch: bool = False
 
 
 def _format_result(result: CommandResult) -> str:
@@ -181,10 +207,20 @@ def build_retest_agent(
         model if model is not None else resolve_model(),
         deps_type=RetestSessionDeps,
         output_type=[ConcludeOutput, AwaitOperator, DeferredToolRequests],
-        instructions=_INSTRUCTIONS,
+        instructions=_BASE_INSTRUCTIONS,
         retries=_MAX_TOOL_RETRIES,
         defer_model_check=True,
     )
+
+    @agent.instructions
+    def _mode_guidance(ctx: RunContext[RetestSessionDeps]) -> str:
+        """Append the persona for this turn's mode (ADR-0039).
+
+        Evaluated per run against freshly-built deps, so a live Auto-run toggle
+        switches the agent between driving itself to a verdict (autonomous) and
+        doing one action then handing back (guided) on its very next turn.
+        """
+        return _AUTONOMOUS_GUIDANCE if ctx.deps.free_launch else _GUIDED_GUIDANCE
 
     @agent.tool(requires_approval=True)
     def run_command(
