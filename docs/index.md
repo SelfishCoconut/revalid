@@ -44,8 +44,12 @@ extraction, then LLM structuring — FR-01/FR-03), a DefectDojo-style JSON expor
 (pure schema mapping, no LLM — FR-02), or manual entry (the escape hatch when a
 model cannot reliably ingest a report — ADR-0020). All three land on a `ready`
 report with findings attached, so everything downstream is identical. Every
-finding is enriched with a CVSS code and a MITRE ATT&CK mapping, inferred and
-flagged as such when the source report is silent (FR-19, ADR-0037).
+finding carries a CVSS code and a MITRE ATT&CK mapping, and the diagram is
+always readable off the `inferred` flag: stated in the report or typed by the
+operator reads `false`, derived by the model reads `true`. The PDF door derives
+one automatically (it comes inside the extraction call); the two LLM-free doors
+copy a stated code, let you type one, and derive only when you ask with
+`enrich=true` (FR-19, ADR-0037).
 
 **Correct what the machine got wrong.** Findings are versioned, never
 overwritten: version 1 is what the model proposed, and each operator correction

@@ -72,8 +72,10 @@ flowchart TD
     A[PDF upload<br/>POST /api/reports] -->|202, background task| B[read_pdf → extract_report<br/>LLM, FR-01/FR-03]
     C[DefectDojo JSON<br/>POST /api/findings/import] --> D[schema mapping, no LLM<br/>FR-02]
     E[Manual entry<br/>POST /api/reports/manual] --> D
-    B --> F[persist findings + CVSS/MITRE enrichment FR-19]
+    B --> N[CVSS/MITRE enrichment FR-19<br/>inside the extraction call]
+    N --> F[persist findings]
     D --> F
+    D -.->|opt in: enrich=true| N
     F --> G[report status → ready]
     B -->|PdfError or any exception| H[report status → failed + error recorded]
 ```
@@ -87,9 +89,24 @@ loop, so a Stop (or a delete) interrupts the in-flight call immediately — not 
 between candidates, which never helped when a single call wedged (#206). Document
 metadata extraction is best-effort and can never fail the report.
 
-Every finding, whichever door it came through, is enriched with a CVSS code and a
-MITRE ATT&CK mapping, inferred when the source report does not state them
-(FR-19, ADR-0037).
+Every finding carries a CVSS code and a MITRE ATT&CK mapping (FR-19, ADR-0037),
+but *how* it gets one depends on the door, and the difference is recorded on the
+`inferred` flag rather than hidden:
+
+| Where it came from | Which door | Provenance |
+|---|---|---|
+| The report states it | PDF (read during extraction), or a DefectDojo `cvssv3` | `inferred=false` |
+| The operator types it | manual entry, or the finding editor afterwards | `inferred=false` |
+| The model derives it | PDF automatically; JSON/manual **only** on `enrich=true` | `inferred=true` |
+
+On the PDF door enrichment is not a separate step — `extract.py` asks for `cvss`
+and `mitre` in the same schema-validated response as the rest of the finding, so
+it costs nothing extra. The JSON and manual doors make no model call at all, so
+there a derivation has to be asked for: `?enrich=true` on the import, `"enrich":
+true` in the manual payload (issues #233/#237). Left off, **no agent is invoked**,
+which is what keeps those doors deterministic, instant and free. Enrichment only
+ever fills fields that are *empty*, so a stated or typed value is never
+overwritten by a derived one.
 
 !!! tip "Seeding data: use manual ingestion"
     For development, demos and walking the flow by hand, seed with **manual
@@ -408,7 +425,7 @@ exercisable with no network and no daemon.
 | `app.py` | FastAPI wiring: routes, dependencies, background tasks |
 | `pdf.py`, `extract.py` | PDF text extraction (pdfplumber) → LLM finding extraction |
 | `ingest.py` | DefectDojo-style schema mapping (no LLM); backs import *and* manual entry |
-| `findings.py` | finding persistence, versions, notes, CVSS/MITRE enrichment |
+| `findings.py` | finding persistence, versions, notes (the taxonomy is stored here, never derived here) |
 | `domain.py` | the typed core: `Finding`, statuses, event kinds, evidence, verdicts |
 | `retest_session.py` | the orchestrator: lifecycle, transcript, gate, verdicts |
 | `retest_agent.py` | the Pydantic AI agent and its two tools |
