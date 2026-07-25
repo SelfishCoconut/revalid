@@ -922,7 +922,7 @@ def run_first_step(
     Docker error) and :func:`~revalid.retest_session.start_and_step` calls
     ``sandbox.start()`` outside its own guard, so both are wrapped here. On any
     failure the sandbox (if one was created) is best-effort torn down and the
-    session is settled to ``error`` — never stranded in ``starting``.
+    session is settled to ``error`` — never stranded in ``working``.
 
     It also **seeds the goal** (FR-17 6b-ii): a caller-supplied ``initial_goal``
     (a goal drafted before the session started, FR-17 6b-iii-b) is used verbatim;
@@ -934,7 +934,7 @@ def run_first_step(
     Args:
         sessions: The app's session factory (each task opens a fresh session).
         registry: The process-local live-session registry.
-        session_id: The already-created (``starting``) retest session to drive.
+        session_id: The already-created (``working``) retest session to drive.
         agent: The built retest agent (a stand-in model in tests).
         make_sandbox: The session-scoped sandbox factory.
         finding: The finding to retest — the agent's goal is derived from it.
@@ -1068,8 +1068,8 @@ def run_message(
 
     * ``idle`` — provision the sandbox and run the first turn, message folded into the
       opening prompt.
-    * ``awaiting_operator`` — the agent handed back (a reply, a guided report, "steer
-      me"); resume it with the message.
+    * ``awaiting_operator`` — the agent handed back (a reply, a guided report, "I've
+      exhausted my options"); resume it with the message.
     * ``stopped`` — resume the paused session with the message.
     * ``awaiting_command`` — a command awaits approval; the message withdraws it and
       steers the agent (Claude Code's "type at the permission prompt").
@@ -1303,11 +1303,11 @@ def _seed_deferred_session(
     from the transcript.
 
     The ``idle`` state itself is recorded too. The console derives a session's
-    status from the latest ``state_change`` event and falls back to ``starting``
+    status from the latest ``state_change`` event and falls back to ``working``
     when the transcript holds none — so without this an idle session read as
     "Working", complete with a thinking indicator, and never offered its wake
     action. The transcript is the source of truth for state (ADR-0025), so the
-    starting state belongs in it rather than being inferred.
+    idle state belongs in it rather than being inferred.
     """
     set_status(session, session_id, RetestSessionStatus.IDLE)
     scope = endpoints if endpoints is not None else finding.affected_endpoints
@@ -1919,7 +1919,7 @@ def _register_free_launch_route(
         """Toggle free-launch mode on a live session (FR-17 Slice 5).
 
         Enabling auto-approves a pending command and lets the agent's commands
-        auto-run (plan changes stay gated); disabling re-arms the per-command
+        auto-run; disabling re-arms the per-command
         gate. Runs in the background; a no-op if the session is no longer live.
         """
         background.add_task(run_free_launch, sessions, registry, session_id, body.enabled)
@@ -1939,9 +1939,9 @@ def _register_guidance_routes(
     def continue_route(session_id: int, background: BackgroundTasks) -> dict[str, str]:
         """Keep going on a paused session (ADR-0034 "Keep going").
 
-        Resumes the agent — a held command re-opens its gate, an exhausted-options
-        pause re-runs the agent with any queued guidance. Runs in the background; a
-        no-op unless the session is paused with a live agent.
+        Resumes the agent from an ``awaiting_operator`` hand-back, re-running it with
+        any queued goal/chat guidance. Runs in the background; a no-op unless the
+        session is handed back with a live agent.
         """
         background.add_task(run_continue, sessions, registry, session_id)
         return {"status": "accepted"}

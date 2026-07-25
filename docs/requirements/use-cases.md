@@ -106,9 +106,9 @@ paths are where the design's claims actually live.
 |---|---|
 | **Use case** | UC-6 — Run a gated retest session |
 | **Actor** | Auditor (primary); LLM backend and authorised target (secondary) |
-| **Requirement** | FR-17 (AC1–AC4, AC26–AC29) |
+| **Requirement** | FR-17 (AC1–AC4, AC26–AC31) |
 | **Precondition** | A finding exists and a retest goal has been set. Docker is available and the sandbox image is built. |
-| **Postcondition** | Either a verdict is recorded against the finding with pinned evidence, or the session ends without one — never a verdict the auditor did not authorise. |
+| **Postcondition** | Either a verdict is recorded against the finding with pinned evidence, or the session ends without one — never a verdict the auditor did not authorise. A recorded verdict remains **withdrawable** (ADR-0043). |
 
 **Main success scenario**
 
@@ -129,11 +129,12 @@ paths are where the design's claims actually live.
 | 4a | The auditor never approves | Nothing runs. The suspension is structural — a deferred tool call, not a policy check — so there is no path from proposal to execution that bypasses step 5. |
 | 5a | The auditor rejects with a reason | The agent resumes with the denial and reconsiders. |
 | 5b | The auditor types a message instead of deciding | The pending command is **withdrawn** and the agent re-runs with the message — typing at the permission prompt (ADR-0042). |
-| 7a | The agent runs out of options | It hands back rather than guessing. `inconclusive` is never written as a verdict by the agent; the sandbox stays alive and the auditor steers or concludes (ADR-0034). |
+| 7a | The agent runs out of options | It hands back rather than guessing. `inconclusive` is never written as a verdict by the agent; the sandbox stays alive and the console **waits** — it prompts for nothing — while the auditor steers or concludes in their own time (ADR-0034/0046). |
 | 8a | The agent believes it knows the answer | Under the default guided mode it offers a *recommendation*; only the auditor records the verdict (ADR-0040). |
 | 8b | The auditor turns on Auto-run | The agent drives itself to a determination, auto-approving its own commands. The egress lock is unaffected — this relaxes the gate, never the containment (ADR-0029). |
 | 2a | The scope is an online host | The sandbox is provisioned behind a per-session **L3 egress gateway** (an `iptables` IP-allowlist in a helper container it cannot alter) instead of the lab network, and **fails closed** if that cannot be done (ADR-0045). |
-| * | The auditor stops, restarts or ends the session | Available at any live point; a stop keeps the sandbox alive so work can resume (ADR-0039). |
+| 9a | The auditor recorded the verdict prematurely | **Reopen** withdraws it from the queryable projection and returns the session to `idle`; the verdict and its cancellation both stay in the transcript, so the audit still sees the full history (ADR-0043). |
+| * | The auditor stops, restarts, concludes or ends the session | Available at any live point — **Conclude** is a permanent control, never gated by the agent having handed back (ADR-0039, ADR-0046); a stop keeps the sandbox alive so work can resume. |
 
 Note what the exception table does *not* contain: a path where the system decides
 something on the auditor's behalf. That is the requirement FR-17 is really
@@ -149,7 +150,7 @@ rather than as a permission check.
 | UC-3 Enter a report manually | FR-02 | ADR-0020 |
 | UC-4 Correct and annotate a finding | FR-16 | ADR-0024 |
 | UC-5 Set the retest goal | FR-17 | ADR-0032 |
-| UC-6 Run a gated retest session | FR-17 | ADR-0025, ADR-0040, ADR-0042 |
+| UC-6 Run a gated retest session | FR-17 | ADR-0025, ADR-0040, ADR-0042, ADR-0043, ADR-0046 |
 | UC-7 Approve or reject a command | FR-17 | ADR-0025 |
 | UC-8 Run a command personally | FR-17 | ADR-0026 |
 | UC-9 Steer the agent by message | FR-17 | ADR-0028, ADR-0042 |

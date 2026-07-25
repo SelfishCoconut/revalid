@@ -1,7 +1,7 @@
 """revalid — AI-driven revalidation of pentest findings.
 
-Parses pentest reports, extracts findings and reproduction steps, and
-re-executes them against authorized lab targets to verify applied fixes.
+Parses pentest reports, extracts findings and reproduction steps, then drives a
+human-gated agentic retest against a contained target to verify applied fixes.
 """
 
 from importlib.metadata import version

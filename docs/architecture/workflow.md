@@ -213,8 +213,10 @@ observes that it timed out and can retry with a narrower scope.
 
 The operator owns the session's lifecycle (issue #150): besides approving each
 command they can **Start** a deferred session, **Stop** a running one (a
-cooperative pause that keeps the sandbox alive), **Resume** it, **Restart** into
-a fresh attempt, or **Conclude** it themselves at any live point. Conclude is a
+cooperative pause that keeps the sandbox alive), pick it back up by **messaging
+it** — there is no Resume button, because talking to a parked agent is what
+continues it (#163) — **Restart** into a fresh attempt, or **Conclude** it
+themselves at any live point. Conclude is a
 *permanent* control, present in every live state (#243) — the retest is over when
 the operator says so, not when the agent invites them to end it.
 
@@ -233,9 +235,11 @@ stateDiagram-v2
     working --> stopped: operator Stop
     stopped --> working: operator Resume
     stopped --> awaiting_command: a message picks it back up
-    awaiting_operator --> concluded: operator concludes manually
     working --> concluded: ConcludeOutput(fixed | still_open) — free-launch only
-    stopped --> concluded: operator concludes manually
+    awaiting_operator --> concluded: operator concludes
+    awaiting_command --> concluded: operator concludes
+    stopped --> concluded: operator concludes
+    working --> concluded: operator concludes — Conclude is permanent, every live state (ADR-0046)
     working --> error: unhandled failure
     concluded --> idle: operator reopens — the verdict is withdrawn (ADR-0043)
     concluded --> [*]
@@ -342,7 +346,8 @@ opening a second conversation.
 | **Stop / Resume** | `.../stop`, `.../resume` | cooperatively pause a running session (sandbox kept alive) and continue it (issue #150) |
 | **Restart model** | `.../restart-model` | aborts a wedged in-flight turn and re-runs it — unstick a frozen model (ADR-0039); keeps the session, sandbox, goal and history (distinct from Restart) |
 | **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
-| Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes an `awaiting_operator` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
+| Keep going | `.../continue` | resumes an `awaiting_operator` hand-back. **API-level only — there is no button**: replying in the composer is what resumes the agent (#163) |
+| **Conclude** | `.../conclude` | writes the operator's own verdict. A **permanent** control, reachable from every live state — including mid-turn and at the approval gate — never gated by the agent having handed back (ADR-0046) |
 | End it | `.../end` | terminal; sandbox torn down |
 | **Reopen** | `.../reopen` | the one way *back* out of a terminal state: withdraws a `concluded` session's verdict and returns it to `idle` so testing can continue (ADR-0043) |
 
@@ -355,9 +360,9 @@ verdict unattended. In **guided mode** the agent never self-concludes — after 
 approved command it parks in `awaiting_operator` with its next suggestion, and a
 determination is surfaced as a verdict *recommendation* for the operator to
 confirm, not self-recorded (ADR-0040). An `inconclusive` result is **never**
-written as a verdict in either mode: the session pauses in `awaiting_operator`
-with the agent's reason, keeps the sandbox alive, and asks the operator to steer
-or to conclude themselves (ADR-0034/0042). A machine that has run out of ideas is
+written as a verdict in either mode: the session parks in `awaiting_operator`
+with the agent's reason, keeps the sandbox alive, and waits — it does not ask the
+operator for anything (ADR-0034/0042/0046). A machine that has run out of ideas is
 not evidence that a vulnerability is fixed.
 
 When a real determination is reached, `record_verdict` writes a `VerdictRecord`
@@ -436,7 +441,7 @@ exercisable with no network and no daemon.
 | `retest_session.py` | the orchestrator: lifecycle, transcript, gate, verdicts |
 | `retest_agent.py` | the Pydantic AI agent and its two tools |
 | `sandbox.py` | `Sandbox` protocol, `DockerSandbox` (egress-locked), `FakeSandbox` |
-| `scope.py` | parses a scope endpoint to the host the sandbox is provisioned against (ADR-0041) |
+| `scope.py` | parses a scope endpoint to the host the sandbox is provisioned against (ADR-0041/0045) |
 | `deltas.py` | transient, never-persisted channel for the model's reasoning tokens mid-turn |
 | `reports_chat.py` | read-only corpus Q&A agent + chat threads |
 | `audit.py`, `export.py`, `eval.py` | re-derivation, versioned export, FR-15 scoring |

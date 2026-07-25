@@ -357,7 +357,7 @@ export function getRetestSession(id: number): Promise<RetestSession> {
 
 /**
  * Toggle free-launch mode on a live session (FR-17 Slice 5). Enabling
- * auto-approves the agent's commands (plan changes stay gated) and drives any
+ * auto-approves the agent's commands and drives any
  * pending command; disabling re-arms the per-command gate.
  */
 export function setFreeLaunch(id: number, enabled: boolean): Promise<{ status: string }> {

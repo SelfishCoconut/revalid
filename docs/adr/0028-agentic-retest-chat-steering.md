@@ -1,7 +1,12 @@
 # 0028. Agentic retest chat steering & Q&A (FR-17 Slice 4)
 
 Date: 2026-07-16
+
 Status: accepted
+> **Superseded in part by [0042](0042-one-voice-five-states-over-guided-mode.md):**
+> the parallel read-only Q&A agent this ADR introduced is deleted — one agent answers
+> every message, queued to the next turn boundary. The pure-queue steering model and
+> the non-gated `respond` tool are unchanged.
 ## Context
 
 FR-17 Slice 4 (epic [#87](https://github.com/SelfishCoconut/revalid/issues/87),

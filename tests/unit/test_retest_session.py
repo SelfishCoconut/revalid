@@ -552,7 +552,7 @@ def test_conclude_session_records_operator_verdict_and_tears_down() -> None:
         s = rs.create_session(session, finding_id=fid, model="m")
         box = _echo_box()
         agent = build_retest_agent(streaming(script_conclude_inconclusive))
-        start_and_step(session, registry, s.id, agent, box, "Retest.")  # pauses (needs_guidance)
+        start_and_step(session, registry, s.id, agent, box, "Retest.")  # hands back
         rs.conclude_session(
             session, registry, s.id, VerdictStatus.INCONCLUSIVE, "I checked; can't tell"
         )

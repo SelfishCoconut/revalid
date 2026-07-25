@@ -123,7 +123,8 @@ class AwaitOperator(BaseModel):
     The turn ends without a command or a verdict: the agent answered the operator
     conversationally (a greeting, a small-talk reply, an acknowledgement) and is
     now waiting for them, sandbox kept alive. Lighter than an ``inconclusive``
-    conclusion — it is not "I'm stuck, please guide me", just "your move". The
+    conclusion — it is not "I'm stuck, please guide me", just a pause: the agent has
+    said its piece and waits. The
     orchestrator surfaces ``message`` as an agent chat bubble and parks the session
     in ``awaiting_operator``; the operator's next message resumes it.
     """
@@ -269,8 +270,8 @@ def build_retest_agent(
         """Send a short prose message to the operator (e.g. answer a question).
 
         Use this to reply to the operator or give a brief status note — not to
-        narrate every step. It runs nothing; after it you continue with your
-        plan, a command, or a verdict.
+        narrate every step. It runs nothing; after it you continue with a command
+        or a verdict.
 
         Args:
             ctx: The run context carrying the message-emit callback.

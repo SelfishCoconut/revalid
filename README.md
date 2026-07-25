@@ -77,7 +77,8 @@ Every screen below is a real capture of the running tool.
 <div align="center">
 <img src="assets/screen-cockpit.png" alt="Retest cockpit — gated agentic console" width="880">
 <br/><sub><b>The cockpit</b> — the agent reasons, proposes a command, and waits. Goal on top, gated
-commands and the verdict in the conversation, a read-only terminal below.</sub>
+commands and the verdict in the conversation, and below them a terminal that shows executed
+output and takes commands of your own at its <code>operator$</code> prompt.</sub>
 </div>
 
 <br/>

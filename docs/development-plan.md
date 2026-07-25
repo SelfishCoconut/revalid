@@ -98,7 +98,7 @@ coverage, authored-diagram drift, missing ADRs) on PRs, and
 
 | Level | Marker | Contract |
 |---|---|---|
-| `tests/unit/` | — | no I/O. LLM code uses Pydantic AI `TestModel`/`FunctionModel`; Docker is replaced by `FakeSandbox`. Coverage is measured here. |
+| `tests/unit/` | — | no *external* I/O: no network, no Docker, no LLM provider, no API key. LLM code uses Pydantic AI `TestModel`/`FunctionModel`; Docker is replaced by `FakeSandbox`. An in-process SQLite database (usually in-memory) and a `TestClient` over the ASGI app **are** allowed here — they are deterministic and need nothing installed — which is why API-surface tests live at this level and why coverage is measured here. |
 | `tests/integration/` | `integration` | real component wiring and real I/O, fakes only at the outermost edge. Still no API key, still deterministic. |
 | `tests/system/` | `system` | the full flow against the dockerized lab. Heavy — nightly and on demand, not per PR. |
 

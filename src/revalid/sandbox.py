@@ -525,7 +525,7 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         (124 on coreutils, 143/SIGTERM on busybox); ``run_command`` surfaces that to
         the agent, which chose the limit and can retry with a narrower scope. Without
         this, a hanging or unbounded command (e.g. an nmap sweep, or one blocked on
-        stdin) would wedge the session at ``running_command`` forever.
+        stdin) would wedge the session at ``working`` forever.
         """
         import time
 

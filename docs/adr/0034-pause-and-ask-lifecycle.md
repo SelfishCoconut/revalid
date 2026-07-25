@@ -7,6 +7,13 @@ Status: accepted
 > step budget) is removed. The only remaining trigger is trigger 2 — the agent
 > handing back after exhausting its options. `continue` no longer raises a budget;
 > it just resumes.
+>
+> **Amended by [0042](0042-one-voice-five-states-over-guided-mode.md) and
+> [0046](0046-handed-back-console-waits.md):** the `needs_guidance` state named
+> throughout this ADR folded into `awaiting_operator`, and the console no longer
+> renders a prompt at that pause — the agent's message is the hand-back and Conclude
+> is a permanent control. The substance stands: the session never gives up, the
+> sandbox stays alive, and only the operator records a verdict.
 
 ## Context
 
