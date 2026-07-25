@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests._retest_helpers import egress_probe_command
 
 from revalid.sandbox import (
     CommandResult,
@@ -20,7 +21,6 @@ from revalid.sandbox import (
     _teardown_by_name,
     dns_resolver,
     egress_firewall_script,
-    egress_probe_command,
     gateway_container_name,
     internal_network_name,
     is_lab_scope,

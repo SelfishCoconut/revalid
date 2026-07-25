@@ -23,6 +23,17 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+      // A size ceiling, so the SPA has one at all (issue #253). The backend is held to
+      // xenon --max-absolute C and "refactor, don't suppress" (CLAUDE.md), while the
+      // most-reshaped file here — the retest console, eight ADRs in nine days — grew to
+      // a single ~900-line component with nothing to stop it. This is deliberately set
+      // just above that file rather than at a virtuous number: it freezes the worst case
+      // instead of demanding an immediate refactor of a screen that works and has been
+      // validated. Lowering it is the point of #253; raising it needs a reason.
+      "max-lines-per-function": [
+        "error",
+        { max: 950, skipBlankLines: false, skipComments: false },
+      ],
     },
   },
   {
@@ -30,6 +41,8 @@ export default tseslint.config(
     files: ["**/*.test.{ts,tsx}", "src/test/**/*.{ts,tsx}"],
     rules: {
       "react-refresh/only-export-components": "off",
+      // Test suites are long by nature: one describe block per module, many cases.
+      "max-lines-per-function": "off",
     },
   },
 );

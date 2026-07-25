@@ -422,10 +422,6 @@ class LiveSession:
     #: is unaffected. Toggled live by ``set_free_launch``; the loop lives in
     #: ``_advance``, which also delivers queued operator messages (ADR-0042).
     free_launch: bool = False
-    #: The agent handed control back (ADR-0034/0042): a reply, a guided report, a
-    #: recommendation, or "I'm stuck". Set by ``_await_operator``, cleared by
-    #: ``continue_session``; the free-launch loop stops while it is ``True``.
-    awaiting_guidance: bool = False
     #: The operator pressed Stop (issue #150): a cooperative pause. Set by
     #: ``stop_session``, cleared by ``resume_session``. An in-flight step that
     #: finishes while this is ``True`` parks the session in ``stopped`` instead of
@@ -777,15 +773,13 @@ def _await_operator(
     next step, recommended a verdict for the operator to confirm, or said it has
     exhausted its options. ``message`` is surfaced as an ordinary ``agent_message``
     and the session moves to the non-terminal ``AWAITING_OPERATOR`` state — the
-    sandbox stays alive, the free-launch loop halts on ``awaiting_guidance`` (reused
-    as the generic "handed back" flag), and the operator's next message resumes it
-    (:func:`continue_session`).
+    sandbox stays alive and the operator's next message resumes it
+    (:func:`continue_session`). The persisted status is the whole signal: ``_advance``
+    reads it to decide whether to keep driving, so there is no in-memory "handed back"
+    flag to keep in step with it.
     """
     append_event(session, session_id, SessionEventKind.AGENT_MESSAGE, {"text": message})
     set_status(session, session_id, RetestSessionStatus.AWAITING_OPERATOR)
-    live = registry.get(session_id)
-    if live is not None:
-        live.awaiting_guidance = True
 
 
 def _mark_delivered(session: Session, session_id: int, messages: list[str]) -> None:
@@ -1472,7 +1466,6 @@ def continue_session(session: Session, registry: SessionRegistry, session_id: in
     live = registry.get(session_id)
     if live is None:
         return
-    live.awaiting_guidance = False
     _resume_run(session, registry, session_id, live)
     _advance(session, registry, session_id)
 

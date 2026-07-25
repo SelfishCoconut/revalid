@@ -10,12 +10,3 @@ from importlib.metadata import version
 # installed package metadata — so a release bump never drifts from the code
 # (and the FR-12 export / NFR-02 lineage report the real version).
 __version__ = version("revalid")
-
-
-def health() -> str:
-    """Return a static liveness string.
-
-    Placeholder for the walking skeleton: proves the package imports, the
-    test pyramid runs, and the docs pipeline picks up public symbols.
-    """
-    return "revalid ok"

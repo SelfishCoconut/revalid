@@ -609,7 +609,7 @@ describe("RetestSession", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 
-  it("renders a distinct ended banner citing the agent's reason", () => {
+  it("renders a retired given_up session as an ordinary verdict (#250)", () => {
     vi.mocked(hook.useRetestSession).mockReturnValue({
       events: [
         {
@@ -626,10 +626,11 @@ describe("RetestSession", () => {
 
     renderAt(1);
 
-    expect(screen.getByText(/retest ended/i)).toBeInTheDocument();
+    // Nothing writes `given_up` any more, so the console carries no branch for it:
+    // such a row reads as terminal and shows its recorded verdict like any other.
+    expect(screen.getByText("Verdict")).toBeInTheDocument();
     expect(screen.getByText("no exploit path found")).toBeInTheDocument();
-    // Not rendered as an ordinary "Verdict" box.
-    expect(screen.queryByText("Verdict")).not.toBeInTheDocument();
+    expect(screen.queryByText(/retest ended/i)).not.toBeInTheDocument();
   });
 
   function mockPaused(reason = "ran that — I'd try /rest next"): void {

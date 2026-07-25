@@ -295,3 +295,14 @@ def script_run_then_conclude_noting_message(
             )
         ]
     )
+
+
+def egress_probe_command(host: str) -> str:
+    """A command that fails iff ``host`` is unreachable — the egress-lock probe.
+
+    Test support, not production code (issue #251): it exists only so the unit and
+    system suites can assert that a host *outside* the session's scope cannot be
+    reached from inside the sandbox. It lived in ``revalid.sandbox`` and was therefore
+    published in the generated API reference despite having no production caller.
+    """
+    return f"curl --max-time 5 --silent --show-error --output /dev/null https://{host}"

@@ -4,7 +4,6 @@ import type { SessionEvent } from "../api/client";
 import {
   autoApprovedSeqs,
   currentFreeLaunch,
-  givenUpReason,
 } from "./sessionDerivations";
 
 const ev = (kind: string, payload: Record<string, unknown> = {}, seq = 0): SessionEvent => ({
@@ -23,16 +22,6 @@ describe("currentFreeLaunch", () => {
   });
   it("falls back to the initial value with no toggle events", () => {
     expect(currentFreeLaunch([ev("command_approved")], true)).toBe(true);
-  });
-});
-
-describe("givenUpReason", () => {
-  it("returns the verdict rationale of a given-up session", () => {
-    const events = [ev("verdict", { status: "inconclusive", rationale: "no exploit path found" })];
-    expect(givenUpReason(events)).toBe("no exploit path found");
-  });
-  it("returns null when no verdict is present", () => {
-    expect(givenUpReason([ev("command_output")])).toBeNull();
   });
 });
 

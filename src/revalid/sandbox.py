@@ -101,11 +101,6 @@ def internal_network_name(session_id: int) -> str:
     return f"revalid-retest-{session_id}"
 
 
-def egress_probe_command(host: str) -> str:
-    """Return a command that fails iff ``host`` is unreachable (egress-lock test)."""
-    return f"curl --max-time 5 --silent --show-error --output /dev/null https://{host}"
-
-
 def lab_base_url() -> str:
     """Return the lab target base URL (``$REVALID_LAB_BASE_URL`` or the default)."""
     return os.environ.get(LAB_BASE_URL_ENV, DEFAULT_LAB_BASE_URL)
