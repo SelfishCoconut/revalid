@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import pytest
 from pydantic_ai import (
     Agent,
     AgentRunResult,
@@ -199,3 +200,57 @@ def test_respond_tool_emits_agent_message_and_run_continues() -> None:
     assert prose == ["the 500 was the WAF rejecting the payload"]
     assert isinstance(result.output, ConcludeOutput)
     assert box.commands == []
+
+
+def _instructions_seen_by_the_model(scope_hosts: tuple[str, ...]) -> str:
+    """Run one turn and return the instructions the model actually received (#247).
+
+    Asserted at this level rather than against the helper alone: the bug being pinned
+    was that a *true* per-session fact never reached the prompt, so the test has to
+    read what the model was told, not what a formatter returned.
+    """
+    captured: list[str] = []
+
+    def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        # Pydantic AI carries instructions on the request itself, not as a prompt part.
+        captured.append(getattr(messages[0], "instructions", None) or "")
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=info.output_tools[0].name,
+                    args={"status": "fixed", "rationale": "done"},
+                )
+            ]
+        )
+
+    agent = build_retest_agent(streaming(script))
+    agent.run_sync(
+        "Retest it.",
+        deps=RetestSessionDeps(
+            sandbox=FakeSandbox([]), emit_output=lambda *_: None, scope_hosts=scope_hosts
+        ),
+    )
+    return captured[0]
+
+
+def test_lab_scope_is_told_only_the_lab_is_reachable() -> None:
+    """A lab session keeps the original, true claim: nothing but the lab target."""
+    text = _instructions_seen_by_the_model(())
+
+    assert "ONLY the lab target" in text
+    assert "never the internet" in text
+
+
+def test_online_scope_is_told_its_target_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An online session must NOT be told the internet is unreachable (issue #247).
+
+    Before this fix the instructions asserted "ONLY the lab target — never the
+    internet" for *every* session, so on an ADR-0045 online retest the model was told
+    its target could not be reached while the sandbox could in fact reach it.
+    """
+    monkeypatch.setenv("REVALID_LAB_BASE_URL", "http://revalid-juice-shop:3000")
+    text = _instructions_seen_by_the_model(("www.hackthissite.org",))
+
+    assert "www.hackthissite.org" in text  # named as reachable and in scope
+    assert "never the internet" not in text  # the false claim is gone
+    assert "unreachable by construction" in text  # everything else still is

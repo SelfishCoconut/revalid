@@ -1312,3 +1312,44 @@ def test_reopen_is_a_noop_when_not_concluded() -> None:
     # ADR-0042 collapsed `starting` into `working`; a non-deferred session is
     # created straight into it, and a no-op reopen must leave that untouched.
     assert s.status == RetestSessionStatus.WORKING.value
+
+
+def test_online_scope_reaches_the_agents_instructions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The session's scope is wired through to what the model is told (issue #247).
+
+    The agent-level test pins the wording; this pins the *wiring*, which is where the
+    bug actually lived — the reachability claim was a build-time constant, so a session
+    provisioned against an online host (ADR-0045) still told the model the internet was
+    unreachable. Asserted through `start_and_step`, the real orchestrator entry point.
+    """
+    monkeypatch.setenv("REVALID_LAB_BASE_URL", "http://revalid-juice-shop:3000")
+    seen: list[str] = []
+
+    def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen.append(getattr(messages[0], "instructions", None) or "")
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=info.output_tools[0].name,
+                    args={"status": "fixed", "rationale": "no longer reproducible"},
+                )
+            ]
+        )
+
+    sessions = session_factory(create_db_engine(IN_MEMORY))
+    registry = SessionRegistry()
+    with sessions() as session:
+        fid = _seed_finding(session)
+        s = rs.create_session(session, finding_id=fid, model="m", deferred=True)
+        rs.append_event(
+            session,
+            s.id,
+            SessionEventKind.TARGET_SET,
+            {"endpoints": ["https://www.hackthissite.org/"]},
+        )
+        start_and_step(
+            session, registry, s.id, build_retest_agent(streaming(script)), _echo_box(), "Retest."
+        )
+
+    assert "www.hackthissite.org" in seen[0]  # the scoped host is named as reachable
+    assert "never the internet" not in seen[0]  # and the false lab-only claim is gone
