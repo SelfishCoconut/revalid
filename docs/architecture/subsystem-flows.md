@@ -29,7 +29,8 @@ flowchart TB
 
     EX --> ENR["CVSS + MITRE ATT&CK enrichment<br/>copied when stated, inferred + flagged when not<br/>FR-19, ADR-0037"]
     ENR --> PERSIST["persist finding identity + version 1<br/>origin = extraction"]
-    MAP -->|"no taxonomy — set by hand<br/>in the finding editor"| PERSIST
+    MAP -->|"default: no model at all"| PERSIST
+    MAP -.->|"opt in — enrich=true<br/>one model call per finding"| ENR
     PERSIST --> READY(["report → ready"])
 
     PX -.->|"PdfError / any exception"| FAIL(["report → failed<br/>error recorded"])
@@ -52,16 +53,32 @@ fail a report.
 For development and demos, seed through **manual entry**: it skips the LLM, so
 seeding is deterministic, instant and free.
 
-The doors are *not* quite equal, and the difference is the FR-19 taxonomy.
-Enrichment is part of the extraction call — `extract.py` asks for `cvss` and
-`mitre` in the same schema-validated response as the rest of the finding — so
-only the PDF door produces them. `ingest.py` maps DefectDojo JSON and manual
-entry with no LLM at all and therefore no taxonomy: those findings land with
-empty `cvss`/`mitre`, and the only route to a taxonomy for them is the finding
-editor, where the operator sets both by hand and provenance becomes
-author-stated (`inferred=false`, issue #226). Worth knowing when reading an
-evaluation: a corpus seeded manually — as the FR-15 run was — has no inferred
-taxonomy in it at all.
+The doors differ in exactly one way, and it is the FR-19 taxonomy. On the PDF
+door enrichment is not a step at all: `extract.py` asks for `cvss` and `mitre` in
+the same schema-validated response as the rest of the finding, so it comes for
+free with a call that was happening anyway. The JSON and manual doors make no
+call, so for them a taxonomy has to be asked for.
+
+Two mechanisms cover that, and the split is deliberate (issue #233):
+
+- **Copying is not inferring.** A DefectDojo export that *states* a CVSS vector
+  and score has it mapped across unconditionally, `inferred=false` — pure schema
+  work, no model. A stated CWE is **not** mapped to ATT&CK: a weakness id is not a
+  technique id, and renaming one into the other would fabricate a claim.
+- **Deriving is opt-in.** `enrich=true` on the import (or the manual payload) runs
+  one taxonomy call per finding to fill what the source left empty. Everything it
+  fills is `inferred=true`, stamped server-side — the enrichment model's own output
+  schema has no `inferred` field, so it has no way to claim a source said it.
+
+Default-off is the point. `enrich=false` invokes **no agent at all**, which is
+what keeps manual entry the deterministic, instant, free seeding path for demos
+and tests, and keeps FR-02's "no LLM" property true rather than merely fast. A
+model that fails to produce a valid taxonomy costs that finding its taxonomy and
+nothing else: the import still lands, and the failure count comes back in the
+response instead of being swallowed.
+
+Worth knowing when reading an evaluation: a corpus seeded manually **without**
+the flag — as the FR-15 run was — contains no inferred taxonomy at all.
 
 ## Reports chat — read-only corpus Q&A (FR-18, ADR-0036)
 

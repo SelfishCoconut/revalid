@@ -40,7 +40,8 @@ def test_health(client: TestClient) -> None:
 def test_import_then_list_roundtrip(client: TestClient) -> None:
     response = client.post("/api/findings/import", json=SAMPLE_EXPORT)
     assert response.status_code == 200
-    assert response.json() == {"imported": 2}
+    # Zero counters: no `enrich` flag, so no model was invoked at all (#233).
+    assert response.json() == {"imported": 2, "enriched": 0, "enrichment_failed": 0}
 
     listed = client.get("/api/findings").json()
     assert [f["title"] for f in listed] == [

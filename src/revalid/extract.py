@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
@@ -80,6 +80,41 @@ class ExtractedFinding(BaseModel):
     reproduction_steps: tuple[str, ...]
     cvss: CvssCode = Field(default_factory=CvssCode)
     mitre: MitreMapping = Field(default_factory=MitreMapping)
+
+
+_TAXONOMY_INSTRUCTIONS = """\
+You classify a single penetration-test finding. You are given the finding as it
+was already recorded; return only its taxonomy, nothing else.
+
+- cvss_vector: a best-estimate CVSS v3.1 base vector for the finding
+  (e.g. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H).
+- cvss_base_score: that vector's 0-10 base score.
+- mitre_techniques: the MITRE ATT&CK technique IDs the finding maps to
+  (e.g. T1190, T1110), most applicable first.
+
+Judge only from the finding's title, description, impact and attack vector. If
+the finding genuinely cannot be assessed, return an empty vector and an empty
+technique list rather than guessing wildly — an empty answer is recorded as "no
+taxonomy", which is honest, whereas a wild guess is recorded as a real
+assessment.\
+"""
+
+
+class FindingTaxonomy(BaseModel):
+    """A finding's derived CVSS + ATT&CK classification (FR-19, opt-in enrichment).
+
+    Deliberately **without** an ``inferred`` flag: everything this model returns is
+    by definition the model's own derivation, so provenance is stamped server-side
+    (:func:`apply_taxonomy` sets ``inferred=True``) and the model has no way to
+    express "the report stated this". That is the same rule the finding editor
+    follows — a client, human or machine, never asserts provenance (ADR-0037).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    cvss_vector: str = ""
+    cvss_base_score: float | None = None
+    mitre_techniques: tuple[str, ...] = ()
 
 
 class Person(BaseModel):
@@ -187,6 +222,26 @@ class ExtractionReport(BaseModel):
     cancelled: bool = False
 
 
+class EnrichmentReport(BaseModel):
+    """Outcome of an opt-in taxonomy enrichment pass (FR-19, issue #233).
+
+    Attributes:
+        findings: The findings in input order, enriched where possible. A finding
+            whose model call failed is present, unchanged.
+        enriched: How many findings actually gained a CVSS vector or ATT&CK
+            techniques. Lower than ``len(findings)`` when some already had them.
+        failed: How many model calls failed schema validation. Non-zero means the
+            import succeeded but part of the taxonomy is missing — surfaced to the
+            operator rather than swallowed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    findings: tuple[Finding, ...]
+    enriched: int = 0
+    failed: int = 0
+
+
 class ExtractionRegistry:
     """Process-local cancel flags for in-flight extractions (issue #205).
 
@@ -250,6 +305,115 @@ class ExtractionRegistry:
         with self._lock:
             self._reasons.pop(report_id, None)
             self._runs.pop(report_id, None)
+
+
+def build_taxonomy_agent(
+    model: Model | KnownModelName | str | None = None,
+) -> Agent[None, FindingTaxonomy]:
+    """Build the opt-in CVSS/ATT&CK enrichment agent (FR-19, issue #233).
+
+    The PDF door gets its taxonomy inside the extraction call itself. The FR-02
+    JSON and manual doors are deliberately LLM-free, so for them enrichment is a
+    *separate, opt-in* pass driven by this agent — one call per finding, only when
+    the operator asks for it.
+
+    Args:
+        model: A Pydantic AI model instance or name. When omitted, the configured
+            backend is used (FR-13/ADR-0010); tests pass ``TestModel``/
+            ``FunctionModel``.
+
+    Returns:
+        An agent whose validated output is one :class:`FindingTaxonomy`.
+    """
+    return Agent(
+        model if model is not None else resolve_model(),
+        output_type=FindingTaxonomy,
+        instructions=_TAXONOMY_INSTRUCTIONS,
+        retries=_MAX_OUTPUT_RETRIES,
+        defer_model_check=True,
+    )
+
+
+def taxonomy_prompt(finding: Finding) -> str:
+    """Render the finding as the prompt the taxonomy agent classifies."""
+    return (
+        f"Title: {finding.title}\n"
+        f"Severity: {finding.severity.value}\n"
+        f"Description: {finding.description}\n"
+        f"Impact: {finding.impact}\n"
+        f"Attack vector: {finding.attack_vector}\n"
+        f"Affected endpoints: {', '.join(finding.affected_endpoints)}"
+    )
+
+
+def apply_taxonomy(finding: Finding, taxonomy: FindingTaxonomy) -> Finding:
+    """Fill a finding's empty CVSS/ATT&CK from ``taxonomy``, flagged as inferred.
+
+    **Never overwrites a stated value.** A finding that already carries a CVSS
+    vector or ATT&CK techniques — mapped verbatim from a DefectDojo export, or
+    typed by the operator — keeps them exactly, with their existing provenance.
+    Only the empty fields are filled, and what this fills is always
+    ``inferred=True``: it is the model's derivation, never a source's claim.
+
+    Args:
+        finding: The finding to enrich.
+        taxonomy: The model's derived classification.
+
+    Returns:
+        The finding with previously-empty taxonomy fields filled, or the original
+        object unchanged when there was nothing to fill.
+    """
+    update: dict[str, CvssCode | MitreMapping] = {}
+    if not finding.cvss.vector and taxonomy.cvss_vector:
+        update["cvss"] = CvssCode(
+            vector=taxonomy.cvss_vector, base_score=taxonomy.cvss_base_score, inferred=True
+        )
+    if not finding.mitre.techniques and taxonomy.mitre_techniques:
+        update["mitre"] = MitreMapping(techniques=taxonomy.mitre_techniques, inferred=True)
+    return finding.model_copy(update=update) if update else finding
+
+
+async def enrich_findings_async(
+    agent: Agent[None, FindingTaxonomy], findings: Sequence[Finding]
+) -> EnrichmentReport:
+    """Derive the missing CVSS/ATT&CK for each finding, one model call apiece.
+
+    A finding whose call fails schema validation (after Pydantic AI's retries) is
+    **left exactly as it was** and counted in ``failed`` rather than raising: an
+    import must not be lost because a small local model could not produce a CVSS
+    vector. The count is returned so the caller can surface it — a silently
+    unenriched import would look identical to one the operator never asked to
+    enrich.
+
+    Args:
+        agent: The agent from :func:`build_taxonomy_agent`.
+        findings: The findings to enrich, in order.
+
+    Returns:
+        The findings in the same order, plus how many were enriched and how many
+        model calls failed.
+    """
+    out: list[Finding] = []
+    enriched = 0
+    failed = 0
+    for finding in findings:
+        try:
+            result = await agent.run(taxonomy_prompt(finding))
+        except UnexpectedModelBehavior:
+            failed += 1
+            out.append(finding)
+            continue
+        updated = apply_taxonomy(finding, result.output)
+        enriched += updated is not finding
+        out.append(updated)
+    return EnrichmentReport(findings=tuple(out), enriched=enriched, failed=failed)
+
+
+def enrich_findings(
+    agent: Agent[None, FindingTaxonomy], findings: Sequence[Finding]
+) -> EnrichmentReport:
+    """Synchronous wrapper over :func:`enrich_findings_async` (the request path)."""
+    return asyncio.run(enrich_findings_async(agent, findings))
 
 
 def build_extraction_agent(

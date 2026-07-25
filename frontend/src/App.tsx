@@ -106,7 +106,7 @@ export function App() {
             <span aria-hidden="true">·</span>
             <span>AI-driven revalidation of pentest findings</span>
             <span aria-hidden="true">·</span>
-            <span>retests only ever hit allowlisted lab targets</span>
+            <span>retests only ever reach the domain you scoped</span>
           </div>
         </footer>
       </div>

@@ -83,20 +83,21 @@ export function GoalStage() {
         </div>
         <div className="space-y-3 p-4">
           <p className="text-sm text-dim">
-            The exact endpoint(s) the agent may hit. Set at launch — the egress-locked
-            sandbox is provisioned around this scope, so changing it means restarting the
-            retest.
+            The <span className="text-fg">domain(s)</span> the agent may reach. Containment
+            is enforced at the network layer, so what actually binds is the host — a path
+            narrows nothing. Set at launch: the egress-locked sandbox is provisioned around
+            this scope, so changing it means restarting the retest.
           </p>
           <div className="space-y-2">
             {endpoints.map((ep, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input
-                  aria-label={`target endpoint ${String(i + 1)}`}
+                  aria-label={`target domain ${String(i + 1)}`}
                   value={ep}
                   onChange={(e) => {
                     setEndpoints((xs) => xs.map((x, j) => (j === i ? e.target.value : x)));
                   }}
-                  placeholder="http://host:port/path"
+                  placeholder="example.com — or a full URL, the host is what binds"
                   className="min-w-0 flex-1 rounded border border-line bg-panel px-2 py-1 font-mono text-[13px] text-fg"
                 />
                 <Button
@@ -117,7 +118,7 @@ export function GoalStage() {
               setEndpoints((xs) => [...xs, ""]);
             }}
           >
-            + Add endpoint
+            + Add domain
           </Button>
         </div>
       </Panel>

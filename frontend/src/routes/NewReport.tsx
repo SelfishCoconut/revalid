@@ -20,7 +20,7 @@ const JSON_PLACEHOLDER = `{
       "title": "SQL injection in login",
       "severity": "high",
       "description": "…",
-      "endpoints": ["/rest/user/login"],
+      "endpoints": ["https://juice.example.com/#/login"],
       "steps_to_reproduce": "1. …\\n2. …"
     }
   ]
@@ -41,6 +41,9 @@ export function NewReport() {
   const [findings, setFindings] = useState<FindingDraft[]>([emptyFinding()]);
   const [jsonText, setJsonText] = useState("");
   const [localError, setLocalError] = useState("");
+  // Off by default: this door is the LLM-free path, and staying that way unless
+  // asked is the point of the flag (FR-19, issue #233).
+  const [enrich, setEnrich] = useState(false);
 
   function patchFinding(index: number, patch: Partial<FindingDraft>) {
     setFindings((current) => current.map((f, i) => (i === index ? { ...f, ...patch } : f)));
@@ -48,11 +51,16 @@ export function NewReport() {
 
   function submit(payload: ManualReportInput) {
     setLocalError("");
-    create.mutate(payload, {
-      onSuccess: (report) => {
-        navigate(`/reports/${String(report.id)}`);
+    create.mutate(
+      // The toggle wins over anything pasted into the JSON, so what the operator
+      // sees checked is what actually runs.
+      { ...payload, enrich },
+      {
+        onSuccess: (report) => {
+          navigate(`/reports/${String(report.id)}`);
+        },
       },
-    });
+    );
   }
 
   function submitForm() {
@@ -204,7 +212,7 @@ export function NewReport() {
                       onChange={(event) => {
                         patchFinding(index, { endpoints: event.target.value });
                       }}
-                      placeholder={"Endpoints (one per line)\n/rest/basket/2"}
+                      placeholder={"Domain(s), one per line\nhttps://juice.example.com/#/basket"}
                     />
                     <textarea
                       className={FIELD}
@@ -268,7 +276,23 @@ export function NewReport() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-line pt-4">
+            <label className="mr-auto flex items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={enrich}
+                onChange={(event) => {
+                  setEnrich(event.target.checked);
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-iris"
+              />
+              <span>
+                <span className="text-fg">Infer CVSS &amp; ATT&amp;CK</span>
+                <span className="block text-[12px] text-faint">
+                  One model call per finding. Off keeps this door LLM-free — instant and free.
+                </span>
+              </span>
+            </label>
             <Button
               variant="ghost"
               onClick={() => {
