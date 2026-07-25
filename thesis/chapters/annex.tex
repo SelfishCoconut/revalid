@@ -152,6 +152,80 @@ carried out from the browser:
   \emph{inconclusive}, together with the evidence that supports it.
 \end{enumerate}
 
+\section{The application in use}
+\label{sec:annex-ui}
+
+The figures below are screenshots of the running application, captured against the
+reference lab of Section~\ref{sec:annex-lab} with a local language-model backend.
+They follow the same path as the walkthrough above: the operator opens the console,
+reviews what the agent proposes, approves a command, and reads the evidence it
+returns.
+
+Figure~\ref{fig:ui-overview} is the entry point. The overview keeps one
+\emph{determination} per finding --- still-open, inconclusive or fixed --- above a
+severity profile of the loaded reports and the list of reports themselves, so the
+state of an engagement is legible at a glance before any retest is run.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-overview.png}}
+\caption[The overview]{The overview. One determination per finding (here none yet),
+the severity profile across the loaded reports, and the report list. The two reports
+are the evaluation inputs of Chapter~\ref{ch:evaluation}, loaded through the manual
+door.}
+\label{fig:ui-overview}
+\end{figure}
+
+Figure~\ref{fig:ui-console-gate} is the heart of the tool and of its safety claim:
+the retest console with the agent \emph{suspended} on a proposed command. The command
+and its one-line rationale are shown, the run cannot continue, and the only way
+forward is the operator's \emph{Approve} or \emph{Reject}. The scope the session is
+locked to is stated above; \emph{Conclude} is always available, so the operator can
+end the retest at any point rather than only when the agent offers to.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-gate.png}}
+\caption[The approval gate]{The retest console at the per-command gate. The agent has
+proposed a command to confirm the SQL-injection login bypass and \emph{suspended};
+nothing reaches the target until the operator approves. This is the interaction the
+whole design exists to enforce (FR-05, FR-17).}
+\label{fig:ui-console-gate}
+\end{figure}
+
+Figure~\ref{fig:ui-console-terminal} shows what an approved command returns: the
+console's terminal holds the \emph{real} captured output, here the administrator
+session token the Juice Shop login-bypass yields, which is the evidence a
+\emph{still-open} verdict is derived from. The two \texttt{operator\$} lines are the
+operator running a command directly (ADR-0026) rather than approving one the agent
+proposed --- one route among several the console offers, used here to address the
+target by its in-sandbox container name.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-terminal.png}}
+\caption[Captured evidence]{The console terminal after execution. The response
+carries a valid administrator authentication token, captured verbatim inside the
+sandbox --- the evidence a verdict is pinned to, not the agent's recollection of it.}
+\label{fig:ui-console-terminal}
+\end{figure}
+
+Figure~\ref{fig:ui-settings} shows the settings view, where the language-model
+backend is chosen at runtime: a local Ollama server, a hosted Claude model or an
+OpenAI-compatible endpoint, with the discovered models listed. This is the
+model-agnostic layer of the design (FR-13) as the operator sees it, and it is what
+makes the local-versus-hosted comparison of Chapter~\ref{ch:evaluation} a
+configuration change rather than a rebuild.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-settings.png}}
+\caption[Choosing the backend]{The settings view. The provider and model are chosen
+at runtime and take effect on the next run without a restart (FR-13); here a local
+Ollama server is selected and its models discovered.}
+\label{fig:ui-settings}
+\end{figure}
+
 \section{Offline demonstrations}
 \label{sec:annex-demos}
 
