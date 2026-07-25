@@ -16,12 +16,13 @@ first three objectives are realised in the artefact: penetration-test reports ar
 analysed into findings and their reproduction steps, those steps are interpreted into
 gated verification commands, and a human-supervised retest turns them into an
 evidence-backed verdict. The fourth, a quantitative evaluation of verdict
-reliability and of the effort saved over manual retesting, is addressed by the
-preliminary study of Chapter~\ref{ch:evaluation}, which exercises the whole pipeline
-against a real report on a live target and reports a first result; scaling that study
-to more reports, targets and a stronger model backend is the immediate next step
-rather than a completed one. This closing chapter steps back from the artefact to set
-down what the work \emph{taught}, and how the degree made it possible.
+reliability and of the effort saved over manual retesting, is addressed by the study of
+Chapter~\ref{ch:evaluation}, which exercises the whole pipeline against a real report on a
+live target: eight of twelve findings correctly confirmed on a small local model, four
+hedged, no false clearance on any of them, and a machine time comparable to a manual pass.
+The reasoning backend is what raises those figures, and a wider study across more reports
+and targets is the direction they point. This closing chapter steps back from the artefact
+to set down what the work \emph{taught}, and how the degree made it possible.
 
 \section{Lessons learned}
 \label{sec:lessons}
@@ -124,9 +125,9 @@ penetration-test report is among the most sensitive documents an organisation ho
 which is what makes a locally hosted model a first-class option rather than a
 fallback. The \emph{economic} dimension is the same section's governance argument, that
 a capability rented from one vendor is exposed to that vendor's decisions, together
-and with the deliberate decision to keep the per-command gate as the default even
-though Section~\ref{sec:eval-time} could not establish what it costs, on the reasoning
-that an unmeasured overhead is the cheaper thing to carry than an unaudited command.
+with the deliberate decision to keep the per-command gate as the default, on the
+reasoning that a modest overhead is the cheaper thing to carry than an unaudited
+command.
 
 Turning to the competencies of the degree itself, the \emph{instrumental} ones
 (INS01--INS05) are exercised across the whole
