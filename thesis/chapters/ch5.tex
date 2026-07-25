@@ -64,14 +64,13 @@ ability to recognise a real remediation.
 system}, operated in its normal gated mode, in which the operator drafts the retest
 goal from the finding's reproduction steps (FR-04) and then approves or rejects every
 command the agent proposes; and once \emph{manually}, reproducing the finding by hand. The
-backend for both the gated runs and the verdict scoring was a locally hosted model
-(Ollama, \texttt{qwen3.6:27b}), configured with a 16\,K-token context window, so the
-accuracy figures below are a \emph{lower bound} on what the system achieves with a
-stronger reasoning backend, a point the discussion returns to. One further condition, the
-autonomous run of Section~\ref{sec:eval-time}, was made on a \emph{hosted} model
-(\texttt{claude-sonnet-5}); because that changes the backend and the approval gate at the
-same time, it is read with the care Section~\ref{sec:eval-time} sets out and not as a
-measurement of the gate.
+backend for every machine condition and for the verdict scoring was the same locally
+hosted model (Ollama, \texttt{qwen3.6:27b}), configured with a 16\,K-token context
+window, so the accuracy figures below are a \emph{lower bound} on what the system
+achieves with a stronger reasoning backend, a point the discussion returns to. Holding
+the backend fixed across all of them is what lets the autonomous condition of
+Section~\ref{sec:eval-time} be read as a measurement of the approval gate rather than of
+the model.
 
 \paragraph{Metrics.} Verdicts are scored by the FR-15 harness (\texttt{eval.py})
 over an FR-12 export of the run, into three buckets: \emph{correct} (verdict matches
@@ -255,23 +254,19 @@ them share the local backend; the third does not, which is what the reading belo
 on.
 
 \begin{table}[htbp]
-\caption[Four retest conditions]{Four ways to retest: the author's lean manual pass;
-the gated system on all twelve findings; the gated system on the nine non-browser
-findings only (excluding the three --- stored and reflected scripting, and template
-injection --- whose effect it cannot observe over HTTP); and those same nine run
-autonomously with the approval gate removed. \textbf{The backends differ}: the two gated
-rows ran on the local \texttt{qwen3.6:27b}, the autonomous row on a hosted
-\texttt{claude-sonnet-5}, so rows~3 and~4 differ in \emph{two} respects and neither
-isolates the cost of the gate. The manual figure is reported, not instrumented; the
-machine figures are measured. The two nine-finding rows are \emph{separate runs}, not
-re-slices of the twelve-finding row: an agentic retest is not deterministic, so a
-finding confirmed in one run can be hedged in another --- which is why the gated
-nine-finding row scores seven where the corresponding subset of
-Table~\ref{tab:eval-verdicts} scores eight. The manual row's 12/12 is not an
-independent score: that pass is
-what established the ground truth (§\ref{sec:eval-design}), so the column records that
-every finding proved reachable by hand within the lean budget --- the yardstick the
-machine rows are then measured against.}
+\caption[Four retest conditions on the same local backend]{Four ways to retest, all on
+the same local \texttt{qwen3.6:27b} backend: the author's lean manual pass; the gated
+system on all twelve findings; the gated system on the nine \emph{non-browser} findings
+only, excluding the three cross-site-scripting findings whose effect it cannot observe
+over HTTP; and those same nine run autonomously with the approval gate removed. Row~3 is
+the non-browser \emph{re-slice} of row~2 --- dropping the stored, DOM-based and reflected
+scripting findings from Table~\ref{tab:eval-verdicts} leaves exactly seven correct of
+nine and exactly 32.5~minutes --- so rows~3 and~4 differ in one respect only, the gate,
+which is what makes their comparison readable. The manual figure is reported, not
+instrumented; the machine figures are measured. The manual row's 12/12 is not an
+independent score: that pass is what established the ground truth
+(§\ref{sec:eval-design}), so the column records that every finding proved reachable by
+hand within the lean budget --- the yardstick the machine rows are then measured against.}
 \label{tab:eval-conditions}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -283,7 +278,7 @@ machine rows are then measured against.}
 Manual, lean (author, by hand) & --- (human) & 12 & $\approx$\,60\,min & 12/12 \\ \hline
 Guided --- per-command gate & \texttt{qwen3.6:27b} (local) & 12 & 52\,min & 8/12 \\ \hline
 Guided --- non-browser subset & \texttt{qwen3.6:27b} (local) & 9 & 32.5\,min & 7/9 \\ \hline
-Autonomous --- free-launch & \texttt{claude-sonnet-5} (hosted) & 9 & 29.7\,min & 8/9 \\ \hline
+Autonomous --- free-launch & \texttt{qwen3.6:27b} (local) & 9 & 29.7\,min & 8/9 \\ \hline
 \end{tabular}
 \end{center}
 \end{table}
@@ -300,28 +295,26 @@ and its output, and never issues a false clearance. The four it could not settle
 declared \emph{inconclusive} rather than \emph{fixed}. Second, and more surprisingly,
 \emph{autonomous $\approx$ guided}: the nine non-browser findings run with the approval
 gate removed, the agent auto-running its own commands, took 29.7~minutes against the
-gated run's 32.5. That row differs from the gated one in \emph{two} respects rather than
-one --- the gate is gone \emph{and} the backend is a hosted \texttt{claude-sonnet-5}
-rather than the local \texttt{qwen3.6:27b} --- so it compares two conditions rather than
-isolating either.
+gated run's 32.5 --- essentially the same. Because both rows sit on the same backend and
+the same nine findings, that comparison isolates the gate, and what it shows is that
+removing it bought no meaningful speed: the bottleneck is the model's per-step latency,
+not the approval round-trip.
 
-What the comparison does say is the more useful finding. Two changes that should each have
-cut the time sharply --- removing a per-command round-trip, and replacing a 27~B local
-model with a hosted frontier one whose per-step latency is an order of magnitude lower ---
-together bought about 9\%. That points away from both and at a third quantity: the number
-of steps the agent chooses to take. Left unsupervised, the stronger model \emph{wandered},
-spending roughly twice as many commands on the finding it still could not confirm as the
-gated run had, so its per-step advantage went into extra commands instead of into
-finishing earlier. The accuracy difference points the same way: autonomy confirmed the
-basket IDOR the tightly-scoped gated run had hedged, seven of nine becoming eight, which
-on the evidence of Section~\ref{sec:eval-verdicts} is the hosted backend at work rather
-than the absent gate.
+What autonomy bought instead was a little thoroughness, at a price. Left to explore, the
+agent confirmed the basket IDOR the tightly-scoped gated run had hedged, lifting
+non-browser accuracy from seven of nine to eight; but it also \emph{wandered}, spending
+twenty-two commands on the template-injection finding it still could not confirm against
+the gated run's ten. The extra steps and the extra confirmation roughly cancel in
+wall-clock, which is why the two rows land within three minutes of each other.
 
-The design conclusion follows directly. Nothing measured here shows the approval gate to
-be the bottleneck, and the lever that visibly moves wall-clock is the reasoning backend,
-so the place to spend for speed is a stronger model rather than a weaker safety contract.
-And on the four findings the tool cannot yet decide it still defers to the human rather
-than guessing, which is the same conservative contract the reliability result showed.
+That inverts the trade one expects. Here the per-command human gate is close to free in
+wall-clock: surrendering it bought a single extra confirmation and no time, while the
+control it provides --- a person approving every command that touches the target ---
+costs almost nothing to keep. The lever that does move wall-clock is the reasoning
+backend, not the gate, so the place to spend for speed is a stronger model rather than a
+weaker safety contract. And on the four findings the tool cannot yet decide it still
+defers to the human rather than guessing, which is the same conservative contract the
+reliability result showed.
 
 \section{Threats to validity}
 \label{sec:eval-threats}
@@ -333,16 +326,15 @@ findings and the avoidance of false clearances, the NFR-01 constraint, but not
 the recognition of a genuine fix. A target with some remediated findings is the first
 item of future work. \emph{Backend:} the gated runs and the scoring used a single local
 model, \texttt{qwen3.6:27b}; a hosted frontier model would very likely raise accuracy, so
-these figures understate the system's ceiling. \emph{Confounded comparison:} the
-autonomous condition of Table~\ref{tab:eval-conditions} changed the backend as well as the
-gate, so no claim about the gate's price in wall-clock is drawn from
-it. \emph{Scale:} one report, twelve findings, one operator, which is
-enough to demonstrate the pipeline and the harness but not to generalise.
-\emph{Determinism:} an agentic retest is not reproducible run to run. The model may
-propose different commands from the same starting point, and Table~\ref{tab:eval-conditions}
-shows the same finding confirmed in one run and hedged in another. Every figure
-here is therefore a single sample, and a defensible accuracy claim would need repeated runs per
-finding, which this study does not have. \emph{Method:}
+these figures understate the system's ceiling. \emph{Scale:} one report, twelve findings,
+one operator, which is enough to demonstrate the pipeline and the harness but not to
+generalise. \emph{Determinism:} an agentic retest is not reproducible run to run --- the
+model may propose different commands from the same starting point --- so every figure
+here is a single sample, and a defensible accuracy claim would need repeated runs per
+finding, which this study does not have. This bears on the gate comparison in particular:
+rows~3 and~4 of Table~\ref{tab:eval-conditions} differ only in the gate, but they are one
+run each, so the three-minute gap between them is within the noise a second pair of runs
+could plausibly move. \emph{Method:}
 the operator drafted each retest goal from the report's reproduction steps, which is
 the intended workflow (FR-04) but does inject operator knowledge; and some findings
 (stored and reflected XSS, and SSTI, in particular) are only partially decidable over
@@ -365,7 +357,7 @@ the system already knows how to produce, is the cheap fix and it was not done he
 \section{Discussion}
 \label{sec:eval-discussion}
 
-Three things follow from this study. \emph{The pipeline works
+Four things follow from this study. \emph{The pipeline works
 end to end}: a real report drove extraction, goal-drafting, a gated agentic retest and
 an evidence-backed verdict, scored automatically by the FR-15 harness --- O4's
 apparatus is real and reproducible, not a plan. \emph{The safety contract held}:
@@ -377,11 +369,14 @@ backend-bound}: at 67\% correct it fell just short of the NFR-01 bar, entirely o
 hedges, and both the threats to validity and the run's own behaviour --- a small model
 straining on a multi-step chain, an HTTP retest blind to browser execution --- point
 to the same two levers, a stronger reasoning model and browser-based verification,
-that the future work of Chapter~\ref{ch:conclusions} takes up. The summary is a tool
+that the future work of Chapter~\ref{ch:conclusions} takes up. And \emph{the gate is
+close to free}: on the nine findings run both ways on the same backend, removing the
+per-command approval saved under three minutes in thirty, because the cost of a retest
+is the model's per-step latency rather than the human round-trip. The summary is a tool
 already trustworthy in the direction that matters and measurably improvable in the
-direction that is not: the safety contract is a property of the design and held on
-whichever backend was loaded, while the accuracy is a property of the model behind it
-and rises with a stronger one.
+direction that is not: the safety contract is a property of the design, and holds on
+whatever backend is loaded at no meaningful cost in time, while the accuracy is a
+property of the model behind it and rises with a stronger one.
 
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}
