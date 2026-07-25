@@ -44,6 +44,7 @@ SOURCES = (
     Path("docs/architecture/data-model.md"),
     Path("docs/architecture/class-model.md"),
     Path("docs/architecture/workflow.md"),
+    Path("docs/architecture/topology.md"),
     Path("docs/requirements/use-cases.md"),
 )
 OUT_DIR = Path("thesis/figs")

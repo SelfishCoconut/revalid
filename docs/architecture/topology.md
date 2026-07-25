@@ -61,6 +61,7 @@ it: not to the internet, and not to the operator's own host. The authorised lab
 container is then connected to that network, which makes it the sandbox's only
 reachable peer. The allowlist *is* the membership list.
 
+<!-- thesis-fig: topology-lab -->
 ```mermaid
 flowchart TB
     subgraph host["operator's machine"]
@@ -106,6 +107,7 @@ its network namespace alive. The **sandbox** is started with
 shares the gateway's. Every packet any tool in the sandbox emits originates in
 the gateway's namespace and is filtered by the gateway's rules.
 
+<!-- thesis-fig: topology-gateway -->
 ```mermaid
 flowchart TB
     subgraph host["operator's machine"]
@@ -114,10 +116,9 @@ flowchart TB
     end
 
     subgraph net["revalid-retest-{id} — routable bridge"]
-        subgraph ns["one network namespace, owned by the gateway"]
-            SBX["revalid-retest-sbx-{id}<br/>NET_RAW, no NET_ADMIN<br/>network_mode=container:gw"]
-            GW["revalid-retest-gw-{id}<br/>NET_ADMIN<br/>iptables OUTPUT allowlist"]
-        end
+        direction LR
+        SBX["revalid-retest-sbx-{id}<br/>NET_RAW, no NET_ADMIN<br/>network_mode=container:gw"]
+        GW["revalid-retest-gw-{id}<br/>NET_ADMIN — owns the netns<br/>iptables OUTPUT allowlist"]
     end
 
     TGT(["the scoped host<br/>its resolved IPv4 addresses"])
@@ -126,13 +127,12 @@ flowchart TB
 
     APP -->|"exec approved command"| DOCK
     DOCK --> SBX
-    SBX -->|"its packets originate<br/>in the gateway's stack"| GW
+    SBX -->|"shares its netns"| GW
     GW -->|ACCEPT| TGT
     GW -->|ACCEPT| DNS
     GW -.->|"DROP — default policy"| OFF
 
     style net fill:#fff5f5,stroke:#e03131,stroke-width:2px
-    style ns fill:#ffe3e3,stroke:#e03131
     style host fill:#e7f5ff,stroke:#1971c2
     style OFF fill:#f1f3f5,stroke:#868e96
 ```

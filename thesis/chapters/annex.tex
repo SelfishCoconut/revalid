@@ -39,11 +39,13 @@ system --- the service with its compiled interface, and the lab target it retest
 make deploy
 \end{lstlisting}
 
+\begin{sloppypar}
 The interface is then at \texttt{http://127.0.0.1:8000} and the lab target at
 \texttt{http://127.0.0.1:3000}, both bound to the loopback interface only. The
 language-model backend deliberately stays on the host machine, so no model weights
 are pulled into the deployment and an existing local server is reused as it is.
 \texttt{make deploy-down} stops the stack, keeping the database on its volume.
+\end{sloppypar}
 
 One consequence deserves to be stated rather than buried. The retest sandbox
 creates its own container and its own isolated network for every session, so the
