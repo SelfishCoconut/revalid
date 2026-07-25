@@ -36,7 +36,8 @@ const defaultSocketFactory: SocketFactory = (url) => new WebSocket(url);
  * `makeSocket`, e.g. a fake in tests), accumulates ordered `SessionEvent`s
  * deduped by `seq`, and derives the session's current lifecycle `status`
  * (from the latest `state_change` event's `payload.to`, defaulting to
- * `"working"`) and terminal `verdict` (from the latest `verdict` event).
+ * `"working"`) and terminal `verdict` (the latest `verdict` event, unless a later
+ * `verdict_cancelled` withdrew it).
  * The socket is closed on unmount and reopened whenever `id` changes.
  */
 export function useRetestSession(id: number, makeSocket: SocketFactory = defaultSocketFactory) {
@@ -98,7 +99,13 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
     };
   }, [id, makeSocket]);
 
-  const verdictEvent = [...events].reverse().find((e) => e.kind === "verdict");
+  // Reopening a session (#214) does not erase its verdict: the append-only
+  // transcript keeps the `verdict` event and gains a `verdict_cancelled`. So the
+  // *latest* of the two decides whether a current verdict exists — otherwise a
+  // reopened session keeps reporting the determination its operator withdrew.
+  const verdictEvent = [...events]
+    .reverse()
+    .find((e) => e.kind === "verdict" || e.kind === "verdict_cancelled");
   const stateEvent = [...events].reverse().find((e) => e.kind === "state_change");
 
   return {
@@ -106,6 +113,7 @@ export function useRetestSession(id: number, makeSocket: SocketFactory = default
     connected,
     thinking,
     status: (stateEvent?.payload.to as string | undefined) ?? "working",
-    verdict: verdictEvent ? (verdictEvent.payload as unknown as Verdict) : null,
+    verdict:
+      verdictEvent?.kind === "verdict" ? (verdictEvent.payload as unknown as Verdict) : null,
   };
 }

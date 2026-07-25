@@ -460,6 +460,10 @@ def test_guided_parks_after_one_command_discarding_the_next_proposal() -> None:
     assert live is not None and live.pending_call_id is None  # the next proposal was discarded
     assert not box.stopped  # sandbox kept alive so the operator can keep steering
     assert "keep probing" in reason  # the discarded proposal surfaced as a suggestion
+    # It reports and stops there (#243): with no determination reached, the hand-back
+    # offers no "or conclude the retest" — ending the retest is the operator's call,
+    # available from the console at any time and never prompted for.
+    assert "conclude" not in reason.lower()
     assert len(proposed) == 1  # only the first (approved) command was ever gated
 
 
@@ -535,6 +539,8 @@ def test_continue_after_guidance_resumes_with_the_operators_steer() -> None:
     assert s.verdict_status is None
     # The steer reached the agent: its second turn concluded citing the operator's steer.
     assert "with the operator's steer, confirmed open" in reason
+    # A determination *is* the one thing the agent may propose concluding on (#243).
+    assert "Conclude to record that" in reason
 
 
 def test_conclude_session_records_operator_verdict_and_tears_down() -> None:

@@ -644,14 +644,34 @@ describe("RetestSession", () => {
     });
   }
 
-  it("surfaces the hand-back message in the chat and prompts a verdict (ADR-0042)", () => {
+  it("shows the hand-back as the agent's message alone — no prompt banner (#243)", () => {
     mockPaused("exhausted my options, need guidance");
     renderAt(1);
-    // No heavy old "needs your guidance" banner — the agent's message carries it,
-    expect(screen.queryByLabelText(/needs guidance/i)).not.toBeInTheDocument();
+    // The agent's message *is* the hand-back. Nothing else is rendered: neither the
+    // old "needs your guidance" banner (ADR-0042) nor the "your move — reply or
+    // conclude" prompt that replaced it (#243). A handed-back console just waits.
     expect(screen.getByText(/exhausted my options/)).toBeInTheDocument();
-    // but the operator is prompted (your move) to steer on or record the verdict.
-    expect(screen.getByLabelText(/handed back/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/needs guidance/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/handed back/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/your move/i)).not.toBeInTheDocument();
+    // The state is still legible — from the status, not from an instruction.
+    expect(screen.getByText(/waiting for you/i)).toBeInTheDocument();
+  });
+
+  it("keeps Conclude available in every live state, unprompted (#243)", () => {
+    const conclude = () => screen.queryByRole("button", { name: /conclude/i });
+    for (const status of ["working", "awaiting_command", "awaiting_operator", "stopped"]) {
+      vi.mocked(hook.useRetestSession).mockReturnValue({
+        events: [{ seq: 1, kind: "agent_message", payload: { text: "on it" } }],
+        status,
+        verdict: null,
+        connected: true,
+        thinking: "",
+      });
+      const view = renderAt(1);
+      expect(conclude(), `Conclude missing in ${status}`).toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it("offers no Keep going button — replying is what resumes it (#163)", async () => {

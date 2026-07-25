@@ -214,7 +214,9 @@ observes that it timed out and can retry with a narrower scope.
 The operator owns the session's lifecycle (issue #150): besides approving each
 command they can **Start** a deferred session, **Stop** a running one (a
 cooperative pause that keeps the sandbox alive), **Resume** it, **Restart** into
-a fresh attempt, or **Conclude** it themselves at any live point.
+a fresh attempt, or **Conclude** it themselves at any live point. Conclude is a
+*permanent* control, present in every live state (#243) — the retest is over when
+the operator says so, not when the agent invites them to end it.
 
 ```mermaid
 stateDiagram-v2
@@ -306,8 +308,12 @@ conversational reply (a greeting, a small-talk answer), a guided one-action repo
 ("ran X — I'd try Y next"), a verdict *recommendation* for the operator to confirm,
 or an honest "I've exhausted my options". That last case folds in the retired
 `needs_guidance` state (ADR-0042): there is no longer a separate "needs your
-guidance" banner — every hand-back is the same lightweight "your move" prompt. The
-sandbox stays alive throughout, and the operator's next message resumes the agent.
+guidance" banner. Nor is there a prompt in its place (#243) — a hand-back renders
+as the agent's message and nothing else, and the console simply waits for as long
+as the operator takes. The state stays legible from the status ("Waiting for you")
+rather than from an instruction, and the agent proposes concluding only when it has
+a determination to propose. The sandbox stays alive throughout, and the operator's
+next message resumes the agent.
 
 The agent has exactly two tools — `run_command` (gated) and `respond` (prose to the
 operator, runs nothing) — and three ways a turn can end: a gated command

@@ -44,6 +44,26 @@ describe("useRetestSession", () => {
     expect(callCount).toBe(1);
   });
 
+  it("drops a verdict a later verdict_cancelled withdrew (reopen, #214/#243)", async () => {
+    const socket = new FakeSocket();
+    const makeSocket = () => socket as unknown as WebSocket;
+
+    const { result } = renderHook(() => useRetestSession(1, makeSocket));
+
+    act(() => {
+      socket.emit({ seq: 1, kind: "verdict", payload: { status: "still_open", rationale: "x" } });
+    });
+    await waitFor(() => expect(result.current.verdict?.status).toBe("still_open"));
+
+    // Reopening keeps the verdict event in the append-only transcript and appends a
+    // cancellation, so the session must stop reporting the withdrawn determination.
+    act(() => {
+      socket.emit({ seq: 2, kind: "verdict_cancelled", payload: { status: "still_open" } });
+    });
+    await waitFor(() => expect(result.current.verdict).toBeNull());
+    expect(result.current.events).toHaveLength(2); // both stay in the audit trail
+  });
+
   it("marks connected false when the server closes the socket, not just on error", async () => {
     const socket = new FakeSocket();
     const makeSocket = () => socket as unknown as WebSocket;
