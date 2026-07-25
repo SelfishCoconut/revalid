@@ -146,7 +146,7 @@ loaded at the time.
 
 Closing that gap does not require building anything, which is what makes it attractive.
 Pydantic~AI already emits OpenTelemetry spans for every agent step, so an
-LLM-observability platform such as Langfuse~\cite{langfuse} --- open-source and
+LLM-observability platform such as Langfuse --- open-source and
 self-hostable, and therefore compatible with the localhost-only posture of NFR-03 and
 with the privacy argument of Section~\ref{subsec:eval-local} --- can ingest them with an
 instrumentation call rather than a redesign. A wider evaluation instrumented that way

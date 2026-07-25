@@ -38,7 +38,7 @@ and identifies the narrow gap it targets (Section~\ref{sec:gap}).
 
 A penetration test is an authorised, goal-directed simulation of an attack whose
 purpose is to discover and demonstrate exploitable weaknesses in a system before a
-real adversary does \cite{singer_friedman, nist80015}. Its output is a report: a structured
+real adversary does \cite{nist80015}. Its output is a report: a structured
 account of each finding, its severity, its impact, and the concrete steps needed
 to reproduce it. That report is not an end in itself but the entry point to the
 \emph{vulnerability management lifecycle} --- the cyclical process of
@@ -157,11 +157,11 @@ to the revalidation phase.
 Findings that flow through the lifecycle are described using a small set of widely
 adopted reference frameworks, and any tool that ingests reports must be able to
 speak their language. Individual issues are catalogued as Common Vulnerabilities
-and Exposures (CVE) identifiers \cite{cve}, while the underlying weakness classes
-are organised by the Common Weakness Enumeration (CWE) \cite{cwe}. Severity is
+and Exposures (CVE) identifiers, while the underlying weakness classes
+are organised by the Common Weakness Enumeration (CWE). Severity is
 communicated with the Common Vulnerability Scoring System (CVSS) \cite{cvss},
 whose numeric vectors drive remediation priority and, indirectly, which findings
-are retested first. For web applications, the OWASP Top~10 \cite{owasp_top10}
+are retested first. For web applications, the OWASP Top~10
 provides a consensus ranking of the most critical risk categories --- injection,
 broken access control, and related classes --- that dominate real reports.
 Finally, the MITRE ATT\&CK knowledge base \cite{mitre_attack} catalogues adversary
@@ -206,19 +206,17 @@ action.}
 \label{subsec:scanners}
 
 The most widespread form of automation is the vulnerability scanner. Network and
-host scanners such as Nessus~\cite{nessus} and OpenVAS~\cite{openvas} match
+host scanners such as Nessus and OpenVAS match
 observed service banners and configurations against databases of known issues,
 whereas dynamic application-security-testing (DAST) tools, among them OWASP
-ZAP~\cite{owasp_zap} and Burp Suite~\cite{burp}, crawl a running web application
+ZAP and Burp Suite, crawl a running web application
 and inject payloads to elicit signs of injection, cross-site scripting or
 misconfiguration. These tools are fast and
 broad, but their limitations are well documented. A controlled evaluation of
 eleven black-box web scanners found that entire vulnerability classes --- notably
 stored cross-site scripting and logic flaws --- are systematically missed, and
-that results vary widely across tools on the same target \cite{doupe2010}. A
-complementary study reached the same conclusion at scale, reporting that automated
-black-box testing leaves a substantial fraction of real vulnerabilities
-undetected \cite{bau2010}. Two properties matter for revalidation in particular:
+that results vary widely across tools on the same target \cite{doupe2010} --- a
+substantial fraction of real vulnerabilities is left undetected. Two properties matter for revalidation in particular:
 scanners reason at the level of \emph{patterns}, not of a specific reported
 finding with its own reproduction steps; and they are prone to false positives,
 which is unacceptable when the output is a binary ``fixed / still-open'' verdict
@@ -232,9 +230,9 @@ in \emph{this} report, is closed.
 A second wave automates not detection but the \emph{execution} of known adversary
 behaviour. Breach-and-attack-simulation (BAS) platforms encode attacker techniques
 as reusable, executable actions and replay them against a target to test whether
-defences hold. MITRE CALDERA \cite{caldera} orchestrates such actions as an
+defences hold. MITRE CALDERA orchestrates such actions as an
 autonomous red-team agent whose behaviours are mapped to ATT\&CK techniques, while
-Atomic Red Team \cite{atomicredteam} provides a library of small, technique-scoped
+Atomic Red Team provides a library of small, technique-scoped
 tests intended to be run repeatably. The intellectual foundation for this
 approach was laid by work on automated adversary emulation, which showed that a
 planner could chain individual techniques into a coherent attack sequence
@@ -254,12 +252,12 @@ A third line of research treats penetration testing as a sequential
 decision-making problem and applies automated planning and reinforcement learning
 to it. Early work modelled the attacker's uncertainty explicitly, casting
 penetration testing as a partially observable Markov decision process so that a
-planner could reason about what it did not yet know \cite{sarraute2012}. A broader
-research programme framed \emph{simulated} penetration testing as a spectrum of
-models of increasing fidelity, from classical planning to game-theoretic
-formulations \cite{hoffmann2015}. More recently, reinforcement-learning agents
-have been trained to select exploitation actions directly from the state of a
-simulated network \cite{schwartz2019}. These approaches demonstrate that the
+planner could reason about what it did not yet know \cite{sarraute2012}. The line
+that followed it broadened into a spectrum of simulated-pentesting models of
+increasing fidelity --- from classical planning to game-theoretic formulations ---
+and, more recently, into reinforcement-learning agents trained to select
+exploitation actions directly from the state of a simulated network. These
+approaches demonstrate that the
 \emph{planning} of an attack can be automated, but they operate almost exclusively
 in simulated or abstracted environments, they require a formal model of the target,
 and they optimise for \emph{finding} a path to compromise rather than for
@@ -285,14 +283,12 @@ Modern language models are built on the transformer architecture \cite{vaswani20
 and their most consequential property emerged with scale: sufficiently large models
 perform new tasks from a natural-language description and a few examples, without
 task-specific training \cite{brown2020}. Two developments turned this capability
-into a basis for autonomous action. First, prompting the model to produce
-intermediate reasoning steps --- chain-of-thought prompting --- was shown to
-substantially improve performance on multi-step problems \cite{wei2022cot}. Second,
-and most directly relevant here, the ReAct paradigm interleaved reasoning traces
-with \emph{actions}, letting a model call external tools, observe their results and
-adjust its plan accordingly \cite{yao2023react}. Complementary work demonstrated
-that models can learn to decide \emph{when} and \emph{how} to invoke tools
-\cite{schick2023toolformer}. Together these results define the tool-using agent: a
+into a basis for autonomous action. Prompting a model to produce intermediate
+reasoning steps was shown to improve performance on multi-step problems, and --- most
+directly relevant here --- the ReAct paradigm interleaved those reasoning traces with
+\emph{actions}, letting a model call external tools, observe their results and
+adjust its plan accordingly \cite{yao2023react}, with related work showing that
+models can also learn \emph{when} and \emph{how} to invoke a tool. Together these results define the tool-using agent: a
 loop in which a model proposes an action, an external environment executes it, and
 the observed output conditions the next proposal. This loop is the computational
 pattern on which the present system is built, with the deliberate addition of a
@@ -302,29 +298,26 @@ human approval gate at each step.
 \label{subsec:llm-offensive}
 
 The application of tool-using agents to offensive security is recent and moving
-quickly, and a systematic review documents the rapid growth of such systems across
-the security lifecycle \cite{zhang2025llmcyber}. PentestGPT decomposes a penetration test
+quickly, and such systems have grown rapidly across the security lifecycle.
+PentestGPT decomposes a penetration test
 into interacting reasoning, generation and parsing modules and shows that an LLM
 can guide the earlier stages of a test, while also documenting where the model
 loses track of context on longer engagements \cite{deng2024pentestgpt}. In parallel,
 an approach explicitly framed around a human-in-the-loop workflow paired a
 language model with a security tester to assist with penetration-testing tasks,
 arguing that human oversight is essential when the model acts on a real system
-\cite{happe2023}. Stronger results followed:
-autonomous agents were shown to exploit web vulnerabilities without prior knowledge
-of them \cite{fang2024websites} and, subsequently, to exploit one-day
-vulnerabilities from their public descriptions alone \cite{fang2024oneday}. Systems
-such as AutoAttacker extended the idea to a broader library of post-compromise
-attacker actions \cite{xu2024autoattacker}.
+\cite{happe2023}. Stronger results followed: autonomous
+agents were shown to exploit web vulnerabilities with no prior knowledge of them
+and, subsequently, to exploit one-day vulnerabilities from their public descriptions
+alone \cite{fang2024oneday}; others extended the idea to broader libraries of
+post-compromise attacker actions.
 
 These capabilities have moved from research prototypes into operational tools that
 work in much the same way as the retest agent developed here: an agent proposes an
 action, runs it, observes the result and iterates. The offensive systems introduced
 in Section~\ref{sec:motivation} are instances of this shift --- the autonomous
 penetration tester XBOW \cite{xbow} and the frontier discovery-and-exploitation
-models exemplified by Mythos \cite{anthropic_mythos, aisi_mythos} --- and controlled
-studies confirm the effectiveness of language models on penetration-testing tasks
-more generally \cite{llm_pentest_efficacy}. One detail of XBOW is worth carrying
+models exemplified by Mythos \cite{anthropic_mythos, aisi_mythos}. One detail of XBOW is worth carrying
 forward: it pairs its language-model-driven exploration with \emph{deterministic}
 validation of each finding and human review before disclosure, a discipline close in
 spirit to the one adopted here. What all these systems share, however, is their
@@ -364,12 +357,11 @@ not unambiguously support a conclusion.
 Before any retest can run, the system must convert a report --- typically a PDF
 written for human readers --- into structured findings with explicit reproduction
 steps. This is an information-extraction problem, and it has an established research
-lineage in the adjacent domain of cyber threat intelligence (CTI). TTPDrill
+lineage in the adjacent domain of cyber threat intelligence (CTI). Earlier systems
 extracted attacker tactics and techniques from unstructured threat reports and
-mapped them onto a formal representation \cite{husari2017ttpdrill}; later systems
-automated the retrieval of ATT\&CK techniques from such reports using supervised
-classification \cite{legoy2020rcatt}; and EXTRACTOR distilled attack behaviour from
-prose into provenance-style graphs \cite{satvat2021extractor}. These systems
+mapped them onto formal representations, or retrieved ATT\&CK techniques from such
+reports by supervised classification; EXTRACTOR went further and distilled attack
+behaviour from prose into provenance-style graphs \cite{satvat2021extractor}. These systems
 established that security-relevant structure can be recovered from free text, but
 they relied on domain-specific pipelines and targeted a fixed output schema. Large
 language models change the economics of this task: given only a description of the
