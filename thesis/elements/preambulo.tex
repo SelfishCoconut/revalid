@@ -125,9 +125,9 @@ target. On a locally hosted model it reached the correct verdict on eight of twe
 findings and hedged on the remaining four, never once declaring a still-exploitable
 finding fixed, meeting the safety constraint the design exists to enforce while
 falling narrowly short of the accuracy target on hedges rather than errors. Its
-machine time was comparable to a manual pass over the same findings, and removing the
-approval gate bought no meaningful speed, indicating that per-command human oversight
-costs far less than it is usually assumed to. Scaling that study to more reports,
+machine time was comparable to a manual pass over the same findings. What that oversight
+costs in wall-clock is left open rather than answered: the run made without the gate also
+changed the model behind it, so the two effects cannot be separated. Scaling that study to more reports,
 targets that include genuinely remediated findings, and a stronger reasoning backend
 is the immediate next step this work opens.
 

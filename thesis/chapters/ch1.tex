@@ -166,12 +166,11 @@ than a retreat from it. Section~\ref{subsec:llm-safety} sets out why an unsuperv
 language-model agent is the wrong instrument for a verdict that a compliance process
 will rely on, since hallucination and over-confident conclusions are not incidental
 defects of these systems but documented properties of them, and
-Section~\ref{sec:design-retest} shows what the gate buys. The obvious objection is
-that oversight must cost speed, which is exactly what the retested objective O4 was
-able to check: Section~\ref{sec:eval-time} finds that removing the gate entirely
-bought no meaningful time, because the bottleneck is the model's own per-step
-latency. The autonomous mode still exists and was measured; it is the default that
-changed, and it changed on evidence.
+Section~\ref{sec:design-retest} shows what the gate buys. The obvious objection is that oversight
+must cost speed. Section~\ref{sec:eval-time} reports what was measured and is careful
+about what it does not settle: the run made without the gate was also made on a different
+model, so the gate's price in wall-clock remains an open question rather than a result.
+The autonomous mode still exists and was measured; it is the default that changed.
 
 \section{Proposed solution}
 \label{sec:solution}
