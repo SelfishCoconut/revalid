@@ -15,13 +15,6 @@ export function currentFreeLaunch(events: SessionEvent[], initial: boolean): boo
   return latest ? Boolean(latest.payload.enabled) : initial;
 }
 
-/** The rationale of a given-up session's verdict, or null if none is recorded. */
-export function givenUpReason(events: SessionEvent[]): string | null {
-  const verdict = [...events].reverse().find((e) => e.kind === "verdict");
-  if (!verdict) return null;
-  return String(verdict.payload.rationale ?? "") || null;
-}
-
 /**
  * Seqs of `command_proposed` events that were auto-approved under free-launch —
  * a proposal whose next command decision in the (strictly ordered) transcript is

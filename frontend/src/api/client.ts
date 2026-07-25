@@ -394,19 +394,9 @@ export function reopenSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/reopen`, { method: "POST" });
 }
 
-/** Start an `idle` (deferred) session — the operator's Start (issue #150). */
-export function startSession(id: number): Promise<{ status: string }> {
-  return request<{ status: string }>(`/retest-sessions/${String(id)}/start`, { method: "POST" });
-}
-
 /** Pause a running session, keeping its sandbox alive — Stop (issue #150). */
 export function stopSession(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/stop`, { method: "POST" });
-}
-
-/** Resume a stopped session — Resume (issue #150). May drive further agent turns. */
-export function resumeSession(id: number): Promise<{ status: string }> {
-  return request<{ status: string }>(`/retest-sessions/${String(id)}/resume`, { method: "POST" });
 }
 
 /**
@@ -418,14 +408,6 @@ export function restartModel(id: number): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/restart-model`, {
     method: "POST",
   });
-}
-
-/**
- * Keep going on a session paused for guidance (ADR-0034): resume the agent. A
- * no-op server-side unless the session is paused with a live agent.
- */
-export function continueSession(id: number): Promise<{ status: string }> {
-  return request<{ status: string }>(`/retest-sessions/${String(id)}/continue`, { method: "POST" });
 }
 
 /**

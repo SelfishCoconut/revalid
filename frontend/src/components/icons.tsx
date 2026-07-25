@@ -84,15 +84,6 @@ export function PauseIcon({ size }: { size?: number }) {
   );
 }
 
-/** Solid triangle — resume a stopped session / keep going. */
-export function PlayIcon({ size }: { size?: number }) {
-  return (
-    <Glyph size={size}>
-      <path d="M4.4 3.1 12.6 8l-8.2 4.9z" fill="currentColor" />
-    </Glyph>
-  );
-}
-
 /** Circular arrow — restart the retest / regenerate the goal. */
 export function RestartIcon({ size }: { size?: number }) {
   return (

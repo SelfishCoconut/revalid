@@ -63,18 +63,37 @@ def build_goal_agent(
     )
 
 
-def _finding_prompt(finding: Finding) -> str:
-    """Render the finding as the goal-generation prompt (the fields the model reads)."""
-    endpoints = ", ".join(finding.affected_endpoints) or "(none stated)"
-    steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
-    return (
-        f"Title: {finding.title}\n"
-        f"Severity: {finding.severity.value}\n"
-        f"Description: {finding.description}\n"
-        f"Attack vector: {finding.attack_vector}\n"
-        f"Affected endpoints: {endpoints}\n"
-        f"Reproduction steps:\n{steps or '(none stated)'}"
-    )
+def finding_prompt(finding: Finding) -> str:
+    """Render a finding as the model-facing context both retest prompts are built from.
+
+    One renderer, deliberately (issue #249): this used to exist twice — here and in
+    ``app.py`` — and the copies had drifted, so the goal generator saw the finding's
+    severity and attack vector while the retest agent, which acts on it, did not.
+
+    Every field is omitted when the finding does not state it, rather than rendered as
+    a placeholder: a report ingested through the JSON or manual door often carries only
+    a title and steps, and telling the model "Attack vector:" followed by nothing invites
+    it to invent one.
+
+    Args:
+        finding: The finding to describe.
+
+    Returns:
+        The finding's identity, classification and original reproduction steps as plain
+        text — the shared basis for goal generation (FR-04) and for the retest agent's
+        opening prompt (FR-17).
+    """
+    lines = [f"Title: {finding.title}", f"Severity: {finding.severity.value}"]
+    if finding.description:
+        lines.append(f"Description: {finding.description}")
+    if finding.attack_vector:
+        lines.append(f"Attack vector: {finding.attack_vector}")
+    if finding.affected_endpoints:
+        lines.append("Affected endpoints: " + ", ".join(finding.affected_endpoints))
+    if finding.reproduction_steps:
+        steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
+        lines.append(f"Reproduction steps:\n{steps}")
+    return "\n".join(lines)
 
 
 def generate_goal(agent: Agent[None, GeneratedGoal], finding: Finding) -> tuple[str, ...]:
@@ -91,6 +110,6 @@ def generate_goal(agent: Agent[None, GeneratedGoal], finding: Finding) -> tuple[
         The generated goal steps, or ``()`` if the model produced nothing usable.
     """
     try:
-        return agent.run_sync(_finding_prompt(finding)).output.steps
+        return agent.run_sync(finding_prompt(finding)).output.steps
     except UnexpectedModelBehavior:
         return ()

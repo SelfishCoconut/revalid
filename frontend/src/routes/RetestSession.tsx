@@ -24,7 +24,6 @@ import {
 import { RetestTerminal } from "../components/RetestTerminal";
 import { StatusBadge } from "../components/StatusBadge";
 import {
-  AlertIcon,
   CheckIcon,
   CrossIcon,
   ExitIcon,
@@ -45,11 +44,7 @@ import { queryKeys } from "../hooks/queryKeys";
 import { useRetestSession } from "../hooks/useRetestSession";
 import { goalStepsToText, parseGoalSteps } from "../lib/goal";
 import { errorMessage } from "../lib/format";
-import {
-  autoApprovedSeqs,
-  currentFreeLaunch,
-  givenUpReason,
-} from "../lib/sessionDerivations";
+import { autoApprovedSeqs, currentFreeLaunch } from "../lib/sessionDerivations";
 import { STATUS_META, type KnownStatus } from "../lib/status";
 import type { VerdictStatus } from "../api/types";
 
@@ -819,29 +814,19 @@ export function RetestSession({
                 bubble in the thread above, and the console simply waits. No banner
                 tells the operator to steer or to conclude: the status reads "Waiting
                 for you" and Conclude is a permanent toolbar control. */}
-            {status === "given_up" ? (
-              // Legacy: sessions from before ADR-0034 could reach a terminal
-              // give-up. New sessions pause for guidance instead.
-              <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">
-                <span className="flex items-center gap-2 text-warn-fg">
-                  <AlertIcon />
-                  <Eyebrow>Retest ended</Eyebrow>
-                </span>
-                <p className="mt-1 text-sm text-warn-fg">
-                  {givenUpReason(events) ?? "The agent stopped without a determination."}
-                </p>
-              </div>
-            ) : (
-              verdict && (
-                <div className="rounded-lg border border-line bg-panel-2/50 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-faint">
-                    <VerdictIcon />
-                    <Eyebrow>Verdict</Eyebrow>
-                    {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
-                  </div>
-                  <p className="text-sm text-fg">{verdict.rationale}</p>
+            {/* No `given_up` branch (#250): nothing writes that state — ADR-0034 retired
+                the give-up and ADR-0042 confirmed legacy rows in removed states do not
+                load at all — so the branch survived only because its own test mocked the
+                status. The enum member stays, so such a row would still read as terminal. */}
+            {verdict && (
+              <div className="rounded-lg border border-line bg-panel-2/50 p-4">
+                <div className="mb-2 flex items-center gap-2 text-faint">
+                  <VerdictIcon />
+                  <Eyebrow>Verdict</Eyebrow>
+                  {isKnownStatus(verdict.status) && <StatusBadge status={verdict.status} />}
                 </div>
-              )
+                <p className="text-sm text-fg">{verdict.rationale}</p>
+              </div>
             )}
             {canAdjudicate && verdict && (
               <div

@@ -14,11 +14,11 @@ import time
 
 import httpx
 import pytest
+from tests._retest_helpers import egress_probe_command
 
 from revalid.sandbox import (
     DockerSandbox,
     SandboxUnavailableError,
-    egress_probe_command,
     lab_base_url,
 )
 

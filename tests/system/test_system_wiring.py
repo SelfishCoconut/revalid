@@ -1,7 +1,9 @@
-"""Placeholder system test proving the marker and nightly job are wired.
+"""System-level smoke check: the ``system`` marker and its nightly job are wired.
 
-Real system tests will run the full retest flow against dockerized lab
-targets (OWASP Juice Shop / DVWA) with known ground truth.
+The real system coverage lives in the sibling modules --- ``test_retest_session_system``
+drives a full gated retest against the dockerized Juice Shop lab and asserts the egress
+lock from inside the sandbox. This module only proves the level itself runs and that the
+package is importable in the environment the nightly job builds.
 """
 
 import pytest
@@ -11,4 +13,4 @@ import revalid
 
 @pytest.mark.system
 def test_system_level_runs() -> None:
-    assert revalid.health() == "revalid ok"
+    assert revalid.__version__  # the installed package reports a real version

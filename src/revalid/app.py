@@ -94,6 +94,7 @@ from revalid.pdf import PdfError, PdfReport, read_pdf
 from revalid.plan import (
     GeneratedGoal,
     build_goal_agent,
+    finding_prompt,
     generate_goal,
 )
 from revalid.reports_chat import (
@@ -1344,26 +1345,9 @@ def run_restart_model(
         restart_model(session, registry, session_id)
 
 
-def _finding_prompt(finding: Finding) -> str:
-    """Render the finding as the retest agent's goal prompt (FR-17).
-
-    Gives the agent the finding's identity and how it was originally reproduced so
-    it can re-verify the issue against the lab target. Mirrors the FR-04 planning
-    prompt (:mod:`revalid.plan`) but carries no operator steering — the retest
-    agent proposes each command for human approval instead.
-    """
-    lines = [f"Title: {finding.title}", f"Description: {finding.description}"]
-    if finding.affected_endpoints:
-        lines.append("Affected endpoints: " + ", ".join(finding.affected_endpoints))
-    if finding.reproduction_steps:
-        steps = "\n".join(f"{i}. {s}" for i, s in enumerate(finding.reproduction_steps, 1))
-        lines.append(f"Reproduction steps:\n{steps}")
-    return "\n".join(lines)
-
-
 def _goal_prompt(goal: tuple[str, ...], finding: Finding) -> str:
     """Prepend the current goal (if any) to the finding context for the agent (FR-17 6b-ii)."""
-    base = _finding_prompt(finding)
+    base = finding_prompt(finding)
     if not goal:
         return base
     steps = "\n".join(f"- {s}" for s in goal)
