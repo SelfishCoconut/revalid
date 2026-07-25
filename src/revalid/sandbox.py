@@ -1,10 +1,16 @@
 """FR-17 / M6 egress-locked retest sandbox (ADR-0025, Slice 0).
 
-An ephemeral Docker container on an ``--internal`` network (no host/internet
-route) in which the retest agent runs one approved command at a time. The pure
-surface (``CommandResult``, ``FakeSandbox``, helpers) is unit-tested; the live
-``DockerSandbox`` needs the optional ``sandbox`` extra and is covered only by
-the nightly system test.
+An ephemeral Docker container in which the retest agent runs one approved command
+at a time, provisioned into one of two topologies according to the session's scope
+(ADR-0041): a lab target gets an ``--internal`` network with the target attached
+as its only other member (no host/internet route at all), while an online target
+gets a per-session **L3 egress gateway** whose network namespace the sandbox joins
+and whose ``iptables`` allowlist it holds no capability to change (ADR-0045).
+Either way containment is topology, never command inspection.
+
+The pure surface (``CommandResult``, ``FakeSandbox``, the mode/resolution/firewall
+helpers) is unit-tested; the live ``DockerSandbox`` needs the optional ``sandbox``
+extra and is covered only by the nightly system test.
 """
 
 from __future__ import annotations
@@ -84,7 +90,14 @@ class SandboxUnavailableError(Exception):
 
 
 def internal_network_name(session_id: int) -> str:
-    """Return the per-session egress-locked Docker network name."""
+    """Return the per-session Docker network name.
+
+    One name for both topologies, because it is the same session resource either
+    way — created with ``internal=True`` for a lab scope (hence the function's
+    name), and as an ordinary routable bridge for an online one, where egress is
+    bounded by the gateway's firewall rather than by the network having no route
+    out (ADR-0045).
+    """
     return f"revalid-retest-{session_id}"
 
 
@@ -144,8 +157,9 @@ def is_lab_scope(scope_hosts: tuple[str, ...]) -> bool:
     """Whether a scope stays on the lab (empty, or every host is the lab host).
 
     Lab scope keeps the unchanged ``--internal`` + attached-lab-container
-    provisioning; any other host is an online target that needs the egress
-    proxy (ADR-0041). An empty scope defaults to the lab.
+    provisioning; any other host is an online target that needs the L3 egress
+    gateway (ADR-0041, re-mechanised by ADR-0045). An empty scope defaults to
+    the lab.
     """
     lab = lab_host()
     return all(host == lab for host in scope_hosts)

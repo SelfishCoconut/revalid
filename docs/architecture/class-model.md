@@ -306,8 +306,14 @@ classDiagram
 
     class DockerSandbox {
         +int session_id
+        -str _network_name
+        -str _sandbox_name
+        -str _gateway_name
+        -Container _container
+        -Container _gateway
         -_start_lab()
-        -_start_online()
+        -_start_online(hosts)
+        -_clear_stale()
     }
 
     class FakeSandbox {
@@ -356,6 +362,20 @@ daemon; `FakeSandbox` replays a script. Neither inherits from the other and
 neither is registered anywhere — structural typing alone makes them
 interchangeable, which is what lets the entire HTTP flow be tested with no Docker
 and no network.
+
+`DockerSandbox` is also the one place where a *class* diagram under-describes the
+design, and the three name fields are the tell. One object provisions two quite
+different topologies — an `--internal` network with the target attached, or an
+egress gateway whose network namespace the sandbox joins (ADR-0045) — and the
+second one's enforcement lives in a **container**, not an object: nothing in this
+diagram holds `NET_ADMIN`. What the fields do capture is why teardown is
+reliable: every per-session resource is addressed **by name**, so a freshly
+constructed instance can reap containers it never created. The parts worth
+testing were pushed out of the class entirely, into pure module-level functions
+(`resolve_scope_ips`, `egress_firewall_script`, `is_lab_scope`) — which is what
+lets the firewall ruleset be unit-tested while the class that runs it stays
+`# pragma: no cover`. The topology itself is drawn on the
+[network topology](topology.md) page.
 
 **`LiveSession` is deliberately not persisted, and `DeltaChannel` deliberately
 persists nothing.** Live agent state (message history, the sandbox handle, the

@@ -8,11 +8,15 @@ without a human saying yes. What comes out is a verdict — `fixed` or
 `still_open` — backed by the real output of the command that decided it.
 
 !!! info "Human-in-the-loop, by construction"
-    The agent is not *asked* to behave. It runs inside a per-session Docker
-    network with `internal=True` — no route to the host, no route to the
-    internet, only the lab container the operator attached — and every command
-    it proposes is a Pydantic AI deferred tool call that **cannot resolve** into
-    an execution until the operator approves it (ADR-0025).
+    The agent is not *asked* to behave. Every command it proposes is a Pydantic
+    AI deferred tool call that **cannot resolve** into an execution until the
+    operator approves it (ADR-0025) — and what an approved command can reach is
+    decided by the shape of the network it runs in, not by inspecting it. A lab
+    retest gets a per-session Docker network with `internal=True`: no route to
+    the host, no route to the internet, only the target the operator attached.
+    An online one gets a per-session L3 egress gateway whose firewall the sandbox
+    holds no capability to change (ADR-0045). Both are drawn on the
+    [network topology](architecture/topology.md) page.
 
 ## Start here
 
@@ -20,7 +24,10 @@ without a human saying yes. What comes out is a verdict — `fixed` or
 |---|---|
 | **[How it works](architecture/workflow.md)** | The program narrative: what happens, in what order, and who is in control at each step. **Read this first.** |
 | [C4 model](architecture/c4.md) | Context, container and component diagrams, plus sequence diagrams for the wire-level detail. |
+| [Network topology](architecture/topology.md) | How FR-06 containment is actually built: both sandbox topologies, the egress ruleset, per-session lifecycle, and the limits of the guarantee. |
 | [Class model](architecture/class-model.md) | Curated class diagrams: the domain core, the persistence seam, the agentic session collaboration, the export document. |
+| [Data model](architecture/data-model.md) | The persisted schema as an ER diagram, plus the lifecycles that move through it — session states, finding lineage, transcript events. |
+| [Subsystem flows](architecture/subsystem-flows.md) | Everything around the retest spine: the three ingest doors, corpus chat, model resolution, the SPA route map. |
 | [Requirements (SRS)](requirements/srs.md) | The FR/NFR catalogue driving the Kanban board, with per-requirement acceptance criteria. |
 | [Use-case model](requirements/use-cases.md) | Actors, use cases traced to requirements, and the decisive scenario expanded with its exception paths. |
 | [ADRs](adr/README.md) | The decision log (MADR). A decision without an ADR doesn't exist. |
