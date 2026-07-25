@@ -24,7 +24,17 @@ const readyReport: Report = {
 };
 
 function draft(overrides: Partial<FindingDraft> = {}): FindingDraft {
-  return { title: "T", severity: "high", description: "", endpoints: "", steps: "", ...overrides };
+  return {
+    title: "T",
+    severity: "high",
+    description: "",
+    endpoints: "",
+    steps: "",
+    cvssVector: "",
+    cvssScore: "",
+    techniques: "",
+    ...overrides,
+  };
 }
 
 function renderNewReport() {
@@ -38,6 +48,45 @@ function renderNewReport() {
 }
 
 describe("draftsToPayload", () => {
+  it("omits taxonomy keys entirely when nothing was typed", () => {
+    // "not stated" must not be sent as an empty vector — the two mean different
+    // things once enrichment can fill the gap (#237).
+    const payload = draftsToPayload("R", [draft()]);
+    expect(payload.findings[0]).not.toHaveProperty("cvssv3");
+    expect(payload.findings[0]).not.toHaveProperty("cvssv3_score");
+    expect(payload.findings[0]).not.toHaveProperty("mitre_techniques");
+  });
+
+  it("carries a typed CVSS code and ATT&CK techniques", () => {
+    const payload = draftsToPayload("R", [
+      draft({
+        cvssVector: "  CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H  ",
+        cvssScore: "9.8",
+        techniques: "T1190, T1110",
+      }),
+    ]);
+    expect(payload.findings[0]).toMatchObject({
+      cvssv3: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      cvssv3_score: 9.8,
+      mitre_techniques: ["T1190", "T1110"],
+    });
+  });
+
+  it("splits techniques on newlines as well as commas", () => {
+    const payload = draftsToPayload("R", [draft({ techniques: "T1190\n T1110 ,\n" })]);
+    expect(payload.findings[0].mitre_techniques).toEqual(["T1190", "T1110"]);
+  });
+
+  it.each(["", "  ", "abc", "-1", "11", "NaN"])(
+    "drops an unusable score (%s) instead of sending 0",
+    (value) => {
+      const payload = draftsToPayload("R", [draft({ cvssVector: "CVSS:3.1/AV:N", cvssScore: value })]);
+      expect(payload.findings[0]).not.toHaveProperty("cvssv3_score");
+      expect(payload.findings[0].cvssv3).toBe("CVSS:3.1/AV:N");
+    },
+  );
+
+
   it("trims fields and splits endpoints into lines", () => {
     const payload = draftsToPayload("  My report  ", [
       draft({ title: " SQLi ", endpoints: "/a\n  /b  \n\n", steps: " 1. do it " }),
@@ -137,6 +186,28 @@ describe("NewReport", () => {
       label: "From JSON",
       findings: [{ title: "X", severity: "low" }],
       enrich: false,
+    });
+  });
+
+  it("sends a hand-typed CVSS code and ATT&CK techniques from the form", async () => {
+    renderNewReport();
+    fireEvent.change(screen.getByPlaceholderText(/Acme Corp/), { target: { value: "R" } });
+    fireEvent.change(screen.getByPlaceholderText(/^Title/), { target: { value: "SQLi" } });
+    fireEvent.change(screen.getByLabelText("Finding 1 CVSS vector"), {
+      target: { value: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" },
+    });
+    fireEvent.change(screen.getByLabelText("Finding 1 CVSS score"), { target: { value: "9.8" } });
+    fireEvent.change(screen.getByLabelText("Finding 1 ATT&CK techniques"), {
+      target: { value: "T1190" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create report/ }));
+
+    expect(await screen.findByText("REPORT PAGE")).toBeInTheDocument();
+    const sent = vi.mocked(client.createManualReport).mock.calls[0][0];
+    expect(sent.findings[0]).toMatchObject({
+      cvssv3: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      cvssv3_score: 9.8,
+      mitre_techniques: ["T1190"],
     });
   });
 

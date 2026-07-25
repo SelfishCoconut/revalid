@@ -21,7 +21,10 @@ const JSON_PLACEHOLDER = `{
       "severity": "high",
       "description": "…",
       "endpoints": ["https://juice.example.com/#/login"],
-      "steps_to_reproduce": "1. …\\n2. …"
+      "steps_to_reproduce": "1. …\\n2. …",
+      "cvssv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cvssv3_score": 9.8,
+      "mitre_techniques": ["T1190"]
     }
   ]
 }`;
@@ -224,6 +227,42 @@ export function NewReport() {
                       placeholder={"Steps to reproduce (one per line)\n1. Log in\n2. Increment the id"}
                     />
                   </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_6rem_12rem]">
+                    <input
+                      className={FIELD}
+                      aria-label={`Finding ${String(index + 1)} CVSS vector`}
+                      value={finding.cvssVector}
+                      onChange={(event) => {
+                        patchFinding(index, { cvssVector: event.target.value });
+                      }}
+                      placeholder="CVSS vector, if the report states one"
+                    />
+                    <input
+                      className={FIELD}
+                      aria-label={`Finding ${String(index + 1)} CVSS score`}
+                      value={finding.cvssScore}
+                      onChange={(event) => {
+                        patchFinding(index, { cvssScore: event.target.value });
+                      }}
+                      placeholder="Score"
+                    />
+                    <input
+                      className={FIELD}
+                      aria-label={`Finding ${String(index + 1)} ATT&CK techniques`}
+                      value={finding.techniques}
+                      onChange={(event) => {
+                        patchFinding(index, { techniques: event.target.value });
+                      }}
+                      placeholder="ATT&CK, e.g. T1190, T1110"
+                    />
+                  </div>
+                  <p className="text-[11px] text-faint">
+                    Leave the taxonomy blank if the report states none — tick{" "}
+                    <span className="text-dim">Infer CVSS &amp; ATT&amp;CK</span> below to have
+                    the model derive it, or fill it in later from the finding editor. What you
+                    type here is recorded as stated by the report, not inferred.
+                  </p>
                 </fieldset>
               ))}
 
@@ -265,7 +304,10 @@ export function NewReport() {
                 spellCheck={false}
               />
               <p className="font-mono text-[11px] text-faint">
-                Shape: {"{ label, findings: [{ title, severity, description, endpoints[], steps_to_reproduce }] }"}
+                Shape:{" "}
+                {
+                  "{ label, findings: [{ title, severity, description, endpoints[], steps_to_reproduce, cvssv3?, cvssv3_score?, mitre_techniques[]? }] }"
+                }
               </p>
             </div>
           )}

@@ -161,6 +161,16 @@ export interface ManualFindingInput {
   description?: string;
   endpoints?: string[];
   steps_to_reproduce?: string;
+  /**
+   * Taxonomy the source report stated, typed by the operator (#237). Present
+   * only when actually typed — omitted means "not stated", which is different
+   * from an empty vector. Anything supplied here is recorded author-stated
+   * (`inferred: false`) and is never overwritten by `enrich`.
+   */
+  cvssv3?: string;
+  cvssv3_score?: number;
+  /** ATT&CK technique ids. A revalid key — DefectDojo has no ATT&CK field. */
+  mitre_techniques?: string[];
 }
 
 /** Payload for creating a report by hand — POST /api/reports/manual. */

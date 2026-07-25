@@ -156,3 +156,35 @@ def test_stated_cwe_never_becomes_an_attack_technique() -> None:
     [finding] = map_defectdojo_export(_export({"title": "t", "severity": "Low", "cwe": 89}))
     assert finding.mitre.techniques == ()
     assert finding.mitre.inferred is False
+
+
+def test_stated_attack_techniques_are_copied_as_author_stated() -> None:
+    """Typed by a person, so author-stated — not an inference (#237)."""
+    [finding] = map_defectdojo_export(
+        _export({"title": "t", "severity": "Low", "mitre_techniques": ["T1190", "T1110"]})
+    )
+    assert finding.mitre.techniques == ("T1190", "T1110")
+    assert finding.mitre.inferred is False
+
+
+def test_blank_technique_entries_are_dropped_not_stored() -> None:
+    """An empty box means "no taxonomy", never a mapping onto the empty string."""
+    [finding] = map_defectdojo_export(
+        _export({"title": "t", "severity": "Low", "mitre_techniques": ["  ", "T1190", ""]})
+    )
+    assert finding.mitre.techniques == ("T1190",)
+
+
+def test_all_blank_techniques_yield_no_mapping_at_all() -> None:
+    [finding] = map_defectdojo_export(
+        _export({"title": "t", "severity": "Low", "mitre_techniques": ["", "   "]})
+    )
+    assert finding.mitre.techniques == ()
+    assert finding.mitre.inferred is False
+
+
+def test_techniques_must_be_a_list_of_strings() -> None:
+    with pytest.raises(IngestError, match="mitre_techniques"):
+        map_defectdojo_export(
+            _export({"title": "t", "severity": "Low", "mitre_techniques": "T1190"})
+        )

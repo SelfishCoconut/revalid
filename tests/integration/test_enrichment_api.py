@@ -141,3 +141,59 @@ def test_a_failed_derivation_still_imports_and_is_reported() -> None:
         assert response.status_code == 200
         assert response.json() == {"imported": 2, "enriched": 0, "enrichment_failed": 2}
         assert len(client.get("/api/findings").json()) == 2
+
+
+def test_manual_report_accepts_a_hand_typed_taxonomy_as_author_stated() -> None:
+    """Typed by a person, so `inferred=false` — and no model is needed for it (#237)."""
+    with _client(_forbidden_model()) as client:
+        response = client.post(
+            "/api/reports/manual",
+            json={
+                "label": "Transcribed",
+                "findings": [
+                    {
+                        "title": "SQLi in login",
+                        "severity": "high",
+                        "cvssv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                        "cvssv3_score": 9.8,
+                        "mitre_techniques": ["T1190"],
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        [finding] = client.get("/api/findings").json()
+        assert finding["cvss"]["vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+        assert finding["cvss"]["base_score"] == 9.8
+        assert finding["cvss"]["inferred"] is False
+        assert finding["mitre"]["techniques"] == ["T1190"]
+        assert finding["mitre"]["inferred"] is False
+
+
+def test_enrichment_never_overwrites_what_the_operator_typed() -> None:
+    """The two features must compose: a typed value outranks a derived one (#237)."""
+    typed = "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"
+    with _client(_deriving_model()) as client:
+        response = client.post(
+            "/api/reports/manual",
+            json={
+                "label": "Typed then enriched",
+                "enrich": True,
+                "findings": [
+                    {
+                        "title": "Weak TLS",
+                        "severity": "low",
+                        "cvssv3": typed,
+                        "mitre_techniques": ["T1040"],
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        [finding] = client.get("/api/findings").json()
+        assert finding["cvss"]["vector"] == typed
+        assert finding["cvss"]["inferred"] is False
+        assert finding["mitre"]["techniques"] == ["T1040"]
+        assert finding["mitre"]["inferred"] is False

@@ -6,17 +6,19 @@ top-level ``{"findings": [...]}`` array where each entry carries at least
 ``Finding.raw`` so unmapped fields stay auditable.
 
 **No LLM** is the invariant of this module, and it is why this door is the
-deterministic, instant, free seeding path for demos and tests. A *stated* CVSS
-code is still copied across (``_map_cvss``) because copying is not inferring;
-*deriving* a taxonomy the source never stated is the opt-in enrichment pass in
-:mod:`revalid.extract`, which the caller runs after mapping (issue #233).
+deterministic, instant, free seeding path for demos and tests. A *stated*
+taxonomy is still copied across — ``cvssv3``/``cvssv3_score`` from the DefectDojo
+format, plus the revalid-specific ``mitre_techniques`` the manual form supplies —
+because copying is not inferring, and both land ``inferred=False``. *Deriving* a
+taxonomy the source never stated is the opt-in enrichment pass in
+:mod:`revalid.extract`, which the caller runs after mapping (issues #233, #237).
 """
 
 from __future__ import annotations
 
 import json
 
-from revalid.domain import CvssCode, Finding, Severity
+from revalid.domain import CvssCode, Finding, MitreMapping, Severity
 
 _SEVERITY_ALIASES: dict[str, Severity] = {
     "info": Severity.INFO,
@@ -82,8 +84,31 @@ def _map_finding(item: object, index: int) -> Finding:
         affected_endpoints=_string_tuple(item.get("endpoints"), index, "endpoints"),
         reproduction_steps=_split_steps(item.get("steps_to_reproduce"), index),
         cvss=_map_cvss(item),
+        mitre=_map_mitre(item, index),
         raw=item,
     )
+
+
+def _map_mitre(item: dict[str, object], index: int) -> MitreMapping:
+    """Copy **stated** ATT&CK technique ids across, unflagged (FR-19, issue #237).
+
+    ``mitre_techniques`` is a revalid key, not a DefectDojo one — the format has
+    no ATT&CK field, so this is the door through which the manual form (and a
+    hand-written JSON payload) supplies techniques the operator read in the
+    source report. Typed by a person means author-stated, so ``inferred`` is
+    ``False``, exactly as the finding editor treats an operator edit (ADR-0037).
+
+    Blank entries are dropped rather than stored, so an empty box yields "no
+    taxonomy" rather than a mapping to the empty string.
+
+    Raises:
+        IngestError: If the field is present but is not a list of strings.
+    """
+    value = item.get("mitre_techniques")
+    if value is None:
+        return MitreMapping()
+    techniques = _string_tuple(value, index, "mitre_techniques")
+    return MitreMapping(techniques=tuple(t.strip() for t in techniques if t.strip()))
 
 
 def _map_cvss(item: dict[str, object]) -> CvssCode:
@@ -96,10 +121,11 @@ def _map_cvss(item: dict[str, object]) -> CvssCode:
     An export that states nothing yields an empty code, which the opt-in
     enrichment pass can later fill (flagged as inferred).
 
-    ATT&CK is deliberately **not** mapped here. DefectDojo carries ``cwe``, and a
-    CWE weakness id is not an ATT&CK technique id — deriving one from the other
-    needs a real mapping, not a rename, so a stated CWE leaves ``mitre`` empty
-    rather than fabricating a technique.
+    A stated ``cwe`` is deliberately **not** turned into an ATT&CK technique: a
+    weakness id is not a technique id, and deriving one from the other needs a
+    real mapping, not a rename. Techniques come from :func:`_map_mitre` (the
+    operator states them) or from the opt-in enrichment pass (which flags them
+    inferred) — never from a renamed CWE.
     """
     vector = item.get("cvssv3") or item.get("cvss_vector")
     if not isinstance(vector, str) or not vector.strip():
