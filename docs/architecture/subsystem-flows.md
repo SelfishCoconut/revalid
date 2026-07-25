@@ -28,8 +28,8 @@ flowchart TB
     M --> MAP
 
     EX --> ENR["CVSS + MITRE ATT&CK enrichment<br/>copied when stated, inferred + flagged when not<br/>FR-19, ADR-0037"]
-    MAP --> ENR
     ENR --> PERSIST["persist finding identity + version 1<br/>origin = extraction"]
+    MAP -->|"no taxonomy — set by hand<br/>in the finding editor"| PERSIST
     PERSIST --> READY(["report → ready"])
 
     PX -.->|"PdfError / any exception"| FAIL(["report → failed<br/>error recorded"])
@@ -50,8 +50,18 @@ single call wedged (#206). Document metadata extraction is best-effort and can n
 fail a report.
 
 For development and demos, seed through **manual entry**: it skips the LLM, so
-seeding is deterministic, instant and free, and the result is indistinguishable
-downstream from an extracted report.
+seeding is deterministic, instant and free.
+
+The doors are *not* quite equal, and the difference is the FR-19 taxonomy.
+Enrichment is part of the extraction call — `extract.py` asks for `cvss` and
+`mitre` in the same schema-validated response as the rest of the finding — so
+only the PDF door produces them. `ingest.py` maps DefectDojo JSON and manual
+entry with no LLM at all and therefore no taxonomy: those findings land with
+empty `cvss`/`mitre`, and the only route to a taxonomy for them is the finding
+editor, where the operator sets both by hand and provenance becomes
+author-stated (`inferred=false`, issue #226). Worth knowing when reading an
+evaluation: a corpus seeded manually — as the FR-15 run was — has no inferred
+taxonomy in it at all.
 
 ## Reports chat — read-only corpus Q&A (FR-18, ADR-0036)
 
