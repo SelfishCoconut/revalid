@@ -105,7 +105,7 @@ erDiagram
         int id PK
         int session_id FK
         int seq "monotonic per session"
-        string kind "16 event kinds"
+        string kind "17 event kinds"
         json payload
         datetime created_at
     }
@@ -227,6 +227,7 @@ stateDiagram-v2
     working --> error: unhandled failure
     working --> ended: operator ends it
 
+    concluded --> idle: reopen — verdict withdrawn
     concluded --> [*]
     ended --> [*]
     error --> [*]
@@ -252,6 +253,7 @@ when it is scaled into the memoir:
 | `working → awaiting_operator` | The agent handed back: a reply, a guided one-action report, a verdict recommendation, or "I'm out of options". |
 | `working → working` | **Restart model** — the operator aborts a wedged in-flight turn and has it re-run (ADR-0039). |
 | `working → concluded` | The agent recorded its own verdict. Reachable **only** under Auto-run. |
+| `concluded → idle` | **Reopen** (ADR-0043): the operator withdraws the recorded verdict and keeps testing. The only edge out of a terminal state. |
 
 A verdict the agent authors itself (`working --> concluded`) is reachable **only
 under free launch / Auto-run**; in guided mode the agent never self-concludes and
@@ -270,6 +272,7 @@ flowchart TB
         A1["agent_message"]
         A2["command_proposed"]
         A3["verdict"]
+        A1 ~~~ A2 ~~~ A3
     end
     subgraph human["the operator's voice"]
         H1["command_approved"]
@@ -278,6 +281,8 @@ flowchart TB
         H4["human_message"]
         H5["verdict_adjudicated"]
         H6["plan_updated — the user-owned goal"]
+        H7["verdict_cancelled — reopened (ADR-0043)"]
+        H1 ~~~ H2 ~~~ H3 ~~~ H4 ~~~ H5 ~~~ H6 ~~~ H7
     end
     subgraph system["the system's voice"]
         S1["command_output"]
@@ -287,10 +292,12 @@ flowchart TB
         S6["error"]
         S7["messages_delivered — queued msg read (ADR-0039)"]
         S8["turn_restarted — operator unstick (ADR-0039)"]
+        S1 ~~~ S2 ~~~ S3 ~~~ S5 ~~~ S6 ~~~ S7 ~~~ S8
     end
 
     A3 --> T[("session_events<br/>append-only, seq-ordered")]
     H5 --> T
+    H7 --> T
     S2 --> T
     T --> V["verdict row<br/>a derivation, not the source"]
     T --> AU["FR-10 audit<br/>re-projects and diffs"]
@@ -308,6 +315,14 @@ carrying its words plus a `state_change` — so the transcript needs no special
 `verdict_adjudicated` is the operator's override. Once present, the **latest**
 one is the authoritative event for audit purposes — not the agent's original
 `verdict`.
+
+`verdict_cancelled` is its counterpart for a **reopened** session (ADR-0043): the
+operator withdrew the determination rather than replacing it. Note what the pair
+of them implies about where truth lives — reopening *deletes* the row in
+`verdicts`, because that table is a projection of current determinations, but it
+cannot delete anything from `session_events`, because that is the record the
+projection was derived from. A verdict can be retracted; the fact that it was
+once reached cannot.
 
 ## Report ingest lifecycle
 

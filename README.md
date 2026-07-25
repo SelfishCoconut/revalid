@@ -105,8 +105,8 @@ flowchart LR
     B --> C["🎯 Operator sets the goal"]
     C --> D{"🤖 Agentic retest loop"}
     D -->|"proposes one command"| G["🛑 Human approval gate"]
-    G -->|"approved"| S["🐳 Egress-locked sandbox<br/>per-session --internal network"]
-    S -->|"only reachable host"| L[("🎯 Authorised lab target")]
+    G -->|"approved"| S["🐳 Egress-locked sandbox<br/>internal network · or L3 gateway"]
+    S -->|"only reachable host"| L[("🎯 Authorised target<br/>lab container · or scoped host")]
     S -->|"output"| D
     D -->|"still open / fixed"| V["⚖️ Verdict + pinned evidence"]
     V --> X["🔗 Audit re-derivation<br/>📦 Versioned export"]
@@ -119,17 +119,22 @@ flowchart LR
     class L data;
 ```
 
-> **Why a `--internal` network instead of a URL allowlist?** Because an allowlist is a promise and a
-> network is a fact. The sandbox container is attached to a network with exactly one other member —
-> the authorised target — so "don't touch anything else" is not enforced by checking strings, it is
-> enforced by there being nothing else to touch. The gate then makes it *deliberate*: a human
-> approves every command the agent runs. See [ADR-0025](docs/adr/0025-agentic-retest-console.md).
+> **Why a network boundary instead of a URL allowlist?** Because an allowlist is a promise and a
+> network is a fact. For a lab target the sandbox is attached to a network with exactly one other
+> member — the authorised target — so "don't touch anything else" is not enforced by checking
+> strings, it is enforced by there being nothing else to touch. For an online target the same
+> principle is applied one layer down: the packet filter lives in a *separate* container whose
+> network namespace the sandbox joins, holding no capability to edit it — so `iptables -F` from an
+> approved command returns `Operation not permitted`. The gate then makes it *deliberate*: a human
+> approves every command the agent runs. See [ADR-0025](docs/adr/0025-agentic-retest-console.md)
+> and [ADR-0045](docs/adr/0045-l3-egress-gateway.md).
 
 > [!TIP]
 > The full narrative — lifecycles, the session state machine, the sandbox model, and every operator
-> action — is in **[docs/architecture/workflow.md](docs/architecture/workflow.md)**, with wire-level
-> sequence diagrams in [docs/architecture/c4.md](docs/architecture/c4.md) and generated API/UML
-> reference on the [docs site](https://selfishcoconut.github.io/revalid/).
+> action — is in **[docs/architecture/workflow.md](docs/architecture/workflow.md)**, with both sandbox
+> topologies drawn rule by rule in [docs/architecture/topology.md](docs/architecture/topology.md),
+> wire-level sequence diagrams in [docs/architecture/c4.md](docs/architecture/c4.md) and generated
+> API/UML reference on the [docs site](https://selfishcoconut.github.io/revalid/).
 
 ## 🚀 Getting started
 
@@ -249,7 +254,7 @@ Any [Pydantic AI](https://ai.pydantic.dev/) model string works; no code change i
 | **LLM** | Ollama (local-first default) · Claude API · anything Pydantic AI speaks, selected at runtime |
 | **Frontend** | Vite · React 19 · TypeScript (strict) · TanStack Query · Tailwind 4 · xterm.js |
 | **Storage** | SQLite — reports, finding versions, append-only session transcripts, verdicts, chats |
-| **Sandbox** | Docker SDK · ephemeral container on a per-session `--internal` network |
+| **Sandbox** | Docker SDK · ephemeral per-session container — on an `--internal` network (lab) or in the namespace of an `iptables` egress gateway (online) |
 | **Ingestion** | `pdfplumber` for PDFs; DefectDojo-style JSON and manual entry for everything else |
 | **Quality** | `mypy --strict` · ruff · xenon (complexity ≤ C) · pytest pyramid ≥ 80% · Vitest · CodeQL · Bandit · pip-audit · Gitleaks |
 | **Docs** | MkDocs Material · mkdocstrings (from docstrings) · pyreverse UML · Mermaid C4 |
@@ -265,7 +270,7 @@ scripts/demo/    — runnable validation demos, one per feature ("How to validat
 docs/
   requirements/  — the SRS (FR/NFR by ID, the contract everything traces to)
   adr/           — Architecture Decision Records (MADR)
-  architecture/  — C4 + workflow, authored Mermaid
+  architecture/  — C4, workflow, network topology, class + data models (authored Mermaid)
   reference/     — generated API + UML (never hand-edited)
   roadmap.md     — current state, milestones, next action
 thesis/          — the memoir (English, ESII XeLaTeX template)

@@ -951,7 +951,7 @@ def start_and_step(
     """
     # Provision against the session's scope (ADR-0041): the launch `target_set`
     # endpoints parsed to their hosts. Lab scope keeps the unchanged internal
-    # network; an online host provisions the allowlisting egress proxy.
+    # network; an online host provisions the L3 egress gateway (ADR-0045).
     sandbox.start(scope_hosts(session_scope(session, session_id)))
     live = LiveSession(agent=agent, sandbox=sandbox, free_launch=free_launch)
     registry.put(session_id, live)

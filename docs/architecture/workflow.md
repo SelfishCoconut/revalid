@@ -167,12 +167,17 @@ production `DockerSandbox`:
    crashed run, or a report deletion, reaps cleanly).
 
 This is what FR-06 means in the current design: **the allowlist is topology**,
-not an HTTP-layer check — network membership on the lab, a closed egress
-allowlist online. The agent is not *asked* to stay on target; it is physically
-unable to reach anything the operator did not scope. Note that online mode
-permits HTTP(S) only — non-HTTP egress has no path out at all. Either way the
-scope is fixed when the sandbox is provisioned: changing it needs a fresh session
-(the `target_set` event is emitted once and never again).
+not an HTTP-layer check — network membership on the lab, an L3 egress allowlist
+online. The agent is not *asked* to stay on target; it is physically unable to
+reach anything the operator did not scope. Because the online filter is L3 it
+names no protocol, so every tool in the toolbox works against a scoped host, not
+just the HTTP ones — that is the whole point of ADR-0045, and its cost is that
+the scope IPs are pinned at launch and cannot follow a rotating CDN. Either way
+the scope is fixed when the sandbox is provisioned: changing it needs a fresh
+session (the `target_set` event is emitted once and never again).
+
+Both topologies — the rules, the per-session resource names, the teardown order
+and the limits — are drawn out on the [network topology](topology.md) page.
 
 Two operational details worth knowing: `start()` self-heals a network left
 behind by a crashed prior session of the same id (it would otherwise 409
@@ -213,6 +218,7 @@ stateDiagram-v2
     working --> concluded: ConcludeOutput(fixed | still_open) — free-launch only
     stopped --> concluded: operator concludes manually
     working --> error: unhandled failure
+    concluded --> idle: operator reopens — the verdict is withdrawn (ADR-0043)
     concluded --> [*]
     error --> [*]
     working --> ended: operator ends the session
@@ -315,6 +321,7 @@ opening a second conversation.
 | **Restart** | new deferred session | ends this attempt and opens a fresh `idle` one (goal + scope carried over) that waits for Start — never auto-runs |
 | Keep going / conclude | `.../continue`, `.../conclude` | Keep going resumes an `awaiting_operator` pause; **Conclude writes the operator's own verdict at any live point** (issue #150), not just at a pause |
 | End it | `.../end` | terminal; sandbox torn down |
+| **Reopen** | `.../reopen` | the one way *back* out of a terminal state: withdraws a `concluded` session's verdict and returns it to `idle` so testing can continue (ADR-0043) |
 
 ### Concluding — and the honest "I don't know"
 
@@ -336,6 +343,16 @@ last real `command_output`, not the model's restatement of it — and the sandbo
 is torn down. An operator can later override the verdict with
 `.../adjudicate`, which appends a `verdict_adjudicated` event; that event then
 becomes the authoritative one for audit purposes.
+
+A concluded session is not quite the end of the line. **Reopen** (`.../reopen`,
+ADR-0043) withdraws the verdict and returns the session to `idle`; waking it from
+there re-provisions the sandbox and picks up from the transcript, with the goal
+and scope reconstructed out of it. The withdrawn verdict stays **in the
+transcript** — its `verdict` event, plus a new `verdict_cancelled` one — because
+the transcript is append-only and is exactly what the FR-10 audit re-projects.
+What is removed is its row in the queryable `verdicts` projection, since a
+determination the operator retracted should not go on being displayed as the
+finding's outcome.
 
 ## Stage 4 — derivations off the trail
 
