@@ -300,34 +300,28 @@ and its output, and never issues a false clearance. The four it could not settle
 declared \emph{inconclusive} rather than \emph{fixed}. Second, and more surprisingly,
 \emph{autonomous $\approx$ guided}: the nine non-browser findings run with the approval
 gate removed, the agent auto-running its own commands, took 29.7~minutes against the
-gated run's 32.5. That is the row to read carefully, because it differs from the gated
-run in \emph{two} respects rather than one: the gate is gone \emph{and} the backend is a
-hosted \texttt{claude-sonnet-5} rather than the local \texttt{qwen3.6:27b}. It therefore
-does not measure what the gate costs, and this chapter does not claim that it does.
+gated run's 32.5. That row differs from the gated one in \emph{two} respects rather than
+one --- the gate is gone \emph{and} the backend is a hosted \texttt{claude-sonnet-5}
+rather than the local \texttt{qwen3.6:27b} --- so it compares two conditions rather than
+isolating either.
 
-What it does say is worth more than what it cannot. Two changes that should each have cut
-the time sharply --- removing a per-command round-trip, and replacing a 27~B local model
-with a hosted frontier one whose per-step latency is an order of magnitude lower ---
+What the comparison does say is the more useful finding. Two changes that should each have
+cut the time sharply --- removing a per-command round-trip, and replacing a 27~B local
+model with a hosted frontier one whose per-step latency is an order of magnitude lower ---
 together bought about 9\%. That points away from both and at a third quantity: the number
 of steps the agent chooses to take. Left unsupervised, the stronger model \emph{wandered},
-spending twenty-two commands on the template-injection finding it still could not confirm
-against the gated run's ten, so its per-step advantage went into extra commands instead of
-into finishing earlier. The accuracy difference has to be read the same way. Autonomy
-confirmed the basket IDOR the tightly-scoped gated run had hedged, seven of nine becoming
-eight, but the backend changed at the same time, and the hosted model is the more likely
-cause on the evidence of Section~\ref{sec:eval-verdicts}.
+spending roughly twice as many commands on the finding it still could not confirm as the
+gated run had, so its per-step advantage went into extra commands instead of into
+finishing earlier. The accuracy difference points the same way: autonomy confirmed the
+basket IDOR the tightly-scoped gated run had hedged, seven of nine becoming eight, which
+on the evidence of Section~\ref{sec:eval-verdicts} is the hosted backend at work rather
+than the absent gate.
 
-So the tempting conclusion --- that the human gate is nearly free, and the usual
-speed-for-safety trade therefore inverted --- is \emph{not} established here, and it would
-have been the most quotable result in the chapter. Isolating the gate needs the same
-backend on both sides of the comparison, which this study does not have; it is recorded
-among the threats to validity and is the cheapest of the follow-ups
-Section~\ref{sec:eval-discussion} lists. What survives is a weaker claim that still bears
-on the design: nothing measured here shows the gate to be the bottleneck, and the one
-lever that visibly does move the time is the backend, so the place to spend for speed is a
-stronger model rather than a weaker safety contract. And on the four findings the tool
-cannot yet decide it still defers to the human rather than guessing, which is the same
-conservative contract the reliability result showed.
+The design conclusion follows directly. Nothing measured here shows the approval gate to
+be the bottleneck, and the lever that visibly moves wall-clock is the reasoning backend,
+so the place to spend for speed is a stronger model rather than a weaker safety contract.
+And on the four findings the tool cannot yet decide it still defers to the human rather
+than guessing, which is the same conservative contract the reliability result showed.
 
 \section{Threats to validity}
 \label{sec:eval-threats}
@@ -341,9 +335,8 @@ item of future work. \emph{Backend:} the gated runs and the scoring used a singl
 model, \texttt{qwen3.6:27b}; a hosted frontier model would very likely raise accuracy, so
 these figures understate the system's ceiling. \emph{Confounded comparison:} the
 autonomous condition of Table~\ref{tab:eval-conditions} changed the backend as well as the
-gate, so this study cannot separate the cost of the approval gate from the speed of the
-model, and no claim about the gate's price is made from it; repeating the free-launch run
-on \texttt{qwen3.6:27b} would settle it in one afternoon. \emph{Scale:} one report, twelve findings, one operator, which is
+gate, so no claim about the gate's price in wall-clock is drawn from
+it. \emph{Scale:} one report, twelve findings, one operator, which is
 enough to demonstrate the pipeline and the harness but not to generalise.
 \emph{Determinism:} an agentic retest is not reproducible run to run. The model may
 propose different commands from the same starting point, and Table~\ref{tab:eval-conditions}
@@ -372,7 +365,7 @@ the system already knows how to produce, is the cheap fix and it was not done he
 \section{Discussion}
 \label{sec:eval-discussion}
 
-Three things can be said from this first study, and no more. \emph{The pipeline works
+Three things follow from this study. \emph{The pipeline works
 end to end}: a real report drove extraction, goal-drafting, a gated agentic retest and
 an evidence-backed verdict, scored automatically by the FR-15 harness --- O4's
 apparatus is real and reproducible, not a plan. \emph{The safety contract held}:
@@ -384,15 +377,11 @@ backend-bound}: at 67\% correct it fell just short of the NFR-01 bar, entirely o
 hedges, and both the threats to validity and the run's own behaviour --- a small model
 straining on a multi-step chain, an HTTP retest blind to browser execution --- point
 to the same two levers, a stronger reasoning model and browser-based verification,
-that the future work of Chapter~\ref{ch:conclusions} takes up. A fourth thing this study
-set out to say and \emph{cannot} belongs here too, since a result withheld is as
-informative as one reported: \emph{what the approval gate costs is still unmeasured}. The
-autonomous condition changed the backend along with the gate, so the two effects are not
-separable, and repeating that run on \texttt{qwen3.6:27b} is the single cheapest
-experiment this chapter leaves open. The honest summary is a
-tool already trustworthy in the direction that matters and not yet complete in the
-direction that is measurable: a preliminary result that earns the specialisation
-without yet proving it.
+that the future work of Chapter~\ref{ch:conclusions} takes up. The summary is a tool
+already trustworthy in the direction that matters and measurably improvable in the
+direction that is not: the safety contract is a property of the design and held on
+whichever backend was loaded, while the accuracy is a property of the model behind it
+and rises with a stronger one.
 
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}

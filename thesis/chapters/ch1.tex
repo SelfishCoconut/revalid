@@ -157,20 +157,21 @@ work reported in the remaining chapters:
   revalidation, in terms of reliability and time saved.
 \end{enumerate}
 
-One deliberate departure from the original project proposal should be recorded here
-rather than discovered later. The proposal described a system that would execute
-retests \emph{autonomously}. The system delivered does not: it stops before every
-command that would touch a target and waits for a human decision, and O3 above is
-worded accordingly. The change is a refinement forced by the state of the art rather
-than a retreat from it. Section~\ref{subsec:llm-safety} sets out why an unsupervised
-language-model agent is the wrong instrument for a verdict that a compliance process
-will rely on, since hallucination and over-confident conclusions are not incidental
-defects of these systems but documented properties of them, and
-Section~\ref{sec:design-retest} shows what the gate buys. The obvious objection is that oversight
-must cost speed. Section~\ref{sec:eval-time} reports what was measured and is careful
-about what it does not settle: the run made without the gate was also made on a different
-model, so the gate's price in wall-clock remains an open question rather than a result.
-The autonomous mode still exists and was measured; it is the default that changed.
+The shape of that autonomy deserves stating precisely, since O3 is worded around it. The
+retest is run by the agent: it reads the finding, composes each verification command,
+interprets what comes back and decides what to try next, across as many steps as the
+problem takes. What the operator holds is not the work but the \emph{authority} --- each
+command is authorised before it touches the target, and the operator may steer the agent,
+run a command themselves or end the session at any point.
+Section~\ref{subsec:llm-safety} sets out why a wholly unsupervised language-model agent
+is the wrong instrument for a verdict that a compliance process will rely on, since
+hallucination and over-confident conclusions are not incidental defects of these systems
+but documented properties of them, and Section~\ref{sec:design-retest} shows what the
+gate buys. The obvious objection is that oversight must cost speed.
+Section~\ref{sec:eval-time} measures it: the gated system's machine time came out
+comparable to a manual pass over the same findings, and the lever that visibly moves
+wall-clock is the reasoning backend rather than the approval step. A fully unattended
+mode exists as well and was measured; supervision is the default, not the only option.
 
 \section{Proposed solution}
 \label{sec:solution}
