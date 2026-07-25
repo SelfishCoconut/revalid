@@ -19,6 +19,7 @@ reference artefact, unreadable at print size.
 
 <!-- thesis-fig: data-model -->
 ```mermaid
+%%{init: {"er": {"useMaxWidth": false}, "themeVariables": {"fontSize": "22px"}}}%%
 erDiagram
     REPORTS ||--o{ FINDINGS : "yields"
     FINDINGS ||--|{ FINDING_VERSIONS : "append-only lineage"

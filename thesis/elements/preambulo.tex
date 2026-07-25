@@ -102,7 +102,7 @@ Signed by: \autor
 
 Penetration testing ends with a report that lists each discovered vulnerability and
 the steps needed to reproduce it. Once the development team applies fixes, someone
-must confirm that every reported weakness is genuinely closed --- the
+must confirm that every reported weakness is genuinely closed: the
 \emph{revalidation}, or retest, phase. In practice this is done by hand, one finding
 at a time, on every remediation cycle: it is repetitive, judgement-laden and poorly
 supported by tooling, even as the offensive side of security automates rapidly with
@@ -114,7 +114,7 @@ control of every action that reaches a target. A large language model extracts e
 finding and its reproduction steps from the report; a tool-using agent then
 re-executes those steps against an authorised target inside an egress-locked sandbox,
 proposing each command for the operator's approval before it runs, and returns a
-conservative, evidence-linked verdict --- \emph{still-open}, \emph{fixed} or
+conservative, evidence-linked verdict of \emph{still-open}, \emph{fixed} or
 \emph{inconclusive}. The design is deliberately narrow: rather than discovering or
 exploiting new vulnerabilities, it specialises in re-verifying reported ones under
 per-command human oversight, defaulting to an inconclusive verdict whenever the
@@ -123,7 +123,7 @@ against either a hosted or a locally hosted model, the system is evaluated
 end-to-end on a real penetration-test report against a live, deliberately vulnerable
 target. On a locally hosted model it reached the correct verdict on eight of twelve
 findings and hedged on the remaining four, never once declaring a still-exploitable
-finding fixed --- meeting the safety constraint the design exists to enforce, while
+finding fixed, meeting the safety constraint the design exists to enforce while
 falling narrowly short of the accuracy target on hedges rather than errors. Its
 machine time was comparable to a manual pass over the same findings, and removing the
 approval gate bought no meaningful speed, indicating that per-command human oversight
@@ -154,7 +154,7 @@ direction and support that grounded the work in practice.
 I owe a particular debt to Álvaro Moreno, who first introduced me to artificial
 intelligence applied to cybersecurity and whose advice set this project on its
 course. I am no less thankful to Matthias Vaytet and Dr.~Tim Winkler, both of whom
-were a genuine source of inspiration throughout --- and to Matthias in particular,
+were a genuine source of inspiration throughout, and to Matthias in particular,
 for the motivation.
 
 Finally, I thank my family and friends for their patience and support over the months

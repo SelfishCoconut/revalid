@@ -24,7 +24,7 @@ first two entries below are required to build, modify or test it from source.
 \item \textbf{Docker}, used both to bring up the intentionally vulnerable lab target
   and to run the isolated container in which the retest agent executes its commands.
 \item \textbf{A language-model backend.} Either a hosted model, selected with an API
-  key, or a locally hosted \texttt{Ollama} server --- the shipped default is
+  key, or a locally hosted \texttt{Ollama} server. The shipped default is
   local-first, so no external service is required to run the tool.
 \end{itemize}
 
@@ -32,8 +32,8 @@ first two entries below are required to build, modify or test it from source.
 \label{sec:annex-deploy}
 
 For simply \emph{running} the tool, neither Python nor Node is needed: the whole
-system --- the service with its compiled interface, and the lab target it retests
---- is built and started from containers by a single command.
+system, the service with its compiled interface and the lab target it retests,
+is built and started from containers by a single command.
 
 \begin{lstlisting}[language=bash]
 make deploy
@@ -49,7 +49,7 @@ are pulled into the deployment and an existing local server is reused as it is.
 
 One consequence deserves to be stated rather than buried. The retest sandbox
 creates its own container and its own isolated network for every session, so the
-service container is given access to the host's container daemon --- which is
+service container is given access to the host's container daemon, which is
 equivalent to giving it administrative control of the host. That is acceptable
 here only because the tool is a single-operator local instrument, run by the
 person who already owns the machine; it is the reason the system is not something
@@ -71,8 +71,8 @@ make build-ui             # compile the React single-page interface
 \end{lstlisting}
 
 The \texttt{sandbox} extra installs the Docker client library the retest agent
-needs. It is optional because every path that does not start a retest session ---
-ingestion, extraction, the audit, the export and the whole test suite --- imports
+needs. It is optional because every path that does not start a retest session
+(ingestion, extraction, the audit, the export and the whole test suite) imports
 nothing from it; omitting it yields a working installation in which a retest cannot
 be started.
 
@@ -94,7 +94,7 @@ curl -s http://127.0.0.1:8000/api/health
 \end{lstlisting}
 
 The active model backend is seeded on first run and can afterwards be changed at any
-time --- provider, model and, where relevant, the API key --- from the
+time (provider, model and, where relevant, the API key) from the
 \emph{Settings} view of the interface, with no restart required.
 
 \section{Bringing up the lab target}
@@ -112,16 +112,13 @@ make lab-down   # stop it when finished
 
 The agent's commands run inside a sandbox container placed on a Docker network in
 \texttt{internal} mode. What is attached to that network is decided by the
-\emph{scope} the operator sets when starting the retest: for a lab scope --- the
-case this guide follows --- the lab target is attached and nothing else, so
+\emph{scope} the operator sets when starting the retest: for a lab scope, the
+case this guide follows, the lab target is attached and nothing else, so
 reachability is network membership (FR-06), the lab container is the one host the
 sandbox has any route to, and no command, whatever address it names, can leave that
-network. (A scope naming a host outside the lab instead confines the sandbox behind
-a per-session egress gateway --- a helper container holding a packet-filter
-allowlist for that host's addresses, which the sandbox cannot alter --- so every
-tool reaches the scoped host alone; if the gateway cannot be provisioned the session
-is torn down rather than run unrestricted.) Two practical consequences follow for
-the lab case, both worth knowing before the first run.
+network. (A scope naming a host outside the lab is confined differently, by a
+per-session egress gateway; see Section~\ref{sec:design-runtime}.) Two practical
+consequences follow for the lab case, both worth knowing before the first run.
 
 Because the sandbox cannot download anything, every tool the agent may use has to be
 present in its image already. That image is built once, locally:
@@ -133,8 +130,8 @@ make sandbox-image   # build the agent's penetration-testing toolbox image
 And because the sandbox has no route off its own network, the target must be
 addressed by its container name (\texttt{http://revalid-juice-shop:3000}) and never
 as \texttt{localhost}, which inside the sandbox resolves to the sandbox itself. A
-retest scoped to a \texttt{localhost} address --- which is what a report's stated
-endpoints usually say --- will simply fail to connect, and does so as a connection
+retest scoped to a \texttt{localhost} address, which is what a report's stated
+endpoints usually say, will simply fail to connect, and does so as a connection
 error rather than as a refusal; the finding's scope must be edited to the container
 name before the retest is started.
 
@@ -147,12 +144,12 @@ carried out from the browser:
 \begin{enumerate}
 \item Upload a penetration-test report (PDF), or enter one manually; the language
   model extracts each finding together with its reproduction steps.
-\item Open a finding and review or edit its retest \emph{goal} --- the objective the
+\item Open a finding and review or edit its retest \emph{goal}, the objective the
   agent will pursue.
 \item Start the agentic retest and \emph{approve each command} the agent proposes
   before it runs; the transcript records every step.
-\item Read the resulting verdict --- \emph{still-open}, \emph{fixed} or
-  \emph{inconclusive} --- together with the evidence that supports it.
+\item Read the resulting verdict of \emph{still-open}, \emph{fixed} or
+  \emph{inconclusive}, together with the evidence that supports it.
 \end{enumerate}
 
 \section{Offline demonstrations}
@@ -170,7 +167,7 @@ make demo-eval            # FR-15  evaluation harness over a run
 \end{lstlisting}
 
 Each runs without Docker, a lab target, a language-model backend or network access,
-so all eight of them can be executed anywhere with \texttt{make test-demos} --- which
+so all eight of them can be executed anywhere with \texttt{make test-demos}, which
 is also what the continuous-integration gate runs on every change
 (Section~\ref{sec:ci}).
 

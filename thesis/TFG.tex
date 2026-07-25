@@ -63,6 +63,17 @@
 % Estilo de página
 \pagestyle{fancy}
 
+% Chapters open on a recto page, so LaTeX inserts a filler verso before each one.
+% Leave those fillers genuinely blank: a page carrying only a number and a running
+% head reads as a printing defect.
+\makeatletter
+\renewcommand{\cleardoublepage}{%
+  \clearpage
+  \if@twoside\ifodd\c@page\else
+    \thispagestyle{empty}\hbox{}\newpage
+  \fi\fi}
+\makeatother
+
 
 % Introducción
 \input{chapters/ch1}
@@ -88,9 +99,8 @@
 \appendix
 \input{chapters/annex}
 
+% Start the bibliography on a recto page (the filler verso stays blank, see above).
 \cleardoublepage
-\thispagestyle{empty}
-
 
 % -------------------------------
 % Bibliografía

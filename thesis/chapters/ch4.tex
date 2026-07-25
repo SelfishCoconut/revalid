@@ -13,12 +13,12 @@ include: the architecture that was built, shipped, and then deleted.
 
 Every diagram in this chapter is rendered from the project's own architecture
 documentation rather than redrawn for the memoir. These C4, class and lifecycle
-diagrams are \emph{authored} --- written as Mermaid in the docs --- not extracted
+diagrams are \emph{authored}, written as Mermaid in the docs, not extracted
 from the code the way the generated UML of Section~\ref{subsec:docs} is; rendering
 the memoir's figure and the documentation's figure from that one source, instead of
 copying either by hand, is what stops the two from drifting apart. Keeping the
 authored diagram itself faithful to the code is a review rule (the
-\emph{doc-curator} agent checks it) rather than a mechanical guarantee --- a
+\emph{doc-curator} agent checks it) rather than a mechanical guarantee, a
 distinction this chapter is careful not to overstate.
 
 \section{From requirements to design}
@@ -35,6 +35,12 @@ that is a design outcome rather than an omission --- Section~\ref{sec:design-evo
 argues why.
 
 \begin{table}[!htbp]
+\caption[Requirements and their status in the delivered system]{The nineteen
+functional and five non-functional requirements, and what became of each. Five
+functional requirements (FR-04, FR-05, FR-07, FR-08 and FR-14) were
+implemented, tested and then removed or repurposed when the retest model changed;
+they are discussed in Section~\ref{sec:design-evolution} rather than hidden.}
+\label{tab:requirements}
 \scriptsize
 \renewcommand{\arraystretch}{1.10}
 \begin{center}
@@ -62,45 +68,53 @@ FR-17 & Interactive agentic retest console & Implemented \\ \hline
 FR-18 & Reports chat assistant & Implemented \\ \hline
 FR-19 & CVSS and MITRE ATT\&CK enrichment & Implemented; ground-truth tagging pending \\ \hline
 NFR-01 & Verdict reliability & \emph{Partially met} --- the safety constraint held (no confidently wrong verdict); accuracy 67\%, short of the 70\% target (Chapter~\ref{ch:evaluation}) \\ \hline
-NFR-02 & Full reproducibility & Replayable session transcript \\ \hline
+NFR-02 & Full reproducibility & \emph{Partial}: replayable session transcript; the model's own calls are not captured (Section~\ref{subsec:future-observability}) \\ \hline
 NFR-03 & Safety (loopback only, no exposure) & Enforced by binding and topology \\ \hline
 NFR-04 & Data protection & Satisfied by construction --- synthetic and lab data only \\ \hline
 NFR-05 & Maintainability & Enforced by the gate of Section~\ref{sec:ci} \\ \hline
 \end{tabular}
 \end{center}
-\caption[Requirements and their status in the delivered system]{The nineteen
-functional and five non-functional requirements, and what became of each. Five
-functional requirements --- FR-04, FR-05, FR-07, FR-08 and FR-14 --- were
-implemented, tested and then removed or repurposed when the retest model changed;
-they are discussed in Section~\ref{sec:design-evolution} rather than hidden.}
-\label{tab:requirements}
 \end{table}
 
-Figure~\ref{fig:arch-use-cases} gives the same contract from the outside, as the
-capabilities an operator actually exercises. Two features of it are worth noting
-before the architecture is opened. There is exactly \emph{one} human actor, which
-is what licenses the interaction model of Section~\ref{sec:design-retest}; and the
-use cases that matter cluster around a single one --- running a gated retest
-session --- whose \emph{included} step is the operator's approval of each command.
-An approval that appears as an included use case rather than an optional extension
-is the diagrammatic form of the claim this system makes.
+Figures~\ref{fig:arch-use-cases} and~\ref{fig:arch-use-cases-retest} give the same
+contract from the outside, as the capabilities an operator actually exercises. The
+first shows the model as a whole; the second expands the group the rest exists to
+serve. Two features are worth noting before the architecture is opened. There is
+exactly \emph{one} human actor, which is what licenses the interaction model of
+Section~\ref{sec:design-retest}; and the use cases that matter cluster around a
+single one, running a gated retest session, whose \emph{included} step is the
+operator's approval of each command. An approval that appears as an included use
+case rather than an optional extension is the diagrammatic form of the claim this
+system makes.
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-use-cases.pdf}
 \caption[Use-case model]{The use-case model, with each case labelled by the
 requirement it realises. The auditor is the only actor that decides; the
-language-model backend can only propose and the authorised target can only
-respond. Approving or rejecting each command is \emph{included} in a retest
-session --- it is not an optional extension of it.}
+language-model backend can only propose. The retest group is collapsed here and
+expanded in Figure~\ref{fig:arch-use-cases-retest}.}
 \label{fig:arch-use-cases}
+\end{figure}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-use-cases-retest.pdf}
+\caption[Use-case model: revalidating a finding]{The retest group of
+Figure~\ref{fig:arch-use-cases}, expanded. This is where the design's claims are
+visible as relations: approving or rejecting each command, and concluding the
+session, are \emph{included} in a retest session --- they are not optional
+extensions of it, which the three genuine extensions (running a command personally,
+steering the agent, handing over the wheel) are. The authorised target is reachable
+only through the session itself.}
+\label{fig:arch-use-cases-retest}
 \end{figure}
 
 Three requirements shape the architecture more than the rest, and it is worth
 naming them before any diagram. FR-06 (only authorised targets are ever reached)
 and NFR-03 (the tool is never exposed beyond the machine it runs on) are safety
 constraints, and safety constraints are best met by structure rather than by
-checks --- a theme returned to in Section~\ref{sec:design-runtime}. FR-10 (any
+checks, a theme returned to in Section~\ref{sec:design-runtime}. FR-10 (any
 verdict must be traceable to the trail that produced it) is what forces the
 persistence model of Section~\ref{sec:design-data}: a verdict cannot be a bare
 row, it has to be a derivation of something append-only.
@@ -111,8 +125,8 @@ row, it has to be a derivation of something append-only.
 \subsection{Context}
 
 Figure~\ref{fig:arch-context} places the system among the actors and systems it
-touches. There is exactly one human role --- the security auditor or developer
-who wants to know whether previously reported findings are still exploitable ---
+touches. There is exactly one human role, the security auditor or developer
+who wants to know whether previously reported findings are still exploitable,
 and exactly two external systems: a language-model backend, and the authorised
 targets being retested.
 
@@ -156,8 +170,8 @@ sandbox.}
 \end{figure}
 
 There is no message broker, no worker fleet and no separate database server, and
-their absence was argued rather than assumed. The alternative --- a queue and a
-worker process --- buys durability of in-flight work across a restart, and costs
+their absence was argued rather than assumed. The alternative, a queue and a
+worker process, buys durability of in-flight work across a restart, and costs
 an operator two more things to install and keep running. For a tool whose unit of
 work is an interactive session a human is watching, that trade is poor: if the
 process dies mid-session the human is present to notice, whereas a broker that
@@ -191,8 +205,8 @@ finding, the verdict, the session states and the enumerations, and imports no
 other module of the system. Everything else may depend on it; it depends on
 nothing. This is what keeps the domain vocabulary from acquiring a database
 shape or a web-framework shape, and it is the reason the persistence layer could
-be reorganised twice --- once to version findings, once to collapse the verdict
-model --- without the domain types moving.
+be reorganised twice, once to version findings and once to collapse the verdict
+model, without the domain types moving.
 
 \paragraph{One door to the schema.} \texttt{db.py} is the only module that
 defines a mapped class or opens a database engine; every other module receives an
@@ -204,8 +218,8 @@ answer, and the two reorganisations described in
 Section~\ref{sec:design-evolution} each touched one file.
 
 \paragraph{One place a model is constructed.} \texttt{llm.py} is the only module
-that builds a language-model client. Every agent --- extraction, goal generation,
-the retest agent, the corpus assistant --- receives its model rather than
+that builds a language-model client. Every agent (extraction, goal generation,
+the retest agent, the corpus assistant) receives its model rather than
 choosing one. That single choke point is what makes FR-13's promise real: the
 backend is swapped from the settings view at runtime, and no component knows
 whether it is talking to a hosted model or one running on the operator's own
@@ -217,8 +231,8 @@ machine.
 The module view of Section~\ref{sec:design-components} says where code lives; this
 section says what shape it has. The diagrams that follow are \emph{curated}: the
 project also generates an exhaustive class diagram per module group directly from
-the source with \texttt{pyreverse}, and that generated view --- a hundred and one
-classes joined by thirty-one relations --- is complete precisely because nobody
+the source with \texttt{pyreverse}, and that generated view, a hundred and five
+classes joined by thirty-one relations, is complete precisely because nobody
 chose what went into it, which is also why it explains nothing. The four structures below were
 selected because each carries a design decision, and each is presented with the
 decision it encodes.
@@ -261,8 +275,8 @@ column, below it nothing handles a domain object.
 \centering
 \includegraphics[width=\textwidth]{figs/arch-class-persistence.pdf}
 \caption[Persistence class model]{The persistence layer. Composition (filled
-diamonds) marks a part with no independent existence --- a finding version, a
-transcript event --- while aggregation marks a record that outlives and is queried
+diamonds) marks a part with no independent existence, such as a finding version or a
+transcript event, while aggregation marks a record that outlives and is queried
 apart from its parent. The conversion methods on three of the classes are the
 entire seam between the database and the domain.}
 \label{fig:arch-class-persistence}
@@ -295,7 +309,7 @@ operator, and in nothing else, so the state machine of
 Section~\ref{sec:design-retest} is total by construction rather than by careful
 enumeration. Second, \emph{the sandbox is a protocol, not a base class}: the real
 implementation drives a Docker daemon and the test one replays a script, and
-neither inherits from nor registers with the other --- structural typing alone
+neither inherits from nor registers with the other: structural typing alone
 makes them interchangeable, which is what allows the whole HTTP flow to be tested
 with no daemon and no network. Third, \emph{what is deliberately not persisted}:
 the live agent, its message history and its sandbox handle live only in memory,
@@ -314,7 +328,7 @@ models, so it cannot describe a document the code does not produce.
 \centering
 \includegraphics[height=0.5\textheight]{figs/arch-class-export.pdf}
 \caption[Export document class model]{The versioned export. A run composes its
-reports, findings --- each with its version history and notes --- and verdicts with
+reports, findings (each with its version history and notes) and verdicts with
 their evidence, plus neutral metrics. The published JSON Schema is generated from
 these classes.}
 \label{fig:arch-class-export}
@@ -357,7 +371,7 @@ to the agent, because it is not implemented in the agent at all.
 This project began with the first design and moved to the second. That
 migration, and the requirement it re-interpreted (FR-06), is one of the clearest
 illustrations of the difference between a control that is stated and a control
-that is enforced --- and it is why the deleted implementation is discussed rather
+that is enforced, and it is why the deleted implementation is discussed rather
 than quietly dropped.
 
 The topology is chosen from the retest's \emph{scope} rather than fixed, and the
@@ -371,7 +385,7 @@ kinds of guarantee.
 \includegraphics[width=\textwidth]{figs/arch-topology-lab.pdf}
 \caption[Lab topology: containment by membership]{Lab topology (ADR-0025).
 Docker gives a network created with \texttt{internal=True} no gateway address, so
-there is no default route out of it --- neither to the internet nor to the operator's
+there is no default route out of it, neither to the internet nor to the operator's
 own machine. The authorised target is then connected to that network, which makes it
 the sandbox's only reachable peer: here the allowlist \emph{is} the membership list,
 and the dashed edge is a connection that does not exist.}
@@ -383,7 +397,7 @@ and the dashed edge is a connection that does not exist.}
 \includegraphics[width=\textwidth]{figs/arch-topology-gateway.pdf}
 \caption[Gateway topology: containment by an unreachable filter]{Gateway topology
 (ADR-0045), used when the scope names a host that is not the lab. The sandbox holds
-\texttt{NET\_RAW} --- so every tool works, not only HTTP clients --- but not
+\texttt{NET\_RAW}, so every tool works and not only HTTP clients, but not
 \texttt{NET\_ADMIN}, and it has no network stack of its own: it shares the gateway's.
 Every packet it emits therefore originates in a namespace whose filter it has no
 privilege to change, and \texttt{iptables -F} from inside returns \emph{Operation not
@@ -391,20 +405,13 @@ permitted}.}
 \label{fig:topology-gateway}
 \end{figure}
 
-When the scope is the lab --- the case the evaluation runs --- provisioning is exactly
-as described above: an isolated network whose only other member is the target. When the
-scope names a host that is not the lab, the session is confined instead by a per-session
-\emph{egress gateway}: a helper container installs a packet-filter allowlist for the
-scoped host's addresses and the sandbox runs inside that gateway's network namespace,
-holding raw-socket access for its tools but not the privilege to change the filter.
-Every tool --- not only HTTP clients --- can then reach the scoped host and nothing
-else. Provisioning \emph{fails closed}: if the gateway cannot be created the session is
-torn down rather than allowed to run with open egress.
+Both arrangements provision \emph{fail-closed}: a session whose network or gateway
+cannot be created is torn down rather than allowed to run with open egress.
 
 The weaker property should be stated plainly, and the two figures make it visible. In
 Figure~\ref{fig:topology-lab} the boundary is an \emph{absent route}: there is nothing
 to misconfigure, because the network has no way out to configure. In
-Figure~\ref{fig:topology-gateway} it is a \emph{correctly configured allowlist} --- a
+Figure~\ref{fig:topology-gateway} it is a \emph{correctly configured allowlist}: a
 promise again, if a small and auditable one, held in a container the agent cannot
 address; and because it filters by address, it pins the scoped host's addresses when
 the session starts and cannot follow a host that moves across a rotating
@@ -430,7 +437,7 @@ independent of the rest.}
 \end{figure}
 
 \paragraph{A finding is an identity, not content.} The \texttt{findings} table
-holds almost nothing --- an identifier and a link to the report it came from.
+holds almost nothing: an identifier and a link to the report it came from.
 Every field a human reads lives in an append-only chain of versions, illustrated
 in Figure~\ref{fig:arch-version-lineage}. Version one is always what the machine
 proposed; each operator correction appends a new version with the reason it was
@@ -440,7 +447,7 @@ made, and nothing is ever overwritten.
 \centering
 \includegraphics[width=0.42\textwidth]{figs/arch-version-lineage.pdf}
 \caption[Finding version lineage]{A finding's lineage. Version~1 is the
-extraction --- what the model proposed. Each operator correction appends an
+extraction, which is what the model proposed. Each operator correction appends an
 immutable version carrying the reason for the change, and the current view is
 simply the highest. Notes attach to the stable identity and are tagged with the
 pipeline stage on which they were written.}
@@ -451,7 +458,7 @@ This is not archival fastidiousness. It is what makes the evaluation of
 Chapter~\ref{ch:evaluation}'s harness possible at all: measuring whether the
 model extracted a finding correctly requires knowing what the model actually
 said, \emph{after} a human has corrected it. A schema that let an operator edit a
-finding in place would destroy the evidence needed to score the system --- the
+finding in place would destroy the evidence needed to score the system, namely the
 correction would silently become the model's answer.
 
 \paragraph{The transcript is the source of truth; the verdict is a derivation.}
@@ -477,7 +484,7 @@ The chapter has so far described the system a finding flows \emph{through} witho
 saying how a finding comes to exist. That front half of the pipeline is where two
 of the project's objectives are met: analysing a report into structured findings
 (objective~O1), and beginning the interpretation of a finding's reproduction steps
-into executable actions (objective~O2) --- an interpretation that the gated loop of
+into executable actions (objective~O2), an interpretation that the gated loop of
 Section~\ref{sec:design-retest} then completes. It is also where version one of the
 lineage in Figure~\ref{fig:arch-version-lineage} is created.
 
@@ -485,8 +492,8 @@ lineage in Figure~\ref{fig:arch-version-lineage} is created.
 paths, all of which converge on the same persisted finding. A PDF is uploaded and
 structured by a language model; a JSON export is imported directly; or a finding is
 entered by hand, bypassing the model entirely (ADR-0002, ADR-0013, ADR-0020). Only
-the PDF door is asynchronous --- extraction is slow enough to run as a polled
-background job --- and the manual door exists precisely so the tool remains usable
+the PDF door is asynchronous, because extraction is slow enough to run as a polled
+background job, and the manual door exists precisely so the tool remains usable
 when no machine reading is wanted or trusted.
 
 \paragraph{Extraction is validate-before-persist.} The PDF path is the one that
@@ -498,7 +505,7 @@ so extraction always has something to work on. The model is then run \emph{once 
 candidate}, and its output must pass a schema gate before it becomes anything: a
 candidate whose output never validates is recorded as a flagged failure rather than
 persisted as a finding (ADR-0009). The system therefore cannot invent a finding
-from a malformed response --- the worst case is a section the operator is told was
+from a malformed response: the worst case is a section the operator is told was
 not understood, not a fabricated entry. Every finding that does survive keeps the
 exact source text it was drawn from and the name of the model that drew it, so
 version one is traceable to the paragraph it came from.
@@ -510,7 +517,7 @@ and the MITRE ATT\&CK techniques a finding implies, which a report often omits
 and the schema keeps them apart. A value the report stated is mapped verbatim; a
 value the model supplied where the report was silent is marked \texttt{inferred};
 and a value that is simply absent is left empty rather than guessed. A later
-reader --- or the export of Section~\ref{sec:design-derivations} --- can always tell
+reader, or the export of Section~\ref{sec:design-derivations}, can always tell
 the report's claim from the tool's interpretation of it. This is the same
 discipline as the verdict's bias toward \emph{inconclusive}: the system is permitted
 to help, never to launder its own uncertainty into apparent fact.
@@ -531,8 +538,8 @@ goal, and it is what the loop of the next section begins from.
 \section{The agentic retest loop}
 \label{sec:design-retest}
 
-This is the heart of the system, and the place where the thesis's claim ---
-autonomy that accelerates an expert without replacing their judgement --- is
+This is the heart of the system, and the place where the thesis's claim, that of
+autonomy accelerating an expert without replacing their judgement, is
 either true or merely asserted.
 
 \subsection{Gating as a structural property}
@@ -548,7 +555,7 @@ The distinction from a conventional guard is worth stating plainly, because it i
 the same distinction as in Section~\ref{sec:design-runtime}. A system that
 executes the command and then checks whether it should have is safe only while
 the check is correct and reachable. A system in which the execution path does not
-exist without a human decision is safe by construction --- there is no ordering
+exist without a human decision is safe by construction: there is no ordering
 of events, no exception, and no future refactor of the agent that produces an
 unapproved command, because the approval is what supplies the tool's result.
 
@@ -567,8 +574,8 @@ reason, so a refusal is information rather than a dead end.}
 \end{figure}
 
 Two details of that cycle matter for the verdict's credibility. The output fed
-back to the agent is the command's \emph{real} captured output --- exit status,
-standard output and standard error --- not the agent's recollection of it; and
+back to the agent is the command's \emph{real} captured output (exit status,
+standard output and standard error) rather than the agent's recollection of it; and
 the same bytes are appended to the transcript, so the evidence a verdict cites is
 the evidence the agent saw. A rejection is also not a dead end: the agent resumes
 with the denial and the operator's stated reason, which lets a human steer by
@@ -585,8 +592,8 @@ step that causes something to happen in the world is the operator's.
 \includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{figs/arch-retest-activity.pdf}
 \caption[The retest loop as an activity]{The retest loop, partitioned by
 responsibility. Note that the operator's decision node has four outgoing edges, not
-two: besides approving or rejecting, they may send a message --- which withdraws
-the pending command and re-steers the agent --- or conclude the retest themselves
+two: besides approving or rejecting, they may send a message, which withdraws
+the pending command and re-steers the agent, or conclude the retest themselves
 at any point.}
 \label{fig:arch-retest-activity}
 \end{figure}
@@ -602,7 +609,7 @@ Figure~\ref{fig:arch-session-lifecycle} gives the states a session moves through
 \caption[Retest session lifecycle]{The session state machine: five live states and
 three terminal ones. The loop between \emph{working} and
 \emph{awaiting\_command} is the gated cycle of
-Figure~\ref{fig:arch-gated-execution} --- an approved command runs \emph{inside}
+Figure~\ref{fig:arch-gated-execution}: an approved command runs \emph{inside}
 the next working turn, which is why there is no separate executing state.
 \emph{awaiting\_operator} is deliberately non-terminal: an agent that has run out
 of ideas hands the session back instead of producing a verdict. The one edge out
@@ -613,7 +620,7 @@ recorded verdict withdraws it and resumes testing (ADR-0043).}
 
 The most consequential state is \texttt{awaiting\_operator}, and it exists because
 of a failure mode specific to this problem. An agent that has exhausted its ideas
-will, if the design demands a verdict, produce one --- and the verdict it
+will, if the design demands a verdict, produce one, and the verdict it
 produces will be \emph{fixed}, because failing to reproduce a vulnerability looks
 exactly like the vulnerability being gone. That is the single most damaging error
 this system can make: a still-exploitable finding marked remediated, with an
@@ -621,7 +628,7 @@ evidence trail that reads as diligent. The design therefore refuses to let
 ``I could not reproduce it'' become a determination. The session pauses, keeps
 its sandbox alive, and hands control back. It does not press for an answer: a
 hand-back is the operator reading output and deciding what to try next, not a
-pending decision, so the console renders no prompt of its own --- the agent's
+pending decision, so the console renders no prompt of its own: the agent's
 last message stands, the status line reads \emph{waiting for you}, and the
 control that ends the retest is permanently to hand rather than offered by a
 banner (ADR-0046). An
@@ -637,8 +644,8 @@ The set of states was itself narrowed twice, and the second narrowing is worth
 recording because it went against the grain of how such systems are usually built.
 An earlier design distinguished a \emph{stuck} pause from an ordinary hand-back,
 on the reasonable-sounding view that the interface should signal the difference.
-In practice they were two banners over one situation --- the agent is not working
-and it is the operator's move --- and the distinction cost a state, an event kind
+In practice they were two banners over one situation, that the agent is not working
+and it is the operator's move, and the distinction cost a state, an event kind
 and a code path to maintain a difference the operator did not act on. ADR-0042
 folded them together, and at the same time collapsed three separate busy states
 into one \texttt{working}, on the observation that a turn is atomic from the
@@ -658,7 +665,7 @@ session is something a human sits through rather than a job left to run unattend
 One terminal state is not quite terminal. A concluded session can be
 \emph{reopened} (ADR-0043): the verdict is withdrawn from the \texttt{verdicts}
 projection and the session returns to \texttt{idle} for further work. What it is
-not is erased --- the withdrawal is appended to the transcript as its own
+not is erased: the withdrawal is appended to the transcript as its own
 \texttt{verdict\_cancelled} event, so the record shows that a determination was
 made and then retracted rather than quietly losing one. This is the same ordering
 the audit of Section~\ref{sec:design-derivations} rests on: the projection is a
@@ -684,7 +691,7 @@ gate, and getting it wrong made the tool unpleasant to use in a way the gate alo
 did not fix. In an intermediate design every approval fed straight into the agent's
 next proposal, so the operator faced an approval treadmill: they were consenting
 continuously without ever being in a position to direct. The design that replaced
-it (ADR-0040) makes the default mode \emph{guided} --- the agent performs one
+it (ADR-0040) makes the default mode \emph{guided}: the agent performs one
 action per operator turn and then hands back, reporting what it saw and, if it has
 one, recommending a next step. Two consequences follow, and the second is the
 substantive one. A proposal the agent makes after an approved command is not opened
@@ -697,7 +704,7 @@ actually matters for a compliance decision.
 
 A related refinement concerns what a message means when a command is waiting for
 approval. Rather than queueing behind the pending decision, a message withdraws the
-proposal and re-runs the agent with what the operator said (ADR-0042) --- the
+proposal and re-runs the agent with what the operator said (ADR-0042); the
 behaviour of typing at a permission prompt in a coding assistant. It reflects a
 small observation about intent: an operator who starts typing instead of clicking
 has already decided that the proposed command is not what they want next, and
@@ -721,8 +728,8 @@ Two read-only capabilities are built on the persisted transcript, and neither
 touches the network.
 
 The first is the FR-10 audit. For every stored verdict it re-projects the
-authoritative transcript event --- the agent's own \texttt{verdict} event, or the
-latest operator adjudication if the human overrode it --- and compares that
+authoritative transcript event, either the agent's own \texttt{verdict} event or the
+latest operator adjudication if the human overrode it, and compares that
 projection against the stored row. A clean run establishes that no verdict has
 drifted from the trail it was derived from. It is important to be exact about
 what this does and does not establish, since the vocabulary invites
@@ -735,7 +742,7 @@ The second is the FR-12 export: a single versioned JSON document containing the
 reports, findings with their version history and notes, and the verdicts with
 their evidence. Its schema is \emph{generated} from the same models that produce
 the document and published alongside it, with a test that fails if the published
-schema and the generated one diverge --- the same principle as the figures in
+schema and the generated one diverge, the same principle as the figures in
 this chapter, applied to a data contract. The evaluation harness consumes that
 document, which is what allows scoring to happen offline, on a file, without a
 live system.
@@ -760,8 +767,8 @@ reproduce in a real page.
 
 \paragraph{Why it was replaced.} Two limitations emerged from using it. The first
 was expressive: a plan fixed in advance cannot react. Real revalidation is
-conditional --- an endpoint responds differently than the report described, a
-credential has rotated, a payload needs one adjustment --- and a batch that
+conditional: an endpoint responds differently than the report described, a
+credential has rotated, a payload needs one adjustment. A batch that
 commits to its steps before seeing any of them either succeeds by luck or fails
 without learning anything. The second was that the approval gate sat at the wrong
 granularity. Approving a plan of eight probes is approving an intention;
@@ -788,8 +795,8 @@ reason about, and the only sensible way to establish that a language model could
 be constrained enough to be trusted with a security decision at all. What it
 could not do was represent the interaction a revalidation actually is. The
 decision to delete it was taken only once the agentic path covered the whole
-retest lifecycle end to end on the same lab targets, and it was recorded --- with
-its rationale, its alternatives and its consequences --- in ADR-0033, which
+retest lifecycle end to end on the same lab targets, and it was recorded, with
+its rationale, its alternatives and its consequences, in ADR-0033, which
 supersedes the eight architecture decision records the batch path rested on. That
 record is the most accurate surviving artefact of the \emph{reasoning} this chapter
 describes, which the remaining code cannot show.
