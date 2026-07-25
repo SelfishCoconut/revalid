@@ -1,7 +1,13 @@
 # 0042. One agent, one voice, five states: fold the parallel Q&A and `needs_guidance` into the guided-mode console
 
 Date: 2026-07-24
+
 Status: accepted
+> **Amended by [0046](0046-handed-back-console-waits.md):** the "light *your move —
+> reply or record the verdict*" prompt this ADR kept in `awaiting_operator` is
+> retired. A hand-back now renders as the agent's message alone; discoverability
+> rests on the status line ("Waiting for you") and Conclude becomes a permanent
+> toolbar control rather than a banner button. The five-state model is unchanged.
 
 ## Context
 

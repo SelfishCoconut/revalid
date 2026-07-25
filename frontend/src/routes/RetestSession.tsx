@@ -136,7 +136,7 @@ function statusLabel(status: string): string {
     idle: "Not started",
     working: "Working",
     awaiting_command: "Awaiting your approval",
-    awaiting_operator: "Your move",
+    awaiting_operator: "Waiting for you",
     stopped: "Paused by you",
     concluded: "Concluded",
     given_up: "Ended",
@@ -591,10 +591,11 @@ export function RetestSession({
                 Restart model
               </Button>
             )}
-            {/* Conclude is reachable from any live state (#150). In awaiting_operator the
-                hand-back prompt carries its own Record-verdict button, so skip it here to
-                keep a single entry point. */}
-            {sandboxLive && !concluding && status !== "awaiting_operator" && (
+            {/* Conclude — a permanent control, present in every live state (#243). The
+                operator ends the retest when *they* decide it is over, so the button is
+                never conditioned on the agent having handed back; no state prompts for
+                it. Hidden only while its own form is open, which is where it leads. */}
+            {sandboxLive && !concluding && (
               <Button
                 variant="ghost"
                 onClick={() => {
@@ -808,47 +809,17 @@ export function RetestSession({
                   <Eyebrow>Paused by you</Eyebrow>
                 </span>
                 <p className="mt-1">
-                  The sandbox is kept alive. Message the agent to pick up where it left off, or
-                  conclude the retest yourself.
+                  The sandbox is kept alive. Message the agent to pick up where it left off.
                 </p>
               </div>
             )}
-            {status === "awaiting_operator" ? (
-              // The agent handed control back — "your move" (ADR-0042). Its message
-              // (a reply, a guided "ran X — I'd try Y next" report, a verdict
-              // recommendation, or "I'm stuck") is in the chat above. Prompt the
-              // operator to steer on, or record the verdict now. Sandbox stays alive.
-              <div
-                aria-label="handed back"
-                className="space-y-3 rounded-lg border border-iris/50 bg-iris/10 p-4"
-              >
-                <div>
-                  <span className="flex items-center gap-2 text-iris-fg">
-                    <FlagIcon />
-                    <Eyebrow>The agent handed back — your move</Eyebrow>
-                  </span>
-                  <p className="mt-1 text-sm text-fg">
-                    Reply below to keep it going — your message is the steer — or conclude to record
-                    the verdict now.
-                  </p>
-                </div>
-                {/* No "Keep going" button: replying *is* keeping going (#163). Conclude
-                    opens the verdict form further down the thread (#157). */}
-                {!concluding && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="accent"
-                      onClick={() => {
-                        setConcluding(true);
-                      }}
-                    >
-                      <FlagIcon />
-                      Conclude…
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ) : status === "given_up" ? (
+            {/* A hand-back (`awaiting_operator`) renders NOTHING here (#243, amending
+                ADR-0042): the agent's message — a reply, a guided "ran X — I'd try Y
+                next" report, a verdict recommendation, or "I'm stuck" — is the last
+                bubble in the thread above, and the console simply waits. No banner
+                tells the operator to steer or to conclude: the status reads "Waiting
+                for you" and Conclude is a permanent toolbar control. */}
+            {status === "given_up" ? (
               // Legacy: sessions from before ADR-0034 could reach a terminal
               // give-up. New sessions pause for guidance instead.
               <div role="alert" className="rounded-lg border border-warn/50 bg-warn/10 p-4">

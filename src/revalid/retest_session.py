@@ -665,20 +665,24 @@ def _suggestion_reason(call: Any) -> str:
 
     In guided mode the agent's own next proposal is never opened as a gate
     (ADR-0040); it is surfaced here as text in the hand-back so the operator can
-    act on it, ask for something else, or conclude — the operator drives, the
-    agent advises.
+    act on it or ask for something else — the operator drives, the agent advises.
+
+    It reports and stops there. No menu of the operator's options, and in
+    particular no "or conclude the retest" (#243): the agent has *not* reached a
+    determination here, and ending the retest is the operator's call to make
+    whenever they like — the console's Conclude control is always available.
     """
     args = call.args_as_dict()
     command = str(args.get("command", "")).strip()
     rationale = str(args.get("rationale", "")).strip()
-    lead = (
+    report = (
         f"I ran that. Next I'd suggest:\n`{command}`"
         if command
         else "Ready for your next instruction."
     )
     if rationale:
-        lead += f"\n({rationale})"
-    return f"{lead}\n\nTell me to go ahead, point me elsewhere, or conclude the retest."
+        report += f"\n({rationale})"
+    return report
 
 
 def _recommendation_reason(output: ConcludeOutput) -> str:
@@ -686,12 +690,14 @@ def _recommendation_reason(output: ConcludeOutput) -> str:
 
     The agent never records a terminal verdict while guided: its ``fixed``/
     ``still_open`` is surfaced as advice for the operator to confirm (Conclude) or
-    overrule by steering further.
+    overrule by steering further. This is the *one* hand-back that may propose
+    concluding, because it is the one where the agent has a determination to
+    propose (#243).
     """
     label = output.status.value.replace("_", " ")
     return (
         f"Based on that, I think this finding is {label}: {output.rationale}\n\n"
-        "Conclude to record this, adjust it, or keep steering me."
+        "Conclude to record that, if you agree."
     )
 
 
