@@ -168,10 +168,11 @@ is the wrong instrument for a verdict that a compliance process will rely on, si
 hallucination and over-confident conclusions are not incidental defects of these systems
 but documented properties of them, and Section~\ref{sec:design-retest} shows what the
 gate buys. The obvious objection is that oversight must cost speed.
-Section~\ref{sec:eval-time} measures it: the gated system's machine time came out
-comparable to a manual pass over the same findings, and the lever that visibly moves
-wall-clock is the reasoning backend rather than the approval step. A fully unattended
-mode exists as well and was measured; supervision is the default, not the only option.
+Section~\ref{sec:eval-time} measures it, by running the same findings on the same backend
+with the gate and without it: the difference was under three minutes in thirty, because
+what a retest costs is the model's per-step latency rather than the human round-trip. A
+fully unattended mode exists as well and was measured; supervision is the default, not
+the only option.
 
 \section{Proposed solution}
 \label{sec:solution}

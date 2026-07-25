@@ -125,11 +125,12 @@ target. On a locally hosted model it reached the correct verdict on eight of twe
 findings and hedged on the remaining four, never once declaring a still-exploitable
 finding fixed, meeting the safety constraint the design exists to enforce while
 falling narrowly short of the accuracy target on hedges rather than errors. Its
-machine time was comparable to a manual pass over the same findings. Those figures were
-obtained on a small model running on the operator's own machine, and the reasoning
-backend is the lever that moves them: driven by a hosted frontier model, the same system
-returned the correct verdict on seven of eight exploitable findings and again issued no
-false clearance.
+machine time was comparable to a manual pass over the same findings, and running the same
+findings with the approval gate and without it showed that per-command human oversight
+costs almost nothing in wall-clock. Those figures were obtained on a small model running
+on the operator's own machine, and the reasoning backend is the lever that moves them:
+driven by a hosted frontier model, the same system returned the correct verdict on seven
+of eight exploitable findings and again issued no false clearance.
 
 % -------------------------------
 % Agradecimientos

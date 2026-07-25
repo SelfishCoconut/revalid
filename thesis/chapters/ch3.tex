@@ -483,9 +483,9 @@ releases a pull request only when all of them report success --- which is what t
 superseded by a new push is cancelled automatically, keeping feedback fast enough to
 stay inside the developer's working loop.
 
-The gate is not a formality, and it is cheap. As of 25~July~2026 it had executed
-336~CI runs and 342~security runs over the 143~pull requests merged into
-\texttt{main}, with a median wall-clock time of 43~seconds and a ninety-fifth
+The gate is not a formality, and it is cheap. As of 25~July~2026 it had executed more
+than 350~CI runs and more than 355~security runs over the 150~pull requests merged into
+\texttt{main}, with a median wall-clock time of 44~seconds and a ninety-fifth
 percentile of 94~seconds. Four runs exceeded ten minutes and none of them finished:
 each was cancelled, two after a job hung until the platform's six-hour ceiling.
 Thirty runs ended red --- nineteen CI and eleven security. Nineteen of those thirty
@@ -616,7 +616,8 @@ the project's public audit trail: the curated usage log under
 completed retrospectively for the later ones from the automatically recorded session
 files and the git history --- together with the \texttt{Co-Authored-By: Claude}
 trailers in that history. The large majority of the project's commits carry the
-trailer; the remainder are author-only commits, and, because the project integrates by
+trailer; the remainder are automated dependency-update commits opened by Dependabot,
+carrying no assistant involvement, and, because the project integrates by
 squash-merge, each merge commit inherits the trailers of the assistant-authored work
 it absorbs.
 
