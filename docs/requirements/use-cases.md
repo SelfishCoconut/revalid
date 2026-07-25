@@ -35,21 +35,21 @@ flowchart TB
 
         subgraph UND["Understand the report"]
             direction TB
-            U1(["Ingest a PDF report<br/>FR-01 · FR-03 · FR-19"])
-            U2(["Import a structured export<br/>FR-02"])
-            U3(["Enter a report manually<br/>FR-02 · ADR-0020"])
-            U4(["Correct and annotate<br/>a finding — FR-16"])
+            U1(["Ingest a<br/>PDF report<br/>FR-01<br/>FR-03<br/>FR-19"])
+            U2(["Import a<br/>structured<br/>export<br/>FR-02"])
+            U3(["Enter a report<br/>manually<br/>FR-02<br/>ADR-0020"])
+            U4(["Correct and<br/>annotate<br/>a finding<br/>FR-16"])
         end
 
-        RET(["Revalidate a finding<br/>7 use cases, expanded below"])
+        RET["Revalidate a finding<br/>7 use cases, expanded separately"]
 
         subgraph OUT["Account for the work"]
             direction TB
-            U12(["Re-derive the<br/>audit trail — FR-10"])
+            U12(["Re-derive the<br/>audit trail<br/>FR-10"])
             U13(["Export a run<br/>FR-12"])
-            U14(["Score against<br/>ground truth — FR-15"])
-            U15(["Ask about<br/>the corpus — FR-18"])
-            U16(["Choose the LLM<br/>backend — FR-13"])
+            U14(["Score against<br/>ground truth<br/>FR-15"])
+            U15(["Ask about<br/>the corpus<br/>FR-18"])
+            U16(["Choose the<br/>LLM backend<br/>FR-13"])
         end
     end
 
@@ -80,13 +80,13 @@ flowchart LR
 
     subgraph RET["Revalidate a finding"]
         direction LR
-        U5(["Set the retest goal<br/>FR-17 · ADR-0032"])
-        U6(["Run a gated retest session<br/>FR-17"])
-        U7(["Approve or reject<br/>a command — AC2"])
-        U11(["Conclude or adjudicate<br/>FR-09 · ADR-0030"])
-        U8(["Run a command<br/>personally — ADR-0026"])
-        U9(["Steer the agent<br/>by message — ADR-0028"])
-        U10(["Hand over the wheel<br/>Auto-run — ADR-0029"])
+        U5(["Set the<br/>retest goal<br/>FR-17<br/>ADR-0032"])
+        U6(["Run a gated<br/>retest session<br/>FR-17"])
+        U7(["Approve or<br/>reject a<br/>command<br/>AC2"])
+        U11(["Conclude or<br/>adjudicate<br/>FR-09<br/>ADR-0030"])
+        U8(["Run a command<br/>personally<br/>ADR-0026"])
+        U9(["Steer the agent<br/>by message<br/>ADR-0028"])
+        U10(["Hand over<br/>the wheel<br/>ADR-0029"])
     end
 
     AUD --- U5
