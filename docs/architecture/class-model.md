@@ -98,8 +98,10 @@ machines on the [data model](data-model.md) page.
 
 ## Persistence: the domain seam
 
-`db.py` is the only module that touches SQLite. Every row class descends from the
-SQLAlchemy `Base`, and the classes that carry domain content own the **conversion**
+`db.py` owns the engine, the schema and the mappings — no other module constructs an
+engine or reaches for `sqlite3`, though feature modules query through the session it
+hands them. Every row class descends from the SQLAlchemy `Base` (omitted from the
+figure, since it carries no domain content), and the classes that carry domain content own the **conversion**
 themselves: finding versions and settings round-trip in both directions
 (`from_domain`/`to_domain`), and a verdict is built from domain values by its
 `agentic` constructor and stores its evidence as JSON. That is the seam — nothing
@@ -110,11 +112,6 @@ domain object.
 ```mermaid
 classDiagram
     direction TB
-
-    class Base {
-        <<abstract>>
-        SQLAlchemy DeclarativeBase
-    }
 
     class ReportRecord {
         +int id
@@ -192,17 +189,6 @@ classDiagram
         +int chat_id
         +str role
     }
-
-    Base <|-- ReportRecord
-    Base <|-- FindingRecord
-    Base <|-- FindingVersionRecord
-    Base <|-- FindingNoteRecord
-    Base <|-- RetestSessionRecord
-    Base <|-- SessionEventRecord
-    Base <|-- VerdictRecord
-    Base <|-- SettingsRecord
-    Base <|-- ChatSessionRecord
-    Base <|-- ChatMessageRecord
 
     ReportRecord "1" o-- "*" FindingRecord
     FindingRecord "1" *-- "1..*" FindingVersionRecord

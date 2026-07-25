@@ -34,9 +34,9 @@ of nineteen functional requirements, five no longer have an implementation, and
 that is a design outcome rather than an omission --- Section~\ref{sec:design-evolution}
 argues why.
 
-\begin{table}[!htb]
-\footnotesize
-\renewcommand{\arraystretch}{1.25}
+\begin{table}[!htbp]
+\scriptsize
+\renewcommand{\arraystretch}{1.10}
 \begin{center}
 \begin{tabular}{|L{1.5cm}|L{6.6cm}|L{4.4cm}|}
 \hline
@@ -85,7 +85,7 @@ session --- whose \emph{included} step is the operator's approval of each comman
 An approval that appears as an included use case rather than an optional extension
 is the diagrammatic form of the claim this system makes.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-use-cases.pdf}
 \caption[Use-case model]{The use-case model, with each case labelled by the
@@ -116,7 +116,7 @@ who wants to know whether previously reported findings are still exploitable ---
 and exactly two external systems: a language-model backend, and the authorised
 targets being retested.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.62\textwidth]{figs/arch-context.pdf}
 \caption[System context]{The system in its context. The auditor uploads a report,
@@ -144,9 +144,9 @@ both the compiled single-page interface at the root and the JSON API beneath
 \texttt{/api}; long-running work is handed to background tasks in the same
 process; durable state is a single SQLite file.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[height=0.62\textheight]{figs/arch-containers.pdf}
+\includegraphics[height=0.84\textheight]{figs/arch-containers.pdf}
 \caption[Container view]{The container view. Everything inside the dashed
 boundary is one operating-system process bound to the loopback interface
 (NFR-03). The interface talks to the API over JSON and, during a retest, a
@@ -173,7 +173,7 @@ Python module and each arrow is a real import, which makes the diagram checkable
 it is generated from the same source the documentation publishes, and a
 dependency drawn here that does not exist in the code is a bug in the drawing.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-components.pdf}
 \caption[Component view of the backend]{The backend modules and their real import
@@ -229,7 +229,7 @@ Figure~\ref{fig:arch-class-domain} shows the vocabulary every other layer speaks
 These are frozen value objects: once constructed they cannot be mutated, so a
 finding cannot be altered in passing by a component that merely reads it.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.46\textheight]{figs/arch-class-domain.pdf}
 \caption[Domain class model]{The domain core. A finding composes its CVSS and
@@ -257,7 +257,7 @@ directions, while a verdict is constructed from domain values and stores its
 evidence as JSON. That conversion is the seam: above it nothing handles a database
 column, below it nothing handles a domain object.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-class-persistence.pdf}
 \caption[Persistence class model]{The persistence layer. Composition (filled
@@ -279,7 +279,7 @@ content and the foreign-key target were the same row.
 Figure~\ref{fig:arch-class-retest} is the collaboration the system exists to run,
 and the one place where a structural guarantee replaces a policy.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.72\textheight]{figs/arch-class-retest.pdf}
 \caption[Agentic retest class model]{The retest collaboration. The agent's turn
@@ -310,7 +310,7 @@ The last structure, Figure~\ref{fig:arch-class-export}, is the FR-12 export, who
 class model \emph{is} its published schema: the schema is generated from these
 models, so it cannot describe a document the code does not produce.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.5\textheight]{figs/arch-class-export.pdf}
 \caption[Export document class model]{The versioned export. A run composes its
@@ -332,7 +332,7 @@ Figure~\ref{fig:arch-deployment} shows the same system as processes, files and
 networks. It is the figure that carries the safety argument, because in this
 design the topology \emph{is} the control.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-deployment.pdf}
 \caption[Deployment and network topology]{Runtime topology, in the lab
@@ -366,7 +366,7 @@ and~\ref{fig:topology-gateway} show the two arrangements side by side, which is 
 clearest way to see that they are not two settings of one mechanism but two different
 kinds of guarantee.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-topology-lab.pdf}
 \caption[Lab topology: containment by membership]{Lab topology (ADR-0025).
@@ -378,7 +378,7 @@ and the dashed edge is a connection that does not exist.}
 \label{fig:topology-lab}
 \end{figure}
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-topology-gateway.pdf}
 \caption[Gateway topology: containment by an unreachable filter]{Gateway topology
@@ -419,7 +419,7 @@ Figure~\ref{fig:arch-data-model} gives the persisted entities and their
 relationships. The schema is small, and three of its properties carry most of the
 design weight.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-data-model.pdf}
 \caption[Entity relationships]{The persisted entities. A report yields findings;
@@ -436,9 +436,9 @@ in Figure~\ref{fig:arch-version-lineage}. Version one is always what the machine
 proposed; each operator correction appends a new version with the reason it was
 made, and nothing is ever overwritten.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=\textwidth]{figs/arch-version-lineage.pdf}
+\includegraphics[width=0.42\textwidth]{figs/arch-version-lineage.pdf}
 \caption[Finding version lineage]{A finding's lineage. Version~1 is the
 extraction --- what the model proposed. Each operator correction appends an
 immutable version carrying the reason for the change, and the current view is
@@ -448,7 +448,7 @@ pipeline stage on which they were written.}
 \end{figure}
 
 This is not archival fastidiousness. It is what makes the evaluation of
-Chapter~\ref{ch:methodology}'s harness possible at all: measuring whether the
+Chapter~\ref{ch:evaluation}'s harness possible at all: measuring whether the
 model extracted a finding correctly requires knowing what the model actually
 said, \emph{after} a human has corrected it. A schema that let an operator edit a
 finding in place would destroy the evidence needed to score the system --- the
@@ -554,7 +554,7 @@ unapproved command, because the approval is what supplies the tool's result.
 
 Figure~\ref{fig:arch-gated-execution} traces one iteration.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.74\textheight]{figs/arch-gated-execution.pdf}
 \caption[One iteration of the gated retest loop]{The gated command cycle. The
@@ -580,9 +580,9 @@ becomes a property of the diagram rather than an assertion about it: the agent's
 steps only ever \emph{propose}, the sandbox's only ever \emph{execute}, and every
 step that causes something to happen in the world is the operator's.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=\textwidth]{figs/arch-retest-activity.pdf}
+\includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{figs/arch-retest-activity.pdf}
 \caption[The retest loop as an activity]{The retest loop, partitioned by
 responsibility. Note that the operator's decision node has four outgoing edges, not
 two: besides approving or rejecting, they may send a message --- which withdraws
@@ -596,7 +596,7 @@ at any point.}
 
 Figure~\ref{fig:arch-session-lifecycle} gives the states a session moves through.
 
-\begin{figure}[!htb]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-session-lifecycle.pdf}
 \caption[Retest session lifecycle]{The session state machine: five live states and
@@ -646,21 +646,6 @@ operator's point of view: the model call and any command it runs happen inside i
 Five live states remain. A state machine that a reader can hold in their head is
 not a cosmetic property of a system whose central claim is that a human stays in
 control of it.
-
-The same instinct was then applied to what the interface \emph{says} in that
-resting state. ADR-0042 replaced the two banners with one light prompt ---
-\emph{your move: reply, or record the verdict} --- and using the tool rejected
-even that: repainted after every approved action, it restates two things the
-operator already knows and frames their own pace as a pending decision. ADR-0046
-removed it. A hand-back now renders as the agent's message and nothing else, the
-state stays legible from a status line reading \emph{waiting for you}, and the
-\textbf{Conclude} control the banner had owned became permanent --- so no state
-gates the one action that ends a retest. The agent's voice was rebalanced the same
-way: it proposes concluding only where it has actually reached a determination,
-because a standing invitation to end the retest is verdict pressure from the party
-this design forbids from recording one. The direction of travel across all three
-narrowings is identical: say what the state \emph{is}, and let the operator decide
-what to do about it.
 
 A session is also not wholly durable, which is the cost promised in
 Section~\ref{sec:design-overview}. Its transcript, status and goal are persisted,

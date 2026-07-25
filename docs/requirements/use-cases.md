@@ -46,8 +46,8 @@ flowchart TB
             U5(["Set the retest goal<br/>FR-17 · ADR-0032"])
             U6(["Run a gated<br/>retest session — FR-17"])
             U7(["Approve or reject<br/>a command — AC2"])
-            U8(["Run a command<br/>personally — ADR-0026"])
-            U9(["Steer the agent<br/>by message — ADR-0028"])
+            U8(["Run a command<br/>personally<br/>ADR-0026"])
+            U9(["Steer the agent<br/>by message<br/>ADR-0028"])
             U10(["Hand over the wheel<br/>Auto-run — ADR-0029"])
             U11(["Conclude or adjudicate<br/>FR-09 · ADR-0030"])
         end
@@ -62,18 +62,9 @@ flowchart TB
         end
     end
 
-    AUD --- U1
-    AUD --- U2
-    AUD --- U3
-    AUD --- U4
-    AUD --- U5
-    AUD --- U6
-    AUD --- U11
-    AUD --- U12
-    AUD --- U13
-    AUD --- U14
-    AUD --- U15
-    AUD --- U16
+    AUD --- UND
+    AUD --- RET
+    AUD --- OUT
 
     U6 -.->|"«include»"| U7
     U6 -.->|"«extend»"| U8
@@ -82,12 +73,10 @@ flowchart TB
     U6 -.->|"«include»"| U11
     U1 -.->|"«include»"| U4
 
-    U1 --- LLM
-    U5 --- LLM
-    U6 --- LLM
-    U15 --- LLM
-    U7 --- TGT
-    U8 --- TGT
+    UND --- LLM
+    RET --- LLM
+    OUT --- LLM
+    RET --- TGT
 
     classDef actor fill:#dbe4ff,stroke:#3b5bdb,stroke-width:2px
     classDef uc fill:#e7f5ff,stroke:#1971c2
