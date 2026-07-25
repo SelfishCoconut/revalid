@@ -28,9 +28,6 @@ erDiagram
     RETEST_SESSIONS ||--|{ SESSION_EVENTS : "append-only transcript"
     RETEST_SESSIONS ||--o{ VERDICTS : "concluded by"
     CHAT_SESSIONS ||--|{ CHAT_MESSAGES : "thread"
-    SETTINGS {
-        int id PK
-    }
 ```
 
 ### Full attribute listing
@@ -163,19 +160,16 @@ machine proposed. Every operator correction appends an `edit`.
 
 <!-- thesis-fig: version-lineage -->
 ```mermaid
-flowchart LR
-    A["v1 — extraction<br/>what the machine proposed"]
-    B["v2 — edit<br/>reason: wrong endpoint"]
-    C["v3 — edit<br/>reason: severity overstated"]
+flowchart TB
+    A["v1 — extraction<br/>machine-proposed"]
+    B["v2 — edit"]
+    C["v3 — edit"]
     D(["current = highest version"])
     A --> B --> C --> D
 
     F(["finding identity<br/>(findings row)"])
     F --- A
-    N1["note @ extract"] --> F
-    N2["note @ goal"] --> F
-    N3["note @ retest"] --> F
-    N4["note @ verdict"] --> F
+    N(["notes @ each stage"]) --> F
 
     style A fill:#e7f5ff,stroke:#1971c2
     style D fill:#ebfbee,stroke:#2f9e44
@@ -211,8 +205,7 @@ stateDiagram-v2
     idle --> working: Start
 
     working --> awaiting_command: proposes a command
-    awaiting_command --> working: approve
-    awaiting_command --> working: reject / message
+    awaiting_command --> working: approve / reject / message
 
     working --> awaiting_operator: agent hands back
     awaiting_operator --> working: operator replies
@@ -226,7 +219,7 @@ stateDiagram-v2
     stopped --> concluded: operator concludes
     working --> concluded: operator concludes (any live state, ADR-0046)
 
-    working --> working: Restart model
+    working --> working: Restart
     working --> error: unhandled failure
     working --> ended: operator ends it
 

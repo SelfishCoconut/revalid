@@ -63,7 +63,7 @@ session. That prototype is the conceptual seed of the system presented in this
 dissertation. Table~\ref{tab:evolution} summarises the progression and the role each
 attempt played.
 
-\begin{table}[htb]
+\begin{table}[htbp]
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -115,13 +115,13 @@ values of the Agile Manifesto to a single developer working
 with an assistant. Work flows continuously from a prioritised backlog; there are no
 sprints and no meetings; and \emph{milestones} mark feature-complete increments
 rather than time boxes. The project passed through six such milestones, from the M1
-walking skeleton to the M6 agentic console, each closing with a semantically
-versioned release: v0.1.0 through v0.4.0 for the first four, and a
+walking skeleton to the M6 agentic console, closing with five semantically
+versioned releases: v0.1.0 through v0.4.0 for the first four, and a
 single v1.0.0 closing both M6 and M5 --- the agentic console was feature-complete
 before the evaluation that measures it could be run, so the two closed together.
 Figure~\ref{fig:milestones} lays out this milestone sequence.
 
-\begin{figure}[htb]
+\begin{figure}[htbp]
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
@@ -157,7 +157,7 @@ the gate detailed in Section~\ref{sec:ci} --- after which the author reviews it
 asynchronously and retains full revert authority. Figure~\ref{fig:pipeline} shows
 this pipeline.
 
-\begin{figure}[htb]
+\begin{figure}[htbp]
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
@@ -198,7 +198,7 @@ its stack at a glance. The paragraphs that follow explain each significant choic
 what the technology is and why it was adopted for this project --- grouped by the
 role it plays.
 
-\begin{table}[htb]
+\begin{table}[htbp]
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -436,7 +436,7 @@ the scheduled audits that catch what no single change can reveal, and the workfl
 that keep the project's published artefacts, and its record of work, in step with the
 code.
 
-\begin{table}[!htb]
+\begin{table}[!htbp]
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -606,7 +606,7 @@ every change, so that the evidence a reviewer is told to trust is itself
 continuously verified. In this project, then, the measure of the gate turned out to
 be not only its strictness but its reach.
 
-\section{Use of Artificial Intelligence Tools}
+\section{Use of artificial-intelligence tools}
 \label{sec:ai-declaration}
 
 In compliance with §6 of the ESII TFG regulation, this section declares the use of
@@ -666,3 +666,17 @@ the sole author of, and is responsible for, this work; the AI tool served as an
 assistant that accelerated implementation, not as a substitute for the author's
 judgement. The complete audit trail is public in the project repository under
 \texttt{docs/ai-usage/}.
+
+\paragraph{Repository and generated documentation.} Everything this dissertation refers
+to --- the source code, the forty-six decision records, the requirements specification,
+the audit trail of this declaration and the generated API and diagram documentation ---
+is public and needs no credentials to read:
+\begin{itemize}
+\item Repository: \url{https://github.com/SelfishCoconut/revalid}
+\item Decision records: \url{https://github.com/SelfishCoconut/revalid/tree/main/docs/adr}
+\item Requirements (SRS):
+  \url{https://github.com/SelfishCoconut/revalid/blob/main/docs/requirements/srs.md}
+\item AI-usage audit trail:
+  \url{https://github.com/SelfishCoconut/revalid/tree/main/docs/ai-usage}
+\end{itemize}
+Appendix~\ref{ch:annex-install} gives the commands to clone, install and run it.
