@@ -96,7 +96,10 @@ Judge only from the finding's title, description, impact and attack vector. If
 the finding genuinely cannot be assessed, return an empty vector and an empty
 technique list rather than guessing wildly — an empty answer is recorded as "no
 taxonomy", which is honest, whereas a wild guess is recorded as a real
-assessment.\
+assessment.
+
+All three fields are required: answer every one of them, even if the answer is
+empty. Do not omit a field.\
 """
 
 
@@ -108,13 +111,22 @@ class FindingTaxonomy(BaseModel):
     (:func:`apply_taxonomy` sets ``inferred=True``) and the model has no way to
     express "the report stated this". That is the same rule the finding editor
     follows — a client, human or machine, never asserts provenance (ADR-0037).
+
+    Every field is **required**, for the same reason :class:`ExtractedFinding`'s
+    are: the model must account for all of them, and Pydantic AI retries when it
+    does not. With defaults, ``{}`` was trivially valid — a small model could
+    return nothing, no retry would fire, and the result was indistinguishable from
+    "assessed and found nothing to say" (issue #241, seen live on a 9b local
+    model). An unassessable finding is still expressible, as an explicit empty
+    vector and empty technique list; it just has to be *chosen* rather than
+    reached by omission.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    cvss_vector: str = ""
-    cvss_base_score: float | None = None
-    mitre_techniques: tuple[str, ...] = ()
+    cvss_vector: str
+    cvss_base_score: float | None
+    mitre_techniques: tuple[str, ...]
 
 
 class Person(BaseModel):
