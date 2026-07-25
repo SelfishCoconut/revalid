@@ -63,12 +63,20 @@ Two mechanisms cover that, and the split is deliberate (issue #233):
 
 - **Copying is not inferring.** A DefectDojo export that *states* a CVSS vector
   and score has it mapped across unconditionally, `inferred=false` — pure schema
-  work, no model. A stated CWE is **not** mapped to ATT&CK: a weakness id is not a
-  technique id, and renaming one into the other would fabricate a claim.
+  work, no model. The manual form adds the same for a person: typed CVSS and
+  ATT&CK boxes, also `inferred=false`, because transcribing what a report says is
+  stating it, not guessing it (#237). A stated CWE is **not** mapped to ATT&CK: a
+  weakness id is not a technique id, and renaming one into the other would
+  fabricate a claim.
 - **Deriving is opt-in.** `enrich=true` on the import (or the manual payload) runs
   one taxonomy call per finding to fill what the source left empty. Everything it
   fills is `inferred=true`, stamped server-side — the enrichment model's own output
   schema has no `inferred` field, so it has no way to claim a source said it.
+
+Those compose in one direction only, which is what keeps the provenance flag
+meaningful: enrichment fills **empty** fields, so stated-in-the-source and
+typed-by-the-operator both outrank derived-by-the-model, and a reader can always
+tell an estimate from a claim.
 
 Default-off is the point. `enrich=false` invokes **no agent at all**, which is
 what keeps manual entry the deterministic, instant, free seeding path for demos
