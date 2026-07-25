@@ -169,7 +169,7 @@ class RetestSessionStatus(enum.StrEnum):
     A live session is always in exactly one of: ``WORKING`` (a turn in flight),
     ``AWAITING_COMMAND`` (a proposed command awaits the operator's approval),
     ``AWAITING_OPERATOR`` (the agent handed back — a reply, an acknowledgement, a
-    guided one-action report, "steer me or conclude", or a verdict recommendation),
+    guided one-action report, "I've exhausted my options", or a verdict recommendation),
     ``IDLE`` (created but not yet provisioned — a ``Restart`` lands here so it never
     auto-runs), or ``STOPPED`` (the operator paused it, sandbox kept alive). A
     session reaches a terminal state (``CONCLUDED``/``ENDED``/``ERROR``) only on a
@@ -191,7 +191,7 @@ class RetestSessionStatus(enum.StrEnum):
     #: permission prompt. A message here withdraws the proposal and steers the agent.
     AWAITING_COMMAND = "awaiting_command"
     #: The agent handed control back without a command or verdict: a conversational
-    #: reply, an acknowledgement, a guided "ran X — your move" report with a suggested
+    #: reply, an acknowledgement, a guided "ran X — I'd try Y next" report with a suggested
     #: next step, a verdict *recommendation* to confirm, or "I've exhausted my options"
     #: (the former ``needs_guidance``, now just the agent's own words). Non-terminal:
     #: the sandbox stays alive and the operator's next message resumes it.

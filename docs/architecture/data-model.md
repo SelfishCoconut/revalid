@@ -216,12 +216,15 @@ stateDiagram-v2
 
     working --> awaiting_operator: agent hands back
     awaiting_operator --> working: operator replies
-    awaiting_operator --> concluded: operator concludes
 
     working --> concluded: concludes (Auto-run only)
     working --> stopped: Stop
     stopped --> working: Resume
+
+    awaiting_operator --> concluded: operator concludes
+    awaiting_command --> concluded: operator concludes
     stopped --> concluded: operator concludes
+    working --> concluded: operator concludes (any live state, ADR-0046)
 
     working --> working: Restart model
     working --> error: unhandled failure
@@ -238,6 +241,9 @@ stateDiagram-v2
         approved action, and the agent never
         self-records a verdict — only the
         operator concludes (ADR-0034/0040/0042).
+        The console renders no prompt here: it
+        waits, and Conclude is always to hand
+        (ADR-0046).
     end note
 ```
 
@@ -253,6 +259,7 @@ when it is scaled into the memoir:
 | `working → awaiting_operator` | The agent handed back: a reply, a guided one-action report, a verdict recommendation, or "I'm out of options". |
 | `working → working` | **Restart model** — the operator aborts a wedged in-flight turn and has it re-run (ADR-0039). |
 | `working → concluded` | The agent recorded its own verdict. Reachable **only** under Auto-run. |
+| `* → concluded` (operator) | **Conclude** is a permanent control (ADR-0046): the operator records their own verdict from **any** live state, including mid-turn and at the approval gate. No state grants or withholds it. |
 | `concluded → idle` | **Reopen** (ADR-0043): the operator withdraws the recorded verdict and keeps testing. The only edge out of a terminal state. |
 
 A verdict the agent authors itself (`working --> concluded`) is reachable **only

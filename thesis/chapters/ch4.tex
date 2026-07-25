@@ -571,7 +571,9 @@ three terminal ones. The loop between \emph{working} and
 Figure~\ref{fig:arch-gated-execution} --- an approved command runs \emph{inside}
 the next working turn, which is why there is no separate executing state.
 \emph{awaiting\_operator} is deliberately non-terminal: an agent that has run out
-of ideas hands the session back instead of producing a verdict.}
+of ideas hands the session back instead of producing a verdict. The one edge out
+of a terminal state is \emph{reopen}: an operator who no longer stands behind a
+recorded verdict withdraws it and resumes testing (ADR-0043).}
 \label{fig:arch-session-lifecycle}
 \end{figure}
 
@@ -583,7 +585,12 @@ exactly like the vulnerability being gone. That is the single most damaging erro
 this system can make: a still-exploitable finding marked remediated, with an
 evidence trail that reads as diligent. The design therefore refuses to let
 ``I could not reproduce it'' become a determination. The session pauses, keeps
-its sandbox alive, and asks the operator to steer or to conclude manually. An
+its sandbox alive, and hands control back. It does not press for an answer: a
+hand-back is the operator reading output and deciding what to try next, not a
+pending decision, so the console renders no prompt of its own --- the agent's
+last message stands, the status line reads \emph{waiting for you}, and the
+control that ends the retest is permanently to hand rather than offered by a
+banner (ADR-0046). An
 earlier design bounded the agent's effort with a step budget and treated
 exhaustion of that budget as a give-up state; it was removed in favour of this
 one. ADR-0034 first retired the give-up state, leaving the budget to pause rather
@@ -606,6 +613,21 @@ Five live states remain. A state machine that a reader can hold in their head is
 not a cosmetic property of a system whose central claim is that a human stays in
 control of it.
 
+The same instinct was then applied to what the interface \emph{says} in that
+resting state. ADR-0042 replaced the two banners with one light prompt ---
+\emph{your move: reply, or record the verdict} --- and using the tool rejected
+even that: repainted after every approved action, it restates two things the
+operator already knows and frames their own pace as a pending decision. ADR-0046
+removed it. A hand-back now renders as the agent's message and nothing else, the
+state stays legible from a status line reading \emph{waiting for you}, and the
+\textbf{Conclude} control the banner had owned became permanent --- so no state
+gates the one action that ends a retest. The agent's voice was rebalanced the same
+way: it proposes concluding only where it has actually reached a determination,
+because a standing invitation to end the retest is verdict pressure from the party
+this design forbids from recording one. The direction of travel across all three
+narrowings is identical: say what the state \emph{is}, and let the operator decide
+what to do about it.
+
 A session is also not wholly durable, which is the cost promised in
 Section~\ref{sec:design-overview}. Its transcript, status and goal are persisted,
 but the live agent, its message history and its sandbox handle are held in an
@@ -614,16 +636,29 @@ survives in a non-terminal state and the sandbox has to be reclaimed separately.
 That is the price of the broker-free design, and it is bounded precisely because a
 session is something a human sits through rather than a job left to run unattended.
 
+One terminal state is not quite terminal. A concluded session can be
+\emph{reopened} (ADR-0043): the verdict is withdrawn from the \texttt{verdicts}
+projection and the session returns to \texttt{idle} for further work. What it is
+not is erased --- the withdrawal is appended to the transcript as its own
+\texttt{verdict\_cancelled} event, so the record shows that a determination was
+made and then retracted rather than quietly losing one. This is the same ordering
+the audit of Section~\ref{sec:design-derivations} rests on: the projection is a
+derivation and may be revised, the transcript is the source and only ever grows.
+
 \subsection{Steering, and the shape of operator control}
 
-Control is exercised in four ways, in increasing order of intervention: approving
+Control is exercised in five ways, in increasing order of intervention: approving
 or rejecting each proposed command; typing a message that reaches the agent as a
 first-class turn on its next decision; editing the retest goal that frames the
-whole session; and running a command directly in the same sandbox, which the
-agent then observes on its next turn. The last of these is deliberately
-\emph{not} gated. The gate exists to keep a machine from acting unilaterally, not
-to supervise the human, and a tool that asked the operator to approve their own
-command would be ceremony rather than safety.
+whole session; running a command directly in the same sandbox, which the agent
+then observes on its next turn; and concluding the retest outright, recording the
+determination the operator has settled on. Running a command directly is
+deliberately \emph{not} gated. The gate exists to keep a machine from acting
+unilaterally, not to supervise the human, and a tool that asked the operator to
+approve their own command would be ceremony rather than safety. Concluding,
+likewise, is never withheld: it is a \emph{permanent} control, available in every
+live state (ADR-0046), because a design whose central claim is that the human owns
+the determination cannot make reaching one contingent on the agent having offered.
 
 Who sets the \emph{pace} turned out to be a separate question from who holds the
 gate, and getting it wrong made the tool unpleasant to use in a way the gate alone

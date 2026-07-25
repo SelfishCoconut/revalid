@@ -2,8 +2,8 @@ import type { SessionEvent } from "../api/client";
 
 /**
  * Pure derivations from a retest session's transcript (the WS event stream, the
- * source of truth). The live free-launch state, the auto-run set, and pause/verdict
- * reasons are all derived from events so they survive a reload (FR-17).
+ * source of truth). The live free-launch state, the auto-run set, and the legacy
+ * give-up reason are all derived from events so they survive a reload (FR-17).
  */
 
 /**

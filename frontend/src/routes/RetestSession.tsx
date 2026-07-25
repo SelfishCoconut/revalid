@@ -378,8 +378,8 @@ export function RetestSession({
   const planSteps = currentPlan(events);
   const targetEndpoints = currentTarget(events);
   const deliveredSeq = latestDeliveredSeq(events);
-  // A pending approval is for either a command or a plan change; both gate on the
-  // same tool_call_id, so they share the approve/reject mutations below.
+  // A pending approval is always a proposed command: the agent's `set_plan` was
+  // removed with the user-owned goal (ADR-0032), so the gate carries nothing else.
   const latestProposal = [...events].reverse().find((event) => event.kind === "command_proposed");
   const awaitingApproval = status === "awaiting_command" && latestProposal !== undefined;
 
@@ -392,7 +392,7 @@ export function RetestSession({
   const adjudicated = adjudicatedEvent !== undefined || adjudicateMutation.isSuccess;
   const finalVerdict = adjudicatedEvent?.payload ?? adjudicateMutation.variables;
 
-  // Shared approve/reject block for a pending command or plan proposal.
+  // The approve/reject block for the pending command proposal.
   const renderApproval = (toolCallId: string, note: string) => (
     <div className="mt-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -543,7 +543,7 @@ export function RetestSession({
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-3">
-            {/* Auto-run — approve the agent's commands automatically (plan changes stay gated).
+            {/* Auto-run — approve the agent's commands automatically.
                 Only meaningful while the sandbox is live (running or stopped). */}
             {sandboxLive && (
               <label className="flex items-center gap-2 text-[13px] text-dim">

@@ -98,10 +98,10 @@ def create_session(
         finding_id: The finding identity (FR-16) this session retests.
         model: The resolved LLM model string driving the agent.
         free_launch: Whether the agent's commands auto-run without a per-command
-            human approval (plan changes stay gated regardless). FR-17 Slice 5.
+            human approval. The gate only ever carries a ``run_command``. FR-17 Slice 5.
         deferred: When ``True``, open the session ``idle`` (created but not started)
             so it waits for an operator ``Start`` instead of auto-running — the
-            Restart path (issue #150). Default ``False`` opens it ``starting``.
+            Restart path (issue #150). Default ``False`` opens it ``working``.
     """
     status = RetestSessionStatus.IDLE if deferred else RetestSessionStatus.WORKING
     record = RetestSessionRecord(
@@ -948,12 +948,12 @@ def start_and_step(
         session: Active DB session for this call.
         registry: The live-session registry; a new :class:`LiveSession` is
             registered here for ``session_id``.
-        session_id: The already-created (``starting``) retest session to drive.
+        session_id: The already-created (``working``) retest session to drive.
         agent: The built retest agent (Task 4).
         sandbox: The not-yet-started sandbox for this session.
         finding_prompt: The user prompt describing the finding to retest.
         free_launch: Whether the agent's commands auto-run without a per-command
-            human approval (FR-17 Slice 5). Plan changes stay gated regardless.
+            human approval (FR-17 Slice 5). The gate only ever carries a command.
     """
     # Provision against the session's scope (ADR-0041): the launch `target_set`
     # endpoints parsed to their hosts. Lab scope keeps the unchanged internal

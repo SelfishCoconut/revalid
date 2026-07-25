@@ -1,7 +1,13 @@
 # 0040. Guided retest is operator-driven: one action per turn, then hand back
 
 Date: 2026-07-23
+
 Status: accepted
+> **Amended by [0042](0042-one-voice-five-states-over-guided-mode.md) and
+> [0046](0046-handed-back-console-waits.md):** the guided park is now
+> `awaiting_operator` (not `needs_guidance`), and the console renders no prompt there —
+> the agent's message is the hand-back, and Conclude is a permanent control. One action
+> per turn, and never self-concluding while guided, are unchanged.
 
 ## Context
 

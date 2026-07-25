@@ -3,6 +3,9 @@
 Date: 2026-07-19
 
 Status: accepted
+> **Amended by [0042](0042-one-voice-five-states-over-guided-mode.md):** the
+> `thinking` status introduced here is renamed `working` (it absorbed `starting` and
+> the never-set `running_command`). The budget removal and the cockpit redesign stand.
 
 Amends [0034](0034-pause-and-ask-lifecycle.md) (removes its first pause trigger).
 Supersedes the configurable step budget added in FR-17 Slice 9 (#122).

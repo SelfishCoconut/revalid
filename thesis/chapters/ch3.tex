@@ -29,7 +29,7 @@ judgement and architecture, not on typing code.
 
 The evidence for this model is the decision trail. Every significant choice was
 recorded as an Architecture Decision Record (ADR) in the lightweight MADR format
-\cite{madr, nygard_adr}; the repository contains \textbf{forty-four} such records,
+\cite{madr, nygard_adr}; the repository contains \textbf{forty-six} such records,
 each stating a context, the options considered, and the decision with its
 consequences. Requirements were captured in a Software Requirements Specification
 following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. These artefacts ---
@@ -74,7 +74,7 @@ attempt played.
 \emph{Adeptus} (hand-crafted) & AI-powered pentesting platform & Ad-hoc prompting; no skills, hooks or ADRs & First attempt; showed that unstructured AI use does not scale. \\ \hline
 \emph{Adeptus} (workbench) & Multi-user pentest workbench + knowledge graph & Heavy: 13 skills, 7 role-agents, 7 hooks, slice-based flow & Peak tooling; revealed that ceremony had outgrown the task. \\ \hline
 \emph{Retester} & Report-driven vulnerability \emph{revalidation} & Focused; Pydantic AI, swappable Claude/Ollama & The pivot from pentesting to retesting. \\ \hline
-\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 44 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
+\bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 46 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
 \end{tabular}
 \end{center}
 \caption[Evolution of the project across earlier attempts]{Evolution from the
@@ -622,13 +622,14 @@ it absorbs.
 
 \paragraph{Tools used.} The single AI tool used for development was Claude Code,
 Anthropic's agentic command-line assistant, driven by Anthropic's Claude family of
-models; the specific model versions used in the earliest milestones are not recorded
-in the project's audit trail, while the later milestones and the assistance with this
-dissertation used the Opus~4 family. Local open-weight models (Ollama, \texttt{qwen}
-family) were used only \emph{as a component and comparison condition of the system
-under study}, never to author the thesis or the code.
+models. The specific model versions used in the earliest milestones are not recorded
+in the project's audit trail; from the point at which the log began recording them,
+three model identities appear --- Fable~5, Opus~4.8 and, for the final sessions and
+much of the assistance with this dissertation, Opus~5. Local open-weight models
+(Ollama, \texttt{qwen} family) were used only \emph{as a component and comparison
+condition of the system under study}, never to author the thesis or the code.
 
-\paragraph{Type of use.} The assistance spanned five categories, in every case under
+\paragraph{Type of use.} The assistance spanned seven categories, in every case under
 the author's direction and subject to the author's review:
 \begin{itemize}
 \item \emph{Research and analysis} --- reading the regulations and the proposal and
@@ -636,8 +637,16 @@ the author's direction and subject to the author's review:
 \item \emph{Code generation} --- implementing the backend (\texttt{src/revalid}) and
   the React front end (\texttt{frontend/src}) from the author's specifications.
 \item \emph{Test writing} --- unit, integration and system tests across the pyramid.
-\item \emph{Documentation generation} --- API documentation, the C4 architecture
-  and sequence diagrams, and the project roadmap.
+\item \emph{Diagnosis and debugging} --- reproducing defects the author found in live
+  use and locating their cause, including the two failures that made online-scope
+  egress unreachable, a schema that permitted an empty model answer to pass as a
+  successful enrichment, and a test that hung rather than failed.
+\item \emph{Refactoring and security remediation} --- consolidating duplicated logic,
+  retiring superseded code paths, and closing findings raised by the static-analysis
+  gate.
+\item \emph{Documentation generation} --- API documentation, the C4 architecture,
+  class, activity and sequence diagrams, the requirements specification and the
+  project roadmap.
 \item \emph{Thesis writing assistance} --- drafting and editing chapters, including
   verifying that every cited reference resolves to a real source.
 \end{itemize}
@@ -649,7 +658,7 @@ dissertation, the chapters listed above were drafted with assistance; all were
 reviewed, corrected and approved by the author.
 
 \paragraph{Authorship statement.} All design, architecture and scope decisions were
-made by the author, as evidenced by the forty-four ADRs and the requirements
+made by the author, as evidenced by the forty-six ADRs and the requirements
 specification that precede the code. Every AI output --- code, tests, documentation
 and thesis prose --- was reviewed and validated by the author before acceptance,
 through pull-request validation and the continuous-integration gate. The author is
