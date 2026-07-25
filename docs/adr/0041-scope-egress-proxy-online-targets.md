@@ -1,7 +1,7 @@
 # 0041. Retest scope drives the sandbox target: allowlisting egress proxy for online targets
 
 Date: 2026-07-24
-Status: accepted (ratified 2026-07-25)
+Status: superseded by [ADR-0045](0045-l3-egress-gateway.md) (the L7 proxy is replaced by an L3 egress gateway so all tools, not just HTTP, reach the scoped host)
 
 ## Context
 

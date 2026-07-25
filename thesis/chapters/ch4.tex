@@ -364,15 +364,19 @@ The topology is chosen from the retest's \emph{scope} rather than fixed, and the
 distinction matters for how far the guarantee reaches. When the scope is the lab
 --- the case the figure shows and the case the evaluation runs --- provisioning is
 exactly as described: an isolated network whose only other member is the target.
-When the scope names a host that is not the lab, the session network is still
-created in \texttt{internal} mode, but its single route out is a per-session
-proxy configured to deny everything except the scoped host. Provisioning that proxy
-\emph{fails closed}: if it cannot be created the session is torn down rather than
-allowed to run with open egress. The weaker property should be stated plainly ---
-in that second configuration the boundary is a correctly configured allowlist
-rather than an absent route, which is a promise again, if a much smaller and more
-auditable one than a check inside the application; and only HTTP traffic has any
-path out at all.
+When the scope names a host that is not the lab, the session is confined instead by
+a per-session \emph{egress gateway}: a helper container installs a packet-filter
+allowlist for the scoped host's addresses and the sandbox runs inside that
+gateway's network namespace, holding raw-socket access for its tools but not the
+privilege to change the filter. Every tool --- not only HTTP clients --- can then
+reach the scoped host and nothing else. Provisioning \emph{fails closed}: if the
+gateway cannot be created the session is torn down rather than allowed to run with
+open egress. The weaker property should be stated plainly --- in that second
+configuration the boundary is a correctly configured allowlist rather than an
+absent route, a promise again, if a small and auditable one held in a container the
+agent cannot reach; and because it filters by address, it pins the scoped host's
+addresses when the session starts and cannot follow a host that moves across a
+rotating content-delivery network.
 
 \section{The data model}
 \label{sec:design-data}

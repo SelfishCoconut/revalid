@@ -132,7 +132,7 @@ paths are where the design's claims actually live.
 | 7a | The agent runs out of options | It hands back rather than guessing. `inconclusive` is never written as a verdict by the agent; the sandbox stays alive and the auditor steers or concludes (ADR-0034). |
 | 8a | The agent believes it knows the answer | Under the default guided mode it offers a *recommendation*; only the auditor records the verdict (ADR-0040). |
 | 8b | The auditor turns on Auto-run | The agent drives itself to a determination, auto-approving its own commands. The egress lock is unaffected — this relaxes the gate, never the containment (ADR-0029). |
-| 2a | The scope is an online host | The sandbox is provisioned with a deny-all-but-scope egress proxy instead of the lab network, and **fails closed** if that cannot be done (ADR-0041). |
+| 2a | The scope is an online host | The sandbox is provisioned behind a per-session **L3 egress gateway** (an `iptables` IP-allowlist in a helper container it cannot alter) instead of the lab network, and **fails closed** if that cannot be done (ADR-0045). |
 | * | The auditor stops, restarts or ends the session | Available at any live point; a stop keeps the sandbox alive so work can resume (ADR-0039). |
 
 Note what the exception table does *not* contain: a path where the system decides

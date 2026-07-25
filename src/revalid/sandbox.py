@@ -9,7 +9,6 @@ the nightly system test.
 
 from __future__ import annotations
 
-import base64
 import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
@@ -37,14 +36,14 @@ DEFAULT_LAB_BASE_URL = "http://localhost:3000"
 #: it for overrunning its limit: 124 (coreutils), 143 (busybox SIGTERM), 137
 #: (SIGKILL). ``run_command`` maps these to a "timed out" note for the agent.
 TIMEOUT_EXIT_CODES = frozenset({124, 137, 143})
-#: Egress-proxy image for online-scope retests (ADR-0041): a deny-all-by-default
-#: allowlisting HTTP(S) proxy that the sandbox's *only* route to the internet
-#: passes through. Configurable so an operator can vendor their own; default Squid.
-DEFAULT_EGRESS_PROXY_IMAGE = "ubuntu/squid:latest"
-#: Env var overriding the egress-proxy image.
-EGRESS_PROXY_IMAGE_ENV = "REVALID_EGRESS_PROXY_IMAGE"
-#: Port the egress proxy listens on inside the session network.
-EGRESS_PROXY_PORT = 3128
+#: DNS resolver an online sandbox is allowed to reach for name resolution
+#: (ADR-0045). The scope host is pre-resolved and pinned in ``/etc/hosts``, but
+#: tools that run their own resolver (nmap most notably) bypass that file, so a
+#: single resolver is allowlisted for them. The L3 firewall still permits only
+#: the scoped IPs, so a resolved-but-off-scope address is dropped regardless.
+DEFAULT_DNS_RESOLVER = "1.1.1.1"
+#: Env var overriding the allowed DNS resolver.
+DNS_RESOLVER_ENV = "REVALID_DNS_RESOLVER"
 
 
 class CommandResult(BaseModel):
@@ -110,14 +109,28 @@ def sandbox_image() -> str:
     return os.environ.get(SANDBOX_IMAGE_ENV, DEFAULT_SANDBOX_IMAGE)
 
 
-def egress_proxy_image() -> str:
-    """Return the egress-proxy image (``$REVALID_EGRESS_PROXY_IMAGE`` or default)."""
-    return os.environ.get(EGRESS_PROXY_IMAGE_ENV, DEFAULT_EGRESS_PROXY_IMAGE)
+def dns_resolver() -> str:
+    """Return the allowed DNS resolver (``$REVALID_DNS_RESOLVER`` or the default)."""
+    return os.environ.get(DNS_RESOLVER_ENV, DEFAULT_DNS_RESOLVER)
 
 
-def egress_proxy_name(session_id: int) -> str:
-    """Return the per-session egress-proxy container name (ADR-0041)."""
-    return f"revalid-retest-proxy-{session_id}"
+def sandbox_container_name(session_id: int) -> str:
+    """Return the per-session sandbox container name (ADR-0045).
+
+    Named (rather than anonymous) so teardown can find and remove it by name even
+    when no live ``DockerSandbox`` object holds a reference — e.g. reaping a
+    session orphaned by a backend restart when its report is deleted.
+    """
+    return f"revalid-retest-sbx-{session_id}"
+
+
+def gateway_container_name(session_id: int) -> str:
+    """Return the per-session egress-gateway container name (ADR-0045).
+
+    The gateway owns the network namespace and the iptables egress allowlist; the
+    sandbox joins that namespace but cannot alter it (it holds no ``NET_ADMIN``).
+    """
+    return f"revalid-retest-gw-{session_id}"
 
 
 def lab_host() -> str:
@@ -144,29 +157,98 @@ def online_scope_hosts(scope_hosts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(host for host in scope_hosts if host != lab)
 
 
-def squid_allowlist_config(hosts: tuple[str, ...]) -> str:
-    """Build a deny-all-by-default Squid config allowing only ``hosts`` (ADR-0041).
+def _bare_host(host: str) -> str:
+    """Strip a ``:port`` suffix from a scope host, leaving the bare hostname."""
+    return host.rsplit(":", 1)[0] if ":" in host and not host.endswith(":") else host
 
-    Each scope host becomes an exact ``dstdomain`` ACL (the port, if any, is
-    dropped — Squid matches the hostname); everything not on the list is denied,
-    so the proxy is a closed allowlist, not an open relay.
+
+def resolve_scope_ips(
+    hosts: tuple[str, ...],
+    resolver: Callable[[str], list[str]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Resolve each online scope host to its IP addresses (ADR-0045).
+
+    The IPs are pinned into the sandbox at launch — allowlisted in the egress
+    firewall and written to ``/etc/hosts`` — so the L3 gateway can permit exactly
+    the scoped host and nothing else. All A/AAAA records are taken, but they are a
+    *snapshot*: a target behind rotating CDN IPs may present addresses not seen
+    here (the inherent limit of an IP allowlist vs. the retired L7 proxy — stated
+    in ADR-0045).
 
     Args:
-        hosts: The online scope hosts (``host`` or ``host:port``) to permit.
+        hosts: The online scope hosts (``host`` or ``host:port``); the port is
+            dropped for resolution.
+        resolver: Injection seam for tests — maps a bare host to its IP strings.
+            Defaults to a real DNS lookup via :func:`socket.getaddrinfo`.
 
     Returns:
-        A Squid configuration string.
+        A mapping of bare host → its resolved IPs (in stable, de-duplicated order).
+        A host that does not resolve maps to an empty tuple (the caller fails
+        closed on it rather than opening egress to a guessed address).
     """
-    domains = " ".join(sorted({host.rsplit(":", 1)[0] for host in hosts if host}))
-    return "\n".join(
-        [
-            f"http_port {EGRESS_PROXY_PORT}",
-            f"acl scoped dstdomain {domains}",
-            "http_access allow scoped",
-            "http_access deny all",
-            "shutdown_lifetime 1 second",
-        ]
-    )
+    resolve = resolver if resolver is not None else _getaddrinfo_ips
+    resolved: dict[str, tuple[str, ...]] = {}
+    for host in hosts:
+        bare = _bare_host(host)
+        if not bare:
+            continue
+        ips = tuple(dict.fromkeys(resolve(bare)))  # de-dupe, preserve order
+        resolved[bare] = ips
+    return resolved
+
+
+def _getaddrinfo_ips(host: str) -> list[str]:  # pragma: no cover - real DNS
+    """Resolve ``host`` to its **IPv4** addresses via the system resolver.
+
+    IPv4 only, on purpose: Docker's default bridge is v4-only, so a host's AAAA
+    (IPv6) records are unreachable from the sandbox anyway — and worse, an IPv6
+    address fed to ``iptables`` (which is v4-only; ``ip6tables`` handles v6) makes
+    the gateway's firewall script fail and the sandbox lose all egress. The
+    firewall separately blanket-drops any IPv6 as defence-in-depth. A v6-only host
+    resolves to nothing here and the caller fails closed on it.
+    """
+    import socket
+
+    infos = socket.getaddrinfo(host, None, socket.AF_INET)
+    return [str(info[4][0]) for info in infos]
+
+
+def egress_firewall_script(scope_ips: tuple[str, ...], dns_ip: str) -> str:
+    """Build the gateway's iptables egress allowlist as a shell script (ADR-0045).
+
+    Default-drop OUTPUT (IPv4), then allow only: loopback, established/related
+    return traffic, DNS to the one permitted resolver, and each scoped IP (any
+    protocol, so ICMP/UDP/TCP scans all work). IPv6 is blanket-dropped — the
+    scope IPs are v4 (see :func:`_getaddrinfo_ips`) and Docker's bridge is v4-only,
+    so v6 is both unneeded and a leak to close; the drop is best-effort (``|| true``)
+    so a kernel without a v6 stack does not abort the script. Everything else is
+    dropped, so the sandbox sharing this namespace reaches the scoped host and
+    nothing else. The gateway then blocks on ``sleep infinity`` to keep the
+    namespace (and thus its rules) alive for the sandbox's lifetime.
+
+    Only resolved IPs and a resolver IP are interpolated — never a hostname — so
+    there is no shell-injection surface (all inputs are numeric).
+
+    Args:
+        scope_ips: The resolved (IPv4) scope IPs to permit.
+        dns_ip: The single DNS resolver to permit on port 53.
+
+    Returns:
+        A ``sh``-executable script string.
+    """
+    lines = [
+        "set -e",
+        "iptables -P OUTPUT DROP",
+        "iptables -A OUTPUT -o lo -j ACCEPT",
+        "iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+        f"iptables -A OUTPUT -d {dns_ip} -p udp --dport 53 -j ACCEPT",
+        f"iptables -A OUTPUT -d {dns_ip} -p tcp --dport 53 -j ACCEPT",
+    ]
+    lines += [f"iptables -A OUTPUT -d {ip} -j ACCEPT" for ip in scope_ips]
+    # Close IPv6 entirely (best-effort: a v6-less kernel has no ip6tables table).
+    lines.append("ip6tables -P OUTPUT DROP 2>/dev/null || true")
+    lines.append("exec sleep infinity")
+    return "\n".join(lines)
 
 
 class FakeSandbox:
@@ -205,6 +287,44 @@ class FakeSandbox:
         self.stopped = True
 
 
+def _teardown_by_name(
+    client: docker.DockerClient,
+    network_name: str,
+    container_names: tuple[str, ...],
+    lab_container: str,
+) -> None:
+    """Remove a session's containers then its network, all by name (best-effort).
+
+    Containers go first (one still attached blocks the network's removal), then the
+    lab container is disconnected (online sessions never attach it, so the call is a
+    harmless no-op there) and the network is removed. Every step tolerates the
+    resource being already gone, so this is safe to call to reap an orphan, to
+    self-heal a stale prior run, or as the normal ``stop()``. The gateway must be
+    removed before the sandbox that shares its namespace would otherwise be fine —
+    order within ``container_names`` is caller-chosen (sandbox first, gateway
+    second) so the namespace owner outlives its guest.
+    """
+    import docker
+
+    for name in container_names:
+        try:
+            client.containers.get(name).remove(force=True)
+        except (docker.errors.NotFound, docker.errors.APIError):
+            pass
+    try:
+        network = client.networks.get(network_name)
+    except docker.errors.NotFound:
+        return
+    try:
+        network.disconnect(lab_container, force=True)
+    except docker.errors.APIError:
+        pass
+    try:
+        network.remove()
+    except (docker.errors.NotFound, docker.errors.APIError):
+        pass
+
+
 class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered by the system test
     """A real ephemeral Docker sandbox on an egress-locked ``--internal`` network."""
 
@@ -215,23 +335,27 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         image: str | None = None,
         lab_container: str = DEFAULT_LAB_CONTAINER,
     ) -> None:
-        """Bind this sandbox to ``session_id`` (scopes its egress-locked network name)."""
+        """Bind this sandbox to ``session_id`` (scopes its per-session resource names)."""
         self._session_id = session_id
         self._image = image if image is not None else sandbox_image()
         self._lab_container = lab_container
         self._container: Container | None = None
-        self._proxy: Container | None = None
+        self._gateway: Container | None = None
         self._network_name = internal_network_name(session_id)
-        self._proxy_name = egress_proxy_name(session_id)
+        self._sandbox_name = sandbox_container_name(session_id)
+        self._gateway_name = gateway_container_name(session_id)
 
     def start(self, scope_hosts: tuple[str, ...] = ()) -> None:
-        """Provision the sandbox for this session's scope (ADR-0041).
+        """Provision the sandbox for this session's scope (ADR-0025/0041/0045).
 
         Lab scope (empty, or every host is the lab host) keeps the unchanged
-        ``--internal`` network with the lab container attached. Any other host is an
-        online target: provision a deny-all-by-default egress proxy that allowlists
-        only the scoped host(s) and route the sandbox's HTTP(S) through it — the
-        sandbox has no other route out (the session network stays ``--internal``).
+        ``--internal`` network with the lab container attached — the target is a
+        named neighbour, reachable by construction and nothing else. Any other host
+        is an online target: provision a per-session **egress gateway** that holds an
+        L3 iptables allowlist for the scoped IP(s), and run the sandbox inside the
+        gateway's network namespace so every tool (not just HTTP) can reach the
+        scoped host and nothing else — and cannot alter that, because it holds no
+        ``NET_ADMIN`` (ADR-0045).
         """
         try:
             import docker
@@ -241,7 +365,7 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
             ) from exc
         client = docker.from_env()
         self._require_image(client)
-        self._clear_stale_network(client)
+        self._clear_stale(client)
         if is_lab_scope(scope_hosts):
             self._start_lab(client)
         else:
@@ -253,6 +377,7 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         network.connect(self._lab_container)  # allowlist == network membership (FR-06)
         self._container = client.containers.run(
             self._image,
+            name=self._sandbox_name,
             command="sleep infinity",
             network=self._network_name,
             detach=True,
@@ -261,77 +386,72 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         )
 
     def _start_online(self, client: docker.DockerClient, hosts: tuple[str, ...]) -> None:
-        """Online provisioning (ADR-0041): an allowlisting egress proxy, fail-closed.
+        """Online provisioning (ADR-0045): a per-session L3 egress gateway, fail-closed.
 
-        The session network stays ``--internal`` so the sandbox has no direct
-        internet route; a Squid proxy attached to *both* that network and the
-        internet-capable default ``bridge`` is its only way out, and Squid denies
-        every destination but ``hosts``. Any provisioning failure raises
-        ``SandboxUnavailableError`` — the sandbox is never left with open egress.
+        Resolve the scope host(s) to their IP(s), then provision two containers on
+        a per-session bridge network:
+
+        - a **gateway** that holds ``NET_ADMIN`` and installs an iptables OUTPUT
+          allowlist permitting only the scoped IPs and one DNS resolver — default
+          drop otherwise — then blocks to keep its network namespace alive;
+        - the **sandbox** itself, run *inside the gateway's network namespace*
+          (``network_mode=container:<gateway>``) with ``NET_RAW`` but **not**
+          ``NET_ADMIN``. So the sandbox's every packet is filtered by the gateway's
+          rules, all tools work (raw sockets, ICMP, any port on the scoped host),
+          and no command it runs can change egress — the capability lives in a
+          different container it cannot reach.
+
+        The scoped host is pinned in the shared ``/etc/hosts`` (via the gateway's
+        ``extra_hosts``) so name resolution needs no network; the one allowed
+        resolver covers tools that resolve independently (nmap). Any provisioning
+        failure tears everything down and raises — never a half-open route.
         """
         import docker.errors
 
         try:
-            client.networks.create(self._network_name, driver="bridge", internal=True)
-            self._proxy = client.containers.run(
-                egress_proxy_image(),
-                name=self._proxy_name,
-                # `entrypoint`, not `command`: the Squid images ship an
-                # ENTRYPOINT that launches Squid itself and treats anything
-                # passed as *its* arguments, so a `command` here never ran — it
-                # arrived as `squid … sh -c '…'` and the container died on
-                # "'-c': unrecognized option". Overriding the entrypoint is what
-                # actually hands control to our shell.
-                entrypoint=["sh", "-c", self._proxy_launch(hosts)],
+            resolved = resolve_scope_ips(hosts)
+            scope_ips = tuple(ip for ips in resolved.values() for ip in ips)
+            if not scope_ips:
+                raise SandboxUnavailableError(
+                    f"could not resolve any scope host to an IP: {', '.join(hosts)}"
+                )
+            dns_ip = dns_resolver()
+            client.networks.create(self._network_name, driver="bridge")
+            self._gateway = client.containers.run(
+                self._image,
+                name=self._gateway_name,
+                # `entrypoint`, not `command`: the run-command path must own PID 1
+                # so its `exec sleep infinity` keeps the netns alive; the script is
+                # a plain multi-line `sh -c` argument (docker-py passes argv, so no
+                # shell requoting) and interpolates only numeric IPs — no injection.
+                entrypoint=["sh", "-c", egress_firewall_script(scope_ips, dns_ip)],
                 network=self._network_name,
+                cap_add=["NET_ADMIN"],
+                dns=[dns_ip],
+                # Pin the scope host(s) so glibc-based tools resolve with zero DNS;
+                # this /etc/hosts is shared into the sandbox via the netns join.
+                extra_hosts={host: ips[0] for host, ips in resolved.items() if ips},
                 detach=True,
                 auto_remove=False,
             )
-            client.networks.get("bridge").connect(self._proxy)  # the internet side
-            self._proxy.reload()
-            proxy_ip = self._proxy.attrs["NetworkSettings"]["Networks"][self._network_name][
-                "IPAddress"
-            ]
-            proxy_url = f"http://{proxy_ip}:{EGRESS_PROXY_PORT}"
             self._container = client.containers.run(
                 self._image,
+                name=self._sandbox_name,
                 command="sleep infinity",
-                network=self._network_name,
+                # Share the gateway's network namespace: the sandbox has no network
+                # of its own, so the gateway's OUTPUT allowlist is the sandbox's
+                # only route out. `network_mode=container` forbids network/dns/
+                # extra_hosts kwargs — they belong to the namespace owner above.
+                network_mode=f"container:{self._gateway_name}",
+                cap_add=["NET_RAW"],  # SYN scans etc.; NOT NET_ADMIN (can't edit rules)
                 detach=True,
                 auto_remove=False,
-                network_disabled=False,
-                environment={
-                    "http_proxy": proxy_url,
-                    "https_proxy": proxy_url,
-                    "HTTP_PROXY": proxy_url,
-                    "HTTPS_PROXY": proxy_url,
-                },
             )
-        except (docker.errors.APIError, KeyError) as exc:
+        except docker.errors.APIError as exc:
             self.stop()  # fail closed: never leave a half-provisioned open route
             raise SandboxUnavailableError(
-                f"online egress proxy provisioning failed: {exc}"
+                f"online egress gateway provisioning failed: {exc}"
             ) from exc
-
-    def _proxy_launch(self, hosts: tuple[str, ...]) -> str:
-        r"""A shell one-liner that writes the allowlist config and runs Squid in foreground.
-
-        The config is passed base64-encoded rather than interpolated as text.
-        The obvious ``printf '%s' {config!r}`` is broken in a way that fails
-        *silently at the wrong layer*: Python's ``repr`` escapes the newlines to
-        the two characters ``\\n``, and ``printf '%s'`` (unlike ``%b``) does not
-        interpret escapes, so Squid received a single-line file full of literal
-        ``\\n`` and died on it — leaving the sandbox with no route out and every
-        online-scope retest unable to reach its target. base64 output is
-        alphanumeric plus ``+/=``, so no quoting rule of any shell can mangle it,
-        whatever ends up in a hostname.
-        """
-        config = squid_allowlist_config(hosts)
-        encoded = base64.b64encode(config.encode()).decode()
-        return (
-            f"echo {encoded} | base64 -d > /etc/squid/squid.conf && "
-            "exec squid -N -f /etc/squid/squid.conf"
-        )
 
     def _require_image(self, client: docker.DockerClient) -> None:
         """Fail early and actionably when the toolbox image has not been built.
@@ -356,40 +476,29 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
                 f"(or set ${SANDBOX_IMAGE_ENV} to an image you already have)"
             ) from exc
 
-    def _clear_stale_network(self, client: docker.DockerClient) -> None:
-        """Remove a same-named network left over from a crashed prior session, if any.
+    def _clear_stale(self, client: docker.DockerClient) -> None:
+        """Reap this session's leftover containers + network from a crashed prior run.
 
         ``start()`` is not re-entrant across a crash: a session killed before it
-        reaches ``stop()`` (process kill, daemon restart) leaves its internal
-        network behind. Because the network name is session-scoped, retrying
-        ``start()`` for the same ``session_id`` would otherwise hit a 409
-        conflict on ``networks.create`` forever. Self-heal instead: disconnect
-        any leftover endpoints and remove the stale network first.
+        reaches ``stop()`` (process kill, daemon restart) leaves its sandbox
+        container, gateway container and/or network behind. All three are
+        session-scoped by *name*, so retrying ``start()`` for the same
+        ``session_id`` would hit a 409 name conflict forever. Self-heal by tearing
+        down the same-named resources first — exactly the by-name teardown
+        ``stop()`` performs.
 
-        Safety assumption (ADR-0008, single trusted user): this targets a
-        leftover from a *prior, crashed* session of the *same* ``session_id`` —
-        it does not distinguish that from a network belonging to another,
-        currently-live session that happens to share the same id. That's safe
-        here only because ``session_id`` is a unique DB row id and sessions run
-        sequentially (never concurrently) under the single-user model. It would
-        be unsafe to run two sandboxes with the same ``session_id`` concurrently
-        (e.g. the system test's fixed sentinel id 9999 must never be run
-        concurrently with itself) — doing so would let one instance's
-        ``start()`` tear down the other's live network.
+        Safety assumption (ADR-0008, single trusted user): this targets leftovers
+        from a *prior, crashed* run of the *same* ``session_id``. That is safe only
+        because ``session_id`` is a unique DB row id and sessions run sequentially
+        under the single-user model; two sandboxes sharing a ``session_id`` must
+        never run concurrently (e.g. the system test's fixed sentinel id).
         """
-        import docker
-
-        try:
-            stale = client.networks.get(self._network_name)
-        except docker.errors.NotFound:
-            return
-        stale.reload()
-        for container_id in list(stale.attrs.get("Containers") or {}):
-            try:
-                stale.disconnect(container_id, force=True)
-            except docker.errors.APIError:
-                pass
-        stale.remove()
+        _teardown_by_name(
+            client,
+            self._network_name,
+            (self._sandbox_name, self._gateway_name),
+            self._lab_container,
+        )
 
     def exec(self, command: str, *, timeout: float) -> CommandResult:
         """Run ``command`` inside the live container, capped at ``timeout`` seconds.
@@ -421,41 +530,21 @@ class DockerSandbox:  # pragma: no cover - drives a live Docker daemon; covered 
         )
 
     def stop(self) -> None:
-        """Remove the container and tear down the egress-locked network (best-effort).
+        """Tear down this session's containers and network by name (best-effort).
 
-        Each step is independently tolerant of "already gone": the container may
-        have vanished already (crash, an external ``docker rm``, a daemon restart)
-        raising ``NotFound``/``APIError`` on ``.remove()``, and ``disconnect``
-        raises a non-``NotFound`` ``APIError`` when the lab container was never
-        actually connected (e.g. ``start()`` failed before ``network.connect``).
-        Neither must prevent the remaining teardown steps from running.
+        Removal is keyed on the session-scoped resource *names*, not on the
+        object's held references, so a freshly constructed ``DockerSandbox`` can
+        reap resources it never created — the case that matters when a report is
+        deleted after a backend restart has forgotten the live session. Every step
+        tolerates "already gone".
         """
         import docker
 
-        if self._container is not None:
-            try:
-                self._container.remove(force=True)
-            except docker.errors.APIError:
-                pass
-            self._container = None
-        # The online-scope egress proxy (ADR-0041), if any: remove it before the
-        # network so its dual attachment (session net + bridge) can't block removal.
-        if self._proxy is not None:
-            try:
-                self._proxy.remove(force=True)
-            except docker.errors.APIError:
-                pass
-            self._proxy = None
-        client = docker.from_env()
-        try:
-            network = client.networks.get(self._network_name)
-        except docker.errors.NotFound:
-            return
-        try:
-            network.disconnect(self._lab_container, force=True)
-        except docker.errors.APIError:
-            pass
-        try:
-            network.remove()
-        except docker.errors.NotFound:
-            pass
+        self._container = None
+        self._gateway = None
+        _teardown_by_name(
+            docker.from_env(),
+            self._network_name,
+            (self._sandbox_name, self._gateway_name),
+            self._lab_container,
+        )

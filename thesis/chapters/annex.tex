@@ -114,10 +114,12 @@ The agent's commands run inside a sandbox container placed on a Docker network i
 case this guide follows --- the lab target is attached and nothing else, so
 reachability is network membership (FR-06), the lab container is the one host the
 sandbox has any route to, and no command, whatever address it names, can leave that
-network. (A scope naming a host outside the lab instead provisions a per-session
-proxy that permits that host alone; if it cannot be provisioned the session is torn
-down rather than run unrestricted.) Two practical consequences follow for the lab
-case, both worth knowing before the first run.
+network. (A scope naming a host outside the lab instead confines the sandbox behind
+a per-session egress gateway --- a helper container holding a packet-filter
+allowlist for that host's addresses, which the sandbox cannot alter --- so every
+tool reaches the scoped host alone; if the gateway cannot be provisioned the session
+is torn down rather than run unrestricted.) Two practical consequences follow for
+the lab case, both worth knowing before the first run.
 
 Because the sandbox cannot download anything, every tool the agent may use has to be
 present in its image already. That image is built once, locally:

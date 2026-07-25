@@ -749,6 +749,47 @@ def test_delete_report_ends_its_live_retest_session() -> None:
         assert client.get(f"/api/retest-sessions/{sid}").status_code == 404  # rows cascaded away
 
 
+def test_delete_report_reaps_a_session_orphaned_by_a_restart() -> None:
+    """Deleting a report tears down a session's sandbox even when it is not live (#228).
+
+    A backend restart abandons in-flight sessions but leaves their Docker
+    resources running and their rows in the DB; the in-memory registry no longer
+    holds them. Deleting the report must still reap those resources — by building
+    a throwaway sandbox for the forgotten session id and calling ``stop()`` (whose
+    real teardown is by name). Here the per-id ``FakeSandbox`` records that it was
+    stopped, standing in for the by-name Docker teardown.
+    """
+    built: dict[int, FakeSandbox] = {}
+
+    def factory(sid: int) -> FakeSandbox:
+        return built.setdefault(
+            sid, FakeSandbox([CommandResult(stdout="ok", stderr="", exit_code=0, elapsed_ms=1)])
+        )
+
+    app = create_app(engine=create_db_engine(IN_MEMORY))
+    app.dependency_overrides[get_retest_agent] = lambda: build_retest_agent(
+        streaming(script_run_then_conclude)
+    )
+    _override_goal_agent(app)
+    app.dependency_overrides[get_sandbox_factory] = lambda: factory
+    with TestClient(app) as client:
+        rid = client.post(
+            "/api/reports/manual",
+            json={"label": "R", "findings": [{"title": "SQLi", "severity": "Critical"}]},
+        ).json()["id"]
+        fid = client.get("/api/findings", params={"report_id": rid}).json()[0]["id"]
+        sid = client.post(f"/api/findings/{fid}/retest-session").json()["id"]
+
+        # Simulate the restart: the session's row survives, but the registry has
+        # forgotten it (as it would after the process bounced).
+        app.state.registry.drop(sid)
+        assert app.state.registry.get(sid) is None
+
+        assert client.delete(f"/api/reports/{rid}").status_code == 204
+        # The orphan was reaped: a sandbox was built for its id and stopped.
+        assert built[sid].stopped is True
+
+
 def test_restart_model_endpoint_is_accepted_and_a_noop_at_the_gate() -> None:
     """POST restart-model returns 202; with no turn in flight it does nothing (#204).
 

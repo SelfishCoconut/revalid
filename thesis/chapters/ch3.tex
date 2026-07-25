@@ -288,9 +288,12 @@ it is easy to overclaim. Each retest session creates its own Docker network in
 \texttt{internal} mode --- a network for which the daemon installs no gateway ---
 and, when the retest is scoped to the local lab, attaches exactly two members to
 it: the authorised target and the container the agent works in. (A retest scoped to
-a host outside the lab keeps the same isolated network but is given a single route
-out through a per-session proxy that denies everything except that host, and is
-torn down rather than run if the proxy cannot be provisioned.) Because the sandbox
+a host outside the lab is instead confined by a per-session \emph{egress gateway}:
+a helper container holds a packet-filter allowlist for the scoped host's addresses,
+and the sandbox runs inside that gateway's network namespace without the privilege
+to alter it --- so every tool, not only HTTP clients, can reach the scoped host and
+nothing else, and no command the agent runs can widen that. The session is torn
+down rather than run if the gateway cannot be provisioned.) Because the sandbox
 has no route off that network, anything the agent may need must already be present,
 so the image it runs is a curated penetration-testing toolbox built locally rather
 than pulled.
@@ -301,7 +304,7 @@ An earlier version of this project did enforce such a list; a check of that kind
 a promise some code path must remember to keep, and it can be defeated by any
 address its author did not anticipate. The route the check was meant to forbid is
 now simply absent. The agent may compose any command it likes --- a request to an
-arbitrary address, a port scan of a private range, a proxy --- and no connection it
+arbitrary address, a port scan of a private range --- and no connection it
 opens has anywhere to go.
 
 Three limits of that boundary are stated here rather than left implicit, because a

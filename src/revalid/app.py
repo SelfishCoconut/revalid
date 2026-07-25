@@ -1625,7 +1625,7 @@ def _register_report_admin_routes(
         return ReportOut.from_record(report)
 
     @router.delete("/reports/{report_id}", status_code=204)
-    def delete_report(report_id: int, session: SessionDep) -> None:
+    def delete_report(report_id: int, session: SessionDep, make_sandbox: SandboxFactoryDep) -> None:
         """Hard-delete a report and everything derived from it (FR-11, #128).
 
         Cascades by hand — SQLite enforces no FKs here — in dependency order:
@@ -1635,14 +1635,17 @@ def _register_report_admin_routes(
 
         First stops any in-flight work the report owns (issues #204/#205): a report
         still extracting is flagged so its background task settles without writing
-        into the deleted row, and every live retest session under it is ended so no
-        agent or sandbox keeps running for a report that is gone.
+        into the deleted row, and every retest session under it has its **sandbox
+        torn down** — the live ones ended cleanly, the rest reaped by name so a
+        session orphaned by a backend restart (its Docker network + containers
+        still up, but no longer in the in-memory registry) does not outlive the
+        report that owned it (ADR-0045, issue #228).
         """
         report = session.get(ReportRecord, report_id)
         if report is None:
             raise HTTPException(status_code=404, detail="report not found")
         extractions.request_cancel(report_id, reason="deleted")
-        _end_live_sessions_for_report(session, registry, report_id)
+        _teardown_report_sandboxes(session, registry, make_sandbox, report_id)
         _cascade_delete_report(session, report)
 
     @router.put("/reports/{report_id}/metadata", response_model=ReportOut)
@@ -2420,17 +2423,29 @@ def _reject_if_duplicate(session: Session, content_hash: str, *, force: bool) ->
     )
 
 
-def _end_live_sessions_for_report(
-    session: Session, registry: SessionRegistry, report_id: int
+def _teardown_report_sandboxes(
+    session: Session,
+    registry: SessionRegistry,
+    make_sandbox: SandboxFactory,
+    report_id: int,
 ) -> None:
-    """End every live retest session under a report before it is deleted (issue #204).
+    """Tear down the sandbox of every retest session under a report before deletion.
 
-    A report's findings may each have an in-flight agentic retest session (a running
-    agent + its sandbox) held in the process-local registry. Deleting the report
-    would leave those orphaned, so each live one is ended first — which cancels any
-    wedged turn and tears the sandbox down (:func:`~revalid.retest_session.end_session`).
-    Non-live sessions (already terminal, or never started) are skipped; the DB rows
-    are removed by :func:`_cascade_delete_report`.
+    A report's findings may each have an agentic retest session with Docker
+    resources (a per-session network + sandbox/gateway containers). Deleting the
+    report must take those with it (ADR-0045, issue #228):
+
+    - a session still **live** in the process-local registry is ended cleanly —
+      cancelling any wedged turn and stopping its sandbox
+      (:func:`~revalid.retest_session.end_session`);
+    - any **other** session is reaped by building a throwaway sandbox for its id
+      and calling ``stop()``, whose teardown is by *name*. This is the case that
+      leaked before: a session whose containers were still running but which a
+      backend restart had dropped from the registry. ``stop()`` is best-effort
+      and a no-op when nothing by that name exists (and a test's ``FakeSandbox``
+      touches no Docker at all).
+
+    The DB rows are removed afterwards by :func:`_cascade_delete_report`.
     """
     finding_ids = list(
         session.scalars(select(FindingRecord.id).where(FindingRecord.report_id == report_id))
@@ -2443,6 +2458,8 @@ def _end_live_sessions_for_report(
     for session_id in session_ids:
         if registry.get(session_id) is not None:
             end_session(session, registry, session_id)
+        else:
+            make_sandbox(session_id).stop()
 
 
 def _cascade_delete_report(session: Session, report: ReportRecord) -> None:
