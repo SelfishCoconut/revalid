@@ -5,6 +5,8 @@ answers from the corpus-overview tool), proving create → ask → persist →
 re-read → delete through the ``/api`` surface with no network and no real model.
 """
 
+import logging
+from collections.abc import AsyncIterator
 from typing import cast
 
 import pytest
@@ -14,7 +16,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from revalid.app import create_app, get_reports_agent
+from revalid.app import STREAM_ERROR_DETAIL, create_app, get_reports_agent
 from revalid.db import IN_MEMORY, ReportRecord, create_db_engine
 from revalid.domain import Finding, ReportStatus, Severity
 from revalid.findings import create_finding
@@ -126,6 +128,56 @@ def test_chat_message_streams_sse_and_persists(client: TestClient) -> None:
         ("user", "how many reports?"),
         ("assistant", "There is 1 report."),
     ]
+
+
+def _failing_stream_model(boom: str) -> FunctionModel:
+    """A stream-capable model that dies mid-run, raising `boom` as its message."""
+
+    async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        raise RuntimeError(boom)
+        yield ""  # pragma: no cover - unreachable; makes this an async generator
+
+    return FunctionModel(stream_function=stream)
+
+
+def test_stream_failure_reports_generically_and_logs_the_cause(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed reply stream tells the SPA nothing and tells the log everything.
+
+    The `error` frame is rendered by the SPA, so it must not carry the exception
+    text (CodeQL py/stack-trace-exposure). The operator still has to be able to
+    tell "Ollama is down" from "bad model", so the cause has to survive somewhere
+    -- the log.
+    """
+    boom = "could not connect to /home/alvar/private/secret.db"
+    app = cast(FastAPI, client.app)
+    app.dependency_overrides[get_reports_agent] = lambda: build_reports_agent(
+        _failing_stream_model(boom)
+    )
+    chat_id = client.post("/api/chats").json()["id"]
+
+    with caplog.at_level(logging.ERROR, logger="revalid.app"):
+        with client.stream(
+            "POST",
+            f"/api/chats/{chat_id}/messages/stream",
+            json={"content": "how many reports?"},
+        ) as response:
+            # The failure happens mid-body, so the status line is already 200.
+            assert response.status_code == 200
+            body = "".join(response.iter_text())
+
+    # Out to the client: the error frame, and nothing about what actually broke.
+    assert "event: error" in body
+    assert STREAM_ERROR_DETAIL in body
+    assert boom not in body
+    assert "secret.db" not in body
+    assert "RuntimeError" not in body
+
+    # In to the log: the cause and a real traceback, so the operator can diagnose.
+    assert boom in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "Traceback" in caplog.text
 
 
 def test_unknown_thread_is_404(client: TestClient) -> None:
