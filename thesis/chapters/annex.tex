@@ -155,75 +155,135 @@ carried out from the browser:
 \section{The application in use}
 \label{sec:annex-ui}
 
-The figures below are screenshots of the running application, captured against the
-reference lab of Section~\ref{sec:annex-lab} with a local language-model backend.
-They follow the same path as the walkthrough above: the operator opens the console,
-reviews what the agent proposes, approves a command, and reads the evidence it
-returns.
+The figures below are screenshots of the running application (in its default dark
+theme), captured against the reference lab of Section~\ref{sec:annex-lab} on a local
+language-model backend. Together they cover every view the operator reaches, and they
+follow the workflow of Section~\ref{sec:annex-flow}: load a report, open a finding,
+draft a goal, run the gated retest, read the evidence, and record a verdict. The run
+shown is real --- the SQL-injection login-bypass against OWASP Juice Shop~17.1.1 ---
+so the verdict and the evidence behind it are genuine, not mocked.
 
-Figure~\ref{fig:ui-overview} is the entry point. The overview keeps one
-\emph{determination} per finding --- still-open, inconclusive or fixed --- above a
-severity profile of the loaded reports and the list of reports themselves, so the
-state of an engagement is legible at a glance before any retest is run.
+\paragraph{Loading a report.} The overview (Figure~\ref{fig:ui-overview}) is the entry
+point: one \emph{determination} per finding above a severity profile and the report
+list. Reports arrive either as a PDF dropped here, or through the manual-entry form
+(Figure~\ref{fig:ui-new}), which bypasses the language model for large reports or small
+local backends (ADR-0020). A report opens to its own page
+(Figure~\ref{fig:ui-report}) with its findings and their severities.
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-overview.png}}
-\caption[The overview]{The overview. One determination per finding (here none yet),
-the severity profile across the loaded reports, and the report list. The two reports
-are the evaluation inputs of Chapter~\ref{ch:evaluation}, loaded through the manual
-door.}
+\caption[The overview]{The overview (\texttt{/}). The determination ledger records one
+verdict per finding --- here a single \emph{still-open} from the run below --- over a
+severity profile and the list of loaded reports.}
 \label{fig:ui-overview}
 \end{figure}
 
-Figure~\ref{fig:ui-console-gate} is the heart of the tool and of its safety claim:
-the retest console with the agent \emph{suspended} on a proposed command. The command
-and its one-line rationale are shown, the run cannot continue, and the only way
-forward is the operator's \emph{Approve} or \emph{Reject}. The scope the session is
-locked to is stated above; \emph{Conclude} is always available, so the operator can
-end the retest at any point rather than only when the agent offers to.
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-new.png}}
+\caption[Manual report entry]{Manual report entry (\texttt{/new}). Findings are typed
+in (or pasted as JSON), bypassing the language model; the report then drives the same
+flow as an extracted one (FR-02, ADR-0020).}
+\label{fig:ui-new}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-report.png}}
+\caption[A report and its findings]{A report (\texttt{/reports/:id}). Its metadata,
+determination tally and severity profile sit above the list of extracted findings.}
+\label{fig:ui-report}
+\end{figure}
+
+\paragraph{Preparing a finding.} A finding moves through four stages, shown by the
+stepper at the top of each: \emph{extract}, \emph{goal}, \emph{retest}, \emph{verdict}.
+The extract stage (Figure~\ref{fig:ui-extract}) shows the structured finding the model
+produced from the report; the goal stage (Figure~\ref{fig:ui-goal}) shows the
+editable, model-drafted retest goal and the \emph{scope} the sandbox will be locked to.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-extract.png}}
+\caption[The extract stage]{The extract stage (\texttt{/findings/:id/extract}). The
+finding as the language model structured it --- title, severity, description,
+reproduction steps and taxonomy --- editable by the operator, with the pipeline stepper
+above.}
+\label{fig:ui-extract}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-goal.png}}
+\caption[The goal stage]{The goal stage (\texttt{/findings/:id/goal}). A model-drafted,
+editable retest goal, and the target \emph{scope} the egress-locked sandbox is
+provisioned around; \emph{Open console} launches the retest with nothing yet running.}
+\label{fig:ui-goal}
+\end{figure}
+
+\paragraph{The gated retest.} Figures~\ref{fig:ui-console-gate}
+and~\ref{fig:ui-console-evidence} are the heart of the tool and of its safety claim.
+The first shows the console \emph{suspended} on a proposed command: the command and
+its rationale are shown, and the only way forward is the operator's \emph{Approve} or
+\emph{Reject}. The second shows the run concluded --- the recorded \emph{still-open}
+verdict with its rationale, the adjudication controls, and the terminal holding the
+\emph{real} captured output: the administrator authentication token the login-bypass
+returned, which is the evidence the verdict is pinned to.
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-gate.png}}
-\caption[The approval gate]{The retest console at the per-command gate. The agent has
-proposed a command to confirm the SQL-injection login bypass and \emph{suspended};
+\caption[The approval gate]{The retest console at the per-command gate
+(\texttt{/retest-sessions/:id}). The agent has proposed a command and \emph{suspended};
 nothing reaches the target until the operator approves. This is the interaction the
 whole design exists to enforce (FR-05, FR-17).}
 \label{fig:ui-console-gate}
 \end{figure}
 
-Figure~\ref{fig:ui-console-terminal} shows what an approved command returns: the
-console's terminal holds the \emph{real} captured output, here the administrator
-session token the Juice Shop login-bypass yields, which is the evidence a
-\emph{still-open} verdict is derived from. The two \texttt{operator\$} lines are the
-operator running a command directly (ADR-0026) rather than approving one the agent
-proposed --- one route among several the console offers, used here to address the
-target by its in-sandbox container name.
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-evidence.png}}
+\caption[Verdict and captured evidence]{The console after the run concluded. The
+recorded \emph{still-open} verdict and its rationale sit above the adjudication
+controls (accept, override, or reopen); the terminal below holds the verbatim
+response, a valid administrator token --- the evidence a verdict is derived from, not
+the agent's recollection of it. The two \texttt{operator\$} lines are the operator
+running a command directly (ADR-0026).}
+\label{fig:ui-console-evidence}
+\end{figure}
+
+\paragraph{The verdict and the corpus.} The verdict stage
+(Figure~\ref{fig:ui-verdict}) records the determination against the finding, with its
+evidence and status. Two cross-cutting views complete the tool: the settings view
+(Figure~\ref{fig:ui-settings}), where the language-model backend is chosen at runtime,
+and the reports assistant (Figure~\ref{fig:ui-chat}), which answers questions over the
+whole corpus of reports, findings and verdicts.
 
 \begin{figure}[htbp]
 \centering
-\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-terminal.png}}
-\caption[Captured evidence]{The console terminal after execution. The response
-carries a valid administrator authentication token, captured verbatim inside the
-sandbox --- the evidence a verdict is pinned to, not the agent's recollection of it.}
-\label{fig:ui-console-terminal}
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-verdict.png}}
+\caption[The verdict stage]{The verdict stage (\texttt{/findings/:id/verdict}). The
+recorded determination for the finding --- here \emph{still open}, from an operator
+conclusion --- with its rationale (FR-09).}
+\label{fig:ui-verdict}
 \end{figure}
-
-Figure~\ref{fig:ui-settings} shows the settings view, where the language-model
-backend is chosen at runtime: a local Ollama server, a hosted Claude model or an
-OpenAI-compatible endpoint, with the discovered models listed. This is the
-model-agnostic layer of the design (FR-13) as the operator sees it, and it is what
-makes the local-versus-hosted comparison of Chapter~\ref{ch:evaluation} a
-configuration change rather than a rebuild.
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-settings.png}}
-\caption[Choosing the backend]{The settings view. The provider and model are chosen
-at runtime and take effect on the next run without a restart (FR-13); here a local
-Ollama server is selected and its models discovered.}
+\caption[Choosing the backend]{The settings view (\texttt{/settings}). The provider
+and model are chosen at runtime and take effect on the next run without a restart
+(FR-13); here a local Ollama server is selected and its models discovered.}
 \label{fig:ui-settings}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-chat.png}}
+\caption[The reports assistant]{The reports assistant (\texttt{/chat}, FR-18). A
+read-only conversational view that answers questions over the corpus of reports,
+findings and verdicts.}
+\label{fig:ui-chat}
 \end{figure}
 
 \section{Offline demonstrations}
