@@ -361,22 +361,56 @@ that is enforced --- and it is why the deleted implementation is discussed rathe
 than quietly dropped.
 
 The topology is chosen from the retest's \emph{scope} rather than fixed, and the
-distinction matters for how far the guarantee reaches. When the scope is the lab
---- the case the figure shows and the case the evaluation runs --- provisioning is
-exactly as described: an isolated network whose only other member is the target.
-When the scope names a host that is not the lab, the session is confined instead by
-a per-session \emph{egress gateway}: a helper container installs a packet-filter
-allowlist for the scoped host's addresses and the sandbox runs inside that
-gateway's network namespace, holding raw-socket access for its tools but not the
-privilege to change the filter. Every tool --- not only HTTP clients --- can then
-reach the scoped host and nothing else. Provisioning \emph{fails closed}: if the
-gateway cannot be created the session is torn down rather than allowed to run with
-open egress. The weaker property should be stated plainly --- in that second
-configuration the boundary is a correctly configured allowlist rather than an
-absent route, a promise again, if a small and auditable one held in a container the
-agent cannot reach; and because it filters by address, it pins the scoped host's
-addresses when the session starts and cannot follow a host that moves across a
-rotating content-delivery network.
+distinction matters for how far the guarantee reaches. Figures~\ref{fig:topology-lab}
+and~\ref{fig:topology-gateway} show the two arrangements side by side, which is the
+clearest way to see that they are not two settings of one mechanism but two different
+kinds of guarantee.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-topology-lab.pdf}
+\caption[Lab topology: containment by membership]{Lab topology (ADR-0025).
+Docker gives a network created with \texttt{internal=True} no gateway address, so
+there is no default route out of it --- neither to the internet nor to the operator's
+own machine. The authorised target is then connected to that network, which makes it
+the sandbox's only reachable peer: here the allowlist \emph{is} the membership list,
+and the dashed edge is a connection that does not exist.}
+\label{fig:topology-lab}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{figs/arch-topology-gateway.pdf}
+\caption[Gateway topology: containment by an unreachable filter]{Gateway topology
+(ADR-0045), used when the scope names a host that is not the lab. The sandbox holds
+\texttt{NET\_RAW} --- so every tool works, not only HTTP clients --- but not
+\texttt{NET\_ADMIN}, and it has no network stack of its own: it shares the gateway's.
+Every packet it emits therefore originates in a namespace whose filter it has no
+privilege to change, and \texttt{iptables -F} from inside returns \emph{Operation not
+permitted}.}
+\label{fig:topology-gateway}
+\end{figure}
+
+When the scope is the lab --- the case the evaluation runs --- provisioning is exactly
+as described above: an isolated network whose only other member is the target. When the
+scope names a host that is not the lab, the session is confined instead by a per-session
+\emph{egress gateway}: a helper container installs a packet-filter allowlist for the
+scoped host's addresses and the sandbox runs inside that gateway's network namespace,
+holding raw-socket access for its tools but not the privilege to change the filter.
+Every tool --- not only HTTP clients --- can then reach the scoped host and nothing
+else. Provisioning \emph{fails closed}: if the gateway cannot be created the session is
+torn down rather than allowed to run with open egress.
+
+The weaker property should be stated plainly, and the two figures make it visible. In
+Figure~\ref{fig:topology-lab} the boundary is an \emph{absent route}: there is nothing
+to misconfigure, because the network has no way out to configure. In
+Figure~\ref{fig:topology-gateway} it is a \emph{correctly configured allowlist} --- a
+promise again, if a small and auditable one, held in a container the agent cannot
+address; and because it filters by address, it pins the scoped host's addresses when
+the session starts and cannot follow a host that moves across a rotating
+content-delivery network. The design keeps the stronger guarantee for the case the
+evaluation depends on, and accepts the weaker one only where the target is, by
+definition, outside anything the tool can isolate.
 
 \section{The data model}
 \label{sec:design-data}
