@@ -184,3 +184,27 @@ def test_enriching_nothing_calls_no_model() -> None:
 
     assert report.findings == ()
     assert (report.enriched, report.failed) == (0, 0)
+
+
+def test_an_omitted_answer_is_a_failure_not_a_silent_no_op() -> None:
+    """A model returning `{}` must retry and then be reported — never pass as "nothing to say".
+
+    Regression for #241: with defaulted fields, `{}` validated trivially, so a
+    small model could no-op and the operator saw a ticked box, a paid-for call,
+    and no taxonomy — indistinguishable from an honest empty assessment.
+    """
+
+    def respond(_messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        tool = info.output_tools[0]
+        return ModelResponse(parts=[ToolCallPart(tool_name=tool.name, args={})])
+
+    original = _finding()
+    report = enrich_findings(build_taxonomy_agent(FunctionModel(respond)), [original])
+
+    assert report.findings == (original,)
+    assert (report.enriched, report.failed) == (0, 1)
+
+
+def test_every_taxonomy_field_is_required() -> None:
+    """Pinned directly: the schema is what forces the model to answer (#241)."""
+    assert all(field.is_required() for field in FindingTaxonomy.model_fields.values())
