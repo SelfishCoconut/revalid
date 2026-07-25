@@ -8,26 +8,26 @@ system test.
 
 from __future__ import annotations
 
-import base64
-import re
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from revalid.sandbox import (
-    EGRESS_PROXY_PORT,
     CommandResult,
     DockerSandbox,
     FakeSandbox,
     SandboxUnavailableError,
+    _teardown_by_name,
+    dns_resolver,
+    egress_firewall_script,
     egress_probe_command,
-    egress_proxy_name,
+    gateway_container_name,
     internal_network_name,
     is_lab_scope,
     lab_host,
     online_scope_hosts,
-    squid_allowlist_config,
+    resolve_scope_ips,
+    sandbox_container_name,
 )
 
 
@@ -97,75 +97,112 @@ def test_fake_sandbox_records_the_scope_it_was_started_with() -> None:
     assert box.scope_hosts == ("domain.com",)
 
 
-def test_egress_proxy_name_is_session_scoped() -> None:
-    assert egress_proxy_name(7) == "revalid-retest-proxy-7"
+# --- Online L3 egress gateway (ADR-0045) ---------------------------------
 
 
-def test_squid_allowlist_denies_all_but_the_scoped_domains() -> None:
-    conf = squid_allowlist_config(("domain.com", "api.example.com:8443"))
-    assert f"http_port {EGRESS_PROXY_PORT}" in conf
-    # Ports are dropped for the dstdomain match; both hosts are allowlisted.
-    assert "acl scoped dstdomain api.example.com domain.com" in conf
-    assert "http_access allow scoped" in conf
-    # The closed default — anything not scoped is denied (no open relay).
-    assert "http_access deny all" in conf
+def test_gateway_and_sandbox_container_names_are_session_scoped() -> None:
+    assert gateway_container_name(7) == "revalid-retest-gw-7"
+    assert sandbox_container_name(7) == "revalid-retest-sbx-7"
 
 
-def test_proxy_launch_writes_a_real_multi_line_squid_config() -> None:
-    """The launch one-liner must reconstruct the config *with real newlines*.
+def test_resolve_scope_ips_strips_ports_and_dedupes() -> None:
+    resolved = resolve_scope_ips(
+        ("api.example.com:8443", "api.example.com"),
+        resolver=lambda _h: ["1.1.1.1", "1.1.1.1", "2.2.2.2"],
+    )
+    # The two hosts collapse to one bare host; IPs are de-duped, order kept.
+    assert resolved == {"api.example.com": ("1.1.1.1", "2.2.2.2")}
 
-    Regression (issue #226): the original built the command as
-    ``printf '%s' {config!r}``. Python's ``repr`` escapes newlines to the two
-    characters ``\\n`` and ``printf '%s'`` does not interpret escapes, so Squid
-    got a single-line file full of literal ``\\n``, died on it, and every
-    online-scope retest silently had no route to its target. Asserting on the
-    *decoded payload* pins the property that actually matters — what lands in
-    ``squid.conf`` — rather than the shape of the shell string.
-    """
-    box = DockerSandbox(session_id=3)
-    launch = box._proxy_launch(("www.hackthissite.org",))
 
-    encoded = launch.split("echo ", 1)[1].split(" |", 1)[0]
-    written = base64.b64decode(encoded).decode()
+def test_resolve_scope_ips_maps_an_unresolvable_host_to_empty() -> None:
+    resolved = resolve_scope_ips(("nope.invalid",), resolver=lambda _h: [])
+    assert resolved == {"nope.invalid": ()}
 
-    assert written == squid_allowlist_config(("www.hackthissite.org",))
-    assert written.splitlines()[0] == f"http_port {EGRESS_PROXY_PORT}"
-    assert len(written.splitlines()) == 5
-    # The exact defect: no literal backslash-n may survive into the config.
-    assert "\\n" not in written
-    # base64 payloads are shell-safe, so no quoting rule can mangle the config.
-    assert re.fullmatch(r"[A-Za-z0-9+/=]+", encoded)
+
+def test_egress_firewall_allowlists_only_scope_ips_and_one_resolver() -> None:
+    script = egress_firewall_script(("1.2.3.4", "5.6.7.8"), "9.9.9.9")
+    # Default-drop is the foundation of the allowlist.
+    assert "iptables -P OUTPUT DROP" in script
+    # Each scoped IP is permitted for any protocol (so ICMP/UDP/TCP scans work).
+    assert "iptables -A OUTPUT -d 1.2.3.4 -j ACCEPT" in script
+    assert "iptables -A OUTPUT -d 5.6.7.8 -j ACCEPT" in script
+    # Exactly the one resolver is allowed, on port 53 only.
+    assert "iptables -A OUTPUT -d 9.9.9.9 -p udp --dport 53 -j ACCEPT" in script
+    assert "iptables -A OUTPUT -d 9.9.9.9 -p tcp --dport 53 -j ACCEPT" in script
+    # Return traffic and loopback are allowed; the namespace is kept alive.
+    assert "--ctstate ESTABLISHED,RELATED -j ACCEPT" in script
+    # IPv6 is closed entirely (v4-only scope), best-effort for a v6-less kernel.
+    assert "ip6tables -P OUTPUT DROP 2>/dev/null || true" in script
+    assert script.strip().endswith("exec sleep infinity")
 
 
 class _FakeContainer:
-    """Minimal stand-in for a docker-py container."""
+    """Minimal docker-py container double that records its own removal."""
 
-    def __init__(self, ip: str = "172.30.0.2") -> None:
-        self.attrs = {"NetworkSettings": {"Networks": {"revalid-retest-5": {"IPAddress": ip}}}}
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+        self.removed = False
 
-    def reload(self) -> None:
-        """No-op: the fake's attrs are already populated."""
-
-
-class _FakeNetworks:
-    def __init__(self) -> None:
-        self.created: list[dict[str, object]] = []
-
-    def create(self, name: str, **kwargs: object) -> object:
-        self.created.append({"name": name, **kwargs})
-        return object()
-
-    def get(self, _name: str) -> Any:
-        return SimpleNamespace(connect=lambda _c: None)
+    def remove(self, *, force: bool = False) -> None:
+        self.removed = True
 
 
 class _FakeContainers:
     def __init__(self) -> None:
         self.runs: list[dict[str, Any]] = []
+        self._by_name: dict[str, _FakeContainer] = {}
 
     def run(self, image: str, **kwargs: Any) -> _FakeContainer:
         self.runs.append({"image": image, **kwargs})
-        return _FakeContainer()
+        container = _FakeContainer(kwargs.get("name"))
+        if container.name is not None:
+            self._by_name[container.name] = container
+        return container
+
+    def get(self, name: str) -> _FakeContainer:
+        import docker
+
+        try:
+            return self._by_name[name]
+        except KeyError as exc:
+            raise docker.errors.NotFound(name) from exc
+
+
+class _FakeNetwork:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.connected: list[str] = []
+        self.disconnected: list[str] = []
+        self.removed = False
+
+    def connect(self, container: str) -> None:
+        self.connected.append(container)
+
+    def disconnect(self, container: str, *, force: bool = False) -> None:
+        self.disconnected.append(container)
+
+    def remove(self) -> None:
+        self.removed = True
+
+
+class _FakeNetworks:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+        self._by_name: dict[str, _FakeNetwork] = {}
+
+    def create(self, name: str, **kwargs: Any) -> _FakeNetwork:
+        self.created.append({"name": name, **kwargs})
+        network = _FakeNetwork(name)
+        self._by_name[name] = network
+        return network
+
+    def get(self, name: str) -> _FakeNetwork:
+        import docker
+
+        try:
+            return self._by_name[name]
+        except KeyError as exc:
+            raise docker.errors.NotFound(name) from exc
 
 
 class _FakeDockerClient:
@@ -174,39 +211,98 @@ class _FakeDockerClient:
         self.containers = _FakeContainers()
 
 
-def test_online_proxy_overrides_the_image_entrypoint() -> None:
-    """The proxy shell must be passed as ``entrypoint``, never as ``command``.
+def test_online_gateway_owns_egress_and_the_sandbox_cannot_change_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gateway holds NET_ADMIN + the firewall; the sandbox shares its netns but not the cap.
 
-    Regression (issue #226): the Squid images declare
-    ``ENTRYPOINT ["entrypoint.sh"]`` with ``CMD ["-f", …, "-NYC"]``, so a
-    ``command=["sh", "-c", …]`` was handed to Squid as *its own* arguments —
-    the container died with "'-c': unrecognized option", the proxy never
-    listened, and the sandbox had no route out. Only overriding the entrypoint
-    actually gives our shell control.
-
-    Needs the optional ``sandbox`` extra: ``_start_online`` imports
-    ``docker.errors`` for its fail-closed except clause. The Docker *daemon* is
-    not needed — the client is a fake — so this runs anywhere the package is
-    installed, which is why CI's unit job syncs the extra.
+    This is the whole point of ADR-0045: egress is enforced in a container the
+    model cannot reach, so an approved command can use every tool against the
+    scoped host yet cannot widen scope. Uses a fake Docker client (no daemon);
+    DNS is stubbed so the test does no real lookup.
     """
     pytest.importorskip("docker")
+    monkeypatch.setattr("revalid.sandbox._getaddrinfo_ips", lambda _h: ["9.9.9.9"])
     box = DockerSandbox(session_id=5)
     client = _FakeDockerClient()
 
     box._start_online(client, ("www.hackthissite.org",))
 
-    proxy_run = client.containers.runs[0]
-    assert proxy_run["entrypoint"][:2] == ["sh", "-c"]
-    assert "squid" in proxy_run["entrypoint"][2]
-    assert "command" not in proxy_run
+    gateway, sandbox = client.containers.runs[0], client.containers.runs[1]
 
-    # The session network stays internal: the proxy is the only way out.
+    # Gateway: owns the firewall (entrypoint runs iptables) and the only NET_ADMIN.
+    assert gateway["name"] == gateway_container_name(5)
+    assert gateway["entrypoint"][:2] == ["sh", "-c"]
+    assert "iptables" in gateway["entrypoint"][2]
+    assert gateway["cap_add"] == ["NET_ADMIN"]
+    assert gateway["dns"] == [dns_resolver()]
+    # The scope host is pinned so name resolution needs no DNS.
+    assert gateway["extra_hosts"] == {"www.hackthissite.org": "9.9.9.9"}
+
+    # Sandbox: shares the gateway's netns, keeps NET_RAW (SYN scans) but NOT
+    # NET_ADMIN — so no command it runs can flush the rules.
+    assert sandbox["name"] == sandbox_container_name(5)
+    assert sandbox["network_mode"] == f"container:{gateway_container_name(5)}"
+    assert sandbox["cap_add"] == ["NET_RAW"]
+    assert "NET_ADMIN" not in sandbox["cap_add"]
+    # network_mode=container forbids these — they belong to the namespace owner.
+    assert "network" not in sandbox
+    assert "dns" not in sandbox
+
+    # The per-session network is a normal bridge (online egress), not internal.
+    assert client.networks.created[0]["name"] == internal_network_name(5)
+    assert client.networks.created[0].get("internal") is not True
+
+
+def test_online_fails_closed_when_the_scope_does_not_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No IP → no sandbox. Never open egress to a guessed address."""
+    pytest.importorskip("docker")
+    monkeypatch.setattr("revalid.sandbox._getaddrinfo_ips", lambda _h: [])
+    box = DockerSandbox(session_id=6)
+    client = _FakeDockerClient()
+
+    with pytest.raises(SandboxUnavailableError, match="could not resolve"):
+        box._start_online(client, ("nope.invalid",))
+
+    # Nothing was provisioned before the failure.
+    assert client.containers.runs == []
+
+
+def test_lab_start_names_the_sandbox_container() -> None:
+    """The lab path names its container too, so teardown-by-name reaps it."""
+    pytest.importorskip("docker")
+    box = DockerSandbox(session_id=8)
+    client = _FakeDockerClient()
+
+    box._start_lab(client)
+
+    assert client.containers.runs[0]["name"] == sandbox_container_name(8)
     assert client.networks.created[0]["internal"] is True
 
-    # The sandbox is pointed at the proxy for both schemes, upper and lower case
-    # (tools read one or the other).
-    env = client.containers.runs[1]["environment"]
-    expected = f"http://172.30.0.2:{EGRESS_PROXY_PORT}"
-    assert {env["http_proxy"], env["https_proxy"], env["HTTP_PROXY"], env["HTTPS_PROXY"]} == {
-        expected
-    }
+
+def test_teardown_by_name_removes_containers_then_the_network() -> None:
+    """stop()/cleanup work by name, so a fresh object reaps resources it never held."""
+    pytest.importorskip("docker")
+    client = _FakeDockerClient()
+    sbx = client.containers.run("img", name="revalid-retest-sbx-9")
+    gw = client.containers.run("img", name="revalid-retest-gw-9")
+    net = client.networks.create("revalid-retest-9")
+
+    _teardown_by_name(
+        client,
+        "revalid-retest-9",
+        ("revalid-retest-sbx-9", "revalid-retest-gw-9"),
+        "revalid-juice-shop",
+    )
+
+    assert sbx.removed and gw.removed
+    assert net.removed
+
+
+def test_teardown_by_name_tolerates_everything_already_gone() -> None:
+    """Reaping a session whose resources never existed is a silent no-op."""
+    pytest.importorskip("docker")
+    client = _FakeDockerClient()
+    _teardown_by_name(client, "revalid-retest-404", ("sbx", "gw"), "revalid-juice-shop")

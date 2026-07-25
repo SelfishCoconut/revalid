@@ -111,3 +111,55 @@ def test_missing_sandbox_image_says_how_to_build_it() -> None:
     box = DockerSandbox(session_id=9997, image="revalid-sandbox:definitely-not-built")
     with pytest.raises(SandboxUnavailableError, match="make sandbox-image"):
         box.start()
+
+
+def _internet_available() -> bool:
+    """Return whether the test host itself has internet (the online test needs it)."""
+    try:
+        return httpx.get("https://example.com", timeout=8).status_code < 500
+    except httpx.RequestError:
+        return False
+
+
+def test_online_sandbox_reaches_its_scope_and_nothing_else() -> None:
+    """The L3 egress gateway (ADR-0045): scoped host reachable, off-scope blocked, tamper-proof.
+
+    This is the path that shipped non-functional twice (missing ``iptables`` in
+    the image, then nmap's file capabilities colliding with the shrunk bounding
+    set) — both invisible to unit tests, so it earns a live acceptance. Scopes to
+    ``example.com`` (an IANA-reserved, always-up host) and asserts:
+
+    - the scoped host is reachable **by every tool** — curl *and* nmap, the whole
+      point of moving off the HTTP-only proxy;
+    - a *different* host is blocked (the allowlist is closed, not open);
+    - the sandbox cannot alter its own egress (``iptables -F`` is denied — it
+      holds ``NET_RAW`` but not ``NET_ADMIN``).
+
+    Needs a Docker daemon, the sandbox extra, and host internet; skips otherwise.
+    """
+    if not _docker_available():
+        pytest.skip("docker not available; run with the sandbox extra + a running daemon")
+    if not _internet_available():
+        pytest.skip("no host internet; the online egress test needs a route out")
+
+    box = DockerSandbox(session_id=9998)
+    try:
+        box.start(("example.com",))
+        scoped = box.exec(
+            "curl --max-time 20 -s -o /dev/null -w '%{http_code}' https://example.com/", timeout=30
+        )
+        assert scoped.stdout.strip() == "200"  # the scoped host is reachable
+
+        nmap = box.exec("nmap -Pn -sT -p443 example.com", timeout=60)
+        assert nmap.exit_code == 0 and "open" in nmap.stdout  # every tool works, not just HTTP
+
+        off = box.exec(
+            "curl --max-time 12 -s -o /dev/null -w '%{http_code}' https://cloudflare.com/",
+            timeout=25,
+        )
+        assert off.exit_code != 0  # a different host is blocked by the allowlist
+
+        tamper = box.exec("iptables -F 2>&1; echo rc=$?", timeout=15)
+        assert "rc=0" not in tamper.stdout  # the model cannot change egress (no NET_ADMIN)
+    finally:
+        box.stop()

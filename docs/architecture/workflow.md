@@ -147,19 +147,24 @@ all, where `scope_hosts` are the launch scope's endpoints parsed down to their
 hosts by `scope.py` (`https://example.com/#/login` → `example.com`). The
 production `DockerSandbox`:
 
-1. creates a per-session Docker network named `revalid-retest-{session_id}` with
-   `internal=True` — **no route to the host and no route to the internet**;
-2. **lab scope** (empty, or every host is the lab): connects the authorised lab
-   container (`revalid-juice-shop`) to that network as its only other member;
-3. **online scope** (ADR-0041): instead launches a per-session Squid container on
-   the network, configured deny-all-by-default with the scoped host(s) as the
-   only `dstdomain` allowlist, and points the sandbox's proxy variables at it —
-   so the one route out reaches the scoped host and nothing else. Any failure
-   while provisioning it **fails closed**: the session dies rather than running
-   with open egress;
-4. launches a pinned container built from `lab/sandbox/Dockerfile` — a Kali
-   base carrying the pentest toolbox (nmap, sqlmap, nikto, hydra, …) — on that
-   network, idling on `sleep infinity` so it persists for the whole session.
+1. **lab scope** (empty, or every host is the lab): creates a per-session Docker
+   network named `revalid-retest-{session_id}` with `internal=True` — **no route
+   to the host and no route to the internet** — and connects the authorised lab
+   container (`revalid-juice-shop`) to it as its only other member;
+2. **online scope** (ADR-0045): resolves the scoped host to its IPv4 address(es),
+   then launches a per-session **egress gateway** container holding an `iptables`
+   OUTPUT allowlist (default-drop; permit only loopback, established traffic, one
+   DNS resolver, and the scoped IP(s)), and runs the sandbox *inside the gateway's
+   network namespace* (`network_mode=container:…`) with `NET_RAW` but not
+   `NET_ADMIN` — so every tool reaches the scoped host and nothing else, and no
+   command can alter the rules. Any failure while provisioning **fails closed**:
+   the session dies rather than running with open egress;
+3. launches (as the sandbox) a pinned container built from
+   `lab/sandbox/Dockerfile` — a Kali base carrying the pentest toolbox (nmap,
+   sqlmap, nikto, hydra, … plus `iptables` for the gateway role) — idling on
+   `sleep infinity` so it persists for the whole session. Every per-session
+   resource is named by session id and torn down by name (so an orphan from a
+   crashed run, or a report deletion, reaps cleanly).
 
 This is what FR-06 means in the current design: **the allowlist is topology**,
 not an HTTP-layer check — network membership on the lab, a closed egress
