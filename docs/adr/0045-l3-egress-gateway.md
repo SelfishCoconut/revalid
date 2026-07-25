@@ -1,7 +1,7 @@
 # 0045. Online-scope egress: a per-session L3 gateway, not an HTTP proxy
 
 Date: 2026-07-25
-Status: proposed
+Status: accepted (ratified 2026-07-25)
 
 Supersedes [ADR-0041](0041-scope-egress-proxy-online-targets.md).
 

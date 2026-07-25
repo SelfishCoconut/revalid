@@ -115,3 +115,42 @@ This preserves the property the original decision rests on — that a reader can
 always tell an estimate from a stated value — while making the correction path
 real. The rest of ADR-0037 is unchanged: the taxonomy remains classificatory
 metadata that never feeds a verdict, which is what justified inferring it at all.
+
+## Update — 2026-07-25: enrichment reaches the LLM-free doors, opt-in (issue #233)
+
+The update above made the taxonomy *correctable* everywhere but left it
+*derivable* only on the PDF door, because enrichment is part of the extraction
+call and the FR-02 / manual doors make no call. Álvaro asked for derivation on
+those doors too. The tension is that both are deliberately **LLM-free** — that
+property is why manual entry is the recommended seeding path for demos and tests
+(deterministic, instant, free), and ADR-0020 exists precisely because a model
+could not be relied on there.
+
+**Decision: an opt-in flag, default off.** `POST /api/findings/import?enrich=true`
+and `{"enrich": true}` on `POST /api/reports/manual` run a taxonomy pass — one
+`build_taxonomy_agent` call per finding, filling only what the source left empty.
+Omitted or false, **no agent is invoked at all**, so the LLM-free guarantee holds
+as an absolute rather than as a promise about speed. The SPA surfaces it as a
+checkbox stating the cost ("one model call per finding"), unticked by default,
+and the toggle overrides any `enrich` pasted into the JSON editor so what the
+operator can see is what runs.
+
+Three properties carry over from the decision above rather than being re-argued:
+
+- **Copying is not inferring.** A stated `cvssv3`/`cvssv3_score` in a DefectDojo
+  export is mapped across on *every* import, flag or no flag, with
+  `inferred=false`. It needs no model, so it is not gated behind one.
+- **A stated CWE is not an ATT&CK technique.** DefectDojo carries `cwe`; mapping a
+  weakness id onto a technique id would fabricate a claim, so it is left empty for
+  the enrichment pass (or the operator) to fill honestly.
+- **Provenance stays server-stamped.** `FindingTaxonomy` — the enrichment model's
+  output schema — carries no `inferred` field at all, so the model has no way to
+  express "the source stated this"; everything it produces is recorded
+  `inferred=true`, and a value already stated is never overwritten.
+
+**Consequence.** A failed enrichment call costs that finding its taxonomy, never
+the import: the finding persists unchanged and the response reports
+`enrichment_failed`, so a partially-enriched import cannot be mistaken for a
+complete one. The FR-15 corpus remains as it was ingested — no taxonomy — because
+re-running it with the flag would change the evaluated artefact, which is the
+author's call, not a side effect of this change.

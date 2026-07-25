@@ -171,9 +171,9 @@ function FindingEditor({ finding }: { finding: Finding }) {
           </label>
         </div>
         <label className={fieldLabel}>
-          Affected endpoints (one per line)
+          Affected domain(s) — one per line, host is what scopes the retest
           <textarea
-            aria-label="Affected endpoints"
+            aria-label="Affected domains"
             rows={4}
             value={form.endpoints}
             disabled={edit.isPending}

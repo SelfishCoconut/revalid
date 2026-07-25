@@ -4,13 +4,19 @@ Initial supported format: DefectDojo-style JSON findings export, i.e. a
 top-level ``{"findings": [...]}`` array where each entry carries at least
 ``title`` and ``severity``. Every source entry is preserved verbatim in
 ``Finding.raw`` so unmapped fields stay auditable.
+
+**No LLM** is the invariant of this module, and it is why this door is the
+deterministic, instant, free seeding path for demos and tests. A *stated* CVSS
+code is still copied across (``_map_cvss``) because copying is not inferring;
+*deriving* a taxonomy the source never stated is the opt-in enrichment pass in
+:mod:`revalid.extract`, which the caller runs after mapping (issue #233).
 """
 
 from __future__ import annotations
 
 import json
 
-from revalid.domain import Finding, Severity
+from revalid.domain import CvssCode, Finding, Severity
 
 _SEVERITY_ALIASES: dict[str, Severity] = {
     "info": Severity.INFO,
@@ -75,8 +81,46 @@ def _map_finding(item: object, index: int) -> Finding:
         description=str(item.get("description") or ""),
         affected_endpoints=_string_tuple(item.get("endpoints"), index, "endpoints"),
         reproduction_steps=_split_steps(item.get("steps_to_reproduce"), index),
+        cvss=_map_cvss(item),
         raw=item,
     )
+
+
+def _map_cvss(item: dict[str, object]) -> CvssCode:
+    """Copy a **stated** CVSS vector across, verbatim and unflagged (FR-19, #233).
+
+    Pure schema mapping — no model, so it happens on every import whether or not
+    enrichment was requested. A DefectDojo export commonly states ``cvssv3`` (the
+    base vector) and ``cvssv3_score``; copying them is free, and copying is not
+    inferring, so ``inferred`` stays ``False``: this is what the source claimed.
+    An export that states nothing yields an empty code, which the opt-in
+    enrichment pass can later fill (flagged as inferred).
+
+    ATT&CK is deliberately **not** mapped here. DefectDojo carries ``cwe``, and a
+    CWE weakness id is not an ATT&CK technique id — deriving one from the other
+    needs a real mapping, not a rename, so a stated CWE leaves ``mitre`` empty
+    rather than fabricating a technique.
+    """
+    vector = item.get("cvssv3") or item.get("cvss_vector")
+    if not isinstance(vector, str) or not vector.strip():
+        return CvssCode()
+    return CvssCode(vector=vector.strip(), base_score=_map_score(item), inferred=False)
+
+
+def _map_score(item: dict[str, object]) -> float | None:
+    """Read a stated CVSS base score, tolerating a numeric string or an absent one."""
+    for key in ("cvssv3_score", "cvss_score"):
+        value = item.get(key)
+        if isinstance(value, bool):  # bool is an int subclass; never a score
+            continue
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                continue
+    return None
 
 
 def _map_severity(value: object, index: int) -> Severity:

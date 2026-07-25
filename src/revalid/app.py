@@ -13,7 +13,7 @@ import contextlib
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Iterable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, cast
@@ -67,12 +67,16 @@ from revalid.domain import (
 )
 from revalid.export import RunExport, build_export, export_schema
 from revalid.extract import (
+    EnrichmentReport,
     ExtractedFinding,
     ExtractionRegistry,
     ExtractionReport,
+    FindingTaxonomy,
     ReportMetadata,
     build_extraction_agent,
     build_metadata_agent,
+    build_taxonomy_agent,
+    enrich_findings,
     extract_metadata,
     extract_report_async,
 )
@@ -475,9 +479,18 @@ class ConcludeRequest(BaseModel):
 
 
 class ImportResult(BaseModel):
-    """Outcome of a findings import."""
+    """Outcome of a findings import.
+
+    ``enriched``/``enrichment_failed`` are 0 unless the caller asked for the
+    opt-in FR-19 taxonomy pass (issue #233). A non-zero ``enrichment_failed``
+    means the import itself succeeded but some findings came back without a
+    taxonomy — reported rather than swallowed, so a partially-enriched import is
+    never mistaken for a complete one.
+    """
 
     imported: int
+    enriched: int = 0
+    enrichment_failed: int = 0
 
 
 class ReportOut(BaseModel):
@@ -662,6 +675,16 @@ def get_metadata_agent(settings: SettingsDep) -> Agent[None, ReportMetadata]:
     return build_metadata_agent(build_model(settings))
 
 
+def get_taxonomy_agent(settings: SettingsDep) -> Agent[None, FindingTaxonomy]:
+    """Yield the FR-19 opt-in taxonomy-enrichment agent (issue #233).
+
+    Constructed per request like every other agent, but only *invoked* when the
+    caller passed ``enrich`` — building it costs no model call, so the LLM-free
+    doors stay LLM-free by default (ADR-0021 for the backend selection).
+    """
+    return build_taxonomy_agent(build_model(settings))
+
+
 def get_retest_agent(settings: SettingsDep) -> RetestAgent:
     """Yield the FR-17 agentic retest agent built from the persisted setting (ADR-0021)."""
     return build_retest_agent(build_model(settings))
@@ -688,6 +711,7 @@ def get_sandbox_factory() -> SandboxFactory:
 GoalAgentDep = Annotated[Agent[None, GeneratedGoal], Depends(get_goal_agent)]
 ExtractionAgentDep = Annotated[Agent[None, list[ExtractedFinding]], Depends(get_extraction_agent)]
 MetadataAgentDep = Annotated[Agent[None, ReportMetadata], Depends(get_metadata_agent)]
+TaxonomyAgentDep = Annotated[Agent[None, FindingTaxonomy], Depends(get_taxonomy_agent)]
 RetestAgentDep = Annotated[RetestAgent, Depends(get_retest_agent)]
 ReportsChatAgentDep = Annotated[Agent[ReportsChatDeps, str], Depends(get_reports_agent)]
 SandboxFactoryDep = Annotated[SandboxFactory, Depends(get_sandbox_factory)]
@@ -839,6 +863,31 @@ def _finding_out(identity: FindingRecord, version: FindingVersionRecord) -> Find
         version=version.version,
         **version.to_domain().model_dump(),
     )
+
+
+def _enrich_if_asked(
+    findings: Sequence[Finding],
+    agent: Agent[None, FindingTaxonomy],
+    *,
+    enrich: bool,
+) -> EnrichmentReport:
+    """Run the opt-in FR-19 taxonomy pass, or pass the findings straight through.
+
+    The whole point of the flag is that ``enrich=False`` touches no model at all,
+    so the LLM-free guarantee of the FR-02 and manual doors is not merely fast but
+    *absolute* — no agent is invoked, nothing to stub in a test (issue #233).
+
+    Args:
+        findings: The mapped findings.
+        agent: The taxonomy agent (only used when ``enrich`` is true).
+        enrich: Whether the operator asked for derived CVSS/ATT&CK.
+
+    Returns:
+        An enrichment report; a zero-count passthrough when ``enrich`` is false.
+    """
+    if not enrich:
+        return EnrichmentReport(findings=tuple(findings))
+    return enrich_findings(agent, findings)
 
 
 def _persist_findings(
@@ -1360,15 +1409,33 @@ def _register_core_routes(router: APIRouter, sessions: sessionmaker[Session]) ->
         return {"status": "ok", "version": __version__}
 
     @router.post("/findings/import", response_model=ImportResult)
-    def import_findings(payload: dict[str, Any], session: SessionDep) -> ImportResult:
-        """Ingest a DefectDojo-style JSON export (FR-02)."""
+    def import_findings(
+        payload: dict[str, Any],
+        session: SessionDep,
+        taxonomy_agent: TaxonomyAgentDep,
+        enrich: bool = False,
+    ) -> ImportResult:
+        """Ingest a DefectDojo-style JSON export (FR-02), optionally enriched (FR-19).
+
+        Mapping is pure schema work with no model involved, which is what makes
+        this door deterministic, instant and free — the property that makes it the
+        seeding path for demos and tests. ``enrich=true`` opts into one extra model
+        call per finding to derive the CVSS/ATT&CK the export did not state
+        (issue #233); it defaults to **off**, so that property survives by default.
+        A stated CVSS is copied across either way — copying is not inferring.
+        """
         try:
             findings = map_defectdojo_export(payload)
         except IngestError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        _persist_findings(session, findings)
+        report = _enrich_if_asked(findings, taxonomy_agent, enrich=enrich)
+        _persist_findings(session, report.findings)
         session.commit()
-        return ImportResult(imported=len(findings))
+        return ImportResult(
+            imported=len(report.findings),
+            enriched=report.enriched,
+            enrichment_failed=report.failed,
+        )
 
     @router.get("/findings", response_model=list[FindingOut])
     def list_findings(session: SessionDep, report_id: int | None = None) -> list[FindingOut]:
@@ -1511,7 +1578,9 @@ def _register_report_routes(
         return ReportOut.from_record(report)
 
     @router.post("/reports/manual", response_model=ReportOut, status_code=201)
-    def create_manual_report(payload: dict[str, Any], session: SessionDep) -> ReportOut:
+    def create_manual_report(
+        payload: dict[str, Any], session: SessionDep, taxonomy_agent: TaxonomyAgentDep
+    ) -> ReportOut:
         """Create a report and its findings directly, bypassing LLM extraction.
 
         The human-entry escape hatch (no FR-03): when a model cannot reliably
@@ -1519,7 +1588,13 @@ def _register_report_routes(
         supplies the findings by form or JSON upload. Reuses the FR-02 DefectDojo
         mapping per finding, then lands the report ``ready`` with its findings
         attached, so an agentic retest session (FR-17) starts identically to an
-        extracted report's. ``payload`` is ``{"label": str, "findings": [...]}``.
+        extracted report's. ``payload`` is
+        ``{"label": str, "findings": [...], "enrich": bool}``.
+
+        ``enrich`` (default **false**) opts into the FR-19 taxonomy pass — one
+        model call per finding to derive the CVSS/ATT&CK a hand-typed finding
+        cannot state (issue #233). Left off, this door stays entirely LLM-free, so
+        seeding for demos and tests remains deterministic, instant and free.
         """
         try:
             findings = map_defectdojo_export(payload)
@@ -1529,17 +1604,20 @@ def _register_report_routes(
             raise HTTPException(
                 status_code=422, detail="a manual report needs at least one finding"
             )
+        enriched = _enrich_if_asked(findings, taxonomy_agent, enrich=bool(payload.get("enrich")))
         label = str(payload.get("label") or "").strip() or "Manual report"
         report = ReportRecord(
             filename=label,
             status=ReportStatus.READY.value,
-            model="manual",
+            # The taxonomy is the only thing a model touches here, so the lineage
+            # records which door ran and whether a model was involved (NFR-02).
+            model="manual+enriched" if enriched.enriched else "manual",
             finding_count=len(findings),
         )
         session.add(report)
         session.commit()
         session.refresh(report)
-        _persist_findings(session, findings, report_id=report.id)
+        _persist_findings(session, enriched.findings, report_id=report.id)
         session.commit()
         session.refresh(report)
         return ReportOut.from_record(report)

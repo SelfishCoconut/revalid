@@ -167,6 +167,12 @@ export interface ManualFindingInput {
 export interface ManualReportInput {
   label: string;
   findings: ManualFindingInput[];
+  /**
+   * Opt into deriving CVSS + MITRE ATT&CK for each finding (FR-19, issue #233).
+   * Omitted/false keeps this door entirely LLM-free — no model call, instant and
+   * free. True costs one model call per finding.
+   */
+  enrich?: boolean;
 }
 
 /** Flexible, tool-agnostic proof for an agentic verdict (FR-17 Slice 6b-i). */

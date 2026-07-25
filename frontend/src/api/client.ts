@@ -367,7 +367,7 @@ export function setFreeLaunch(id: number, enabled: boolean): Promise<{ status: s
   );
 }
 
-/** Approve a proposed command so the agent runs it against the allowlisted lab target. */
+/** Approve a proposed command so the agent runs it against the scoped target. */
 export function approveCommand(id: number, cid: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/retest-sessions/${String(id)}/commands/${cid}/approve`, {
     method: "POST",

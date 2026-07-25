@@ -88,6 +88,8 @@ describe("NewReport", () => {
           steps_to_reproduce: "",
         },
       ],
+      // Off unless the operator ticks it — this door stays LLM-free by default (#233).
+      enrich: false,
     });
   });
 
@@ -134,6 +136,44 @@ describe("NewReport", () => {
     expect(vi.mocked(client.createManualReport).mock.calls[0][0]).toEqual({
       label: "From JSON",
       findings: [{ title: "X", severity: "low" }],
+      enrich: false,
+    });
+  });
+
+  it("sends enrich=true when the operator ticks the taxonomy toggle", async () => {
+    renderNewReport();
+    fireEvent.change(screen.getByPlaceholderText(/Acme Corp/), {
+      target: { value: "Enriched run" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/^Title/), {
+      target: { value: "SQLi" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Infer CVSS/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Create report/ }));
+
+    expect(await screen.findByText("REPORT PAGE")).toBeInTheDocument();
+    expect(vi.mocked(client.createManualReport).mock.calls[0][0]).toMatchObject({
+      enrich: true,
+    });
+  });
+
+  it("a pasted enrich flag never overrides the toggle the operator can see", async () => {
+    renderNewReport();
+    fireEvent.click(screen.getByRole("button", { name: "JSON" }));
+    fireEvent.change(screen.getByPlaceholderText(/"label"/), {
+      target: {
+        value: JSON.stringify({
+          label: "Sneaky",
+          findings: [{ title: "X", severity: "low" }],
+          enrich: true,
+        }),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Create report/ }));
+
+    expect(await screen.findByText("REPORT PAGE")).toBeInTheDocument();
+    expect(vi.mocked(client.createManualReport).mock.calls[0][0]).toMatchObject({
+      enrich: false,
     });
   });
 
