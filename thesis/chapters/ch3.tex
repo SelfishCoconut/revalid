@@ -47,12 +47,12 @@ projects whose shortcomings shaped it, and the progression is itself instructive
 
 The project began under the name \emph{Adeptus} with an ambition that proved too
 broad: a full, locally deployable \emph{penetration-testing platform}. Successive
-iterations explored this idea --- an AI-powered pentesting web application, and then
+iterations explored this idea: an AI-powered pentesting web application, and then
 a multi-user ``pentest workbench'' pairing each operator with a private AI
 conversation over a shared, engagement-scoped knowledge graph, extensible through
 external tools. The scope was the problem. Building a general offensive platform
-meant most of the effort went into breadth --- orchestration, multi-user concerns,
-tool integration --- rather than into a defensible, evaluable research
+meant most of the effort went into breadth (orchestration, multi-user concerns, tool
+integration) rather than into a defensible, evaluable research
 contribution.
 
 The turning point was narrowing the problem from \emph{pentesting} to
@@ -64,6 +64,11 @@ dissertation. Table~\ref{tab:evolution} summarises the progression and the role 
 attempt played.
 
 \begin{table}[htbp]
+\caption[Evolution of the project across earlier attempts]{Evolution from the
+\emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool. The
+decisive lessons were to narrow the scope from pentesting to revalidation, and to match
+the AI-workflow ceremony to that narrower scope.}
+\label{tab:evolution}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -77,11 +82,6 @@ attempt played.
 \bft{\emph{revalid}} (this work) & Report-driven, human-gated retest tool & 9 skills, 3 agents, 3 hooks, 46 ADRs; Kanban + CI & The disciplined, evaluable TFG. \\ \hline
 \end{tabular}
 \end{center}
-\caption[Evolution of the project across earlier attempts]{Evolution from the
-\emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool. The
-decisive lessons were to narrow the scope from pentesting to revalidation, and to match
-the AI-workflow ceremony to that narrower scope.}
-\label{tab:evolution}
 \end{table}
 
 \subsection{From a hybrid process to disciplined iteration}
@@ -199,6 +199,10 @@ what the technology is and why it was adopted for this project --- grouped by th
 role it plays.
 
 \begin{table}[htbp]
+\caption[Technology stack of the system]{The technology stack, by layer. The
+Pydantic AI abstraction is what makes the language-model backend swappable between a
+cloud and a local provider without code changes.}
+\label{tab:stack}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -214,10 +218,6 @@ Front end & React 19, Vite, TypeScript, Tailwind CSS 4, React Query & Single-pag
 Quality gates & ruff, mypy \texttt{-{}-strict}, pytest, coverage, xenon & Lint, types, tests, complexity \\ \hline
 \end{tabular}
 \end{center}
-\caption[Technology stack of the system]{The technology stack, by layer. The
-Pydantic AI abstraction is what makes the language-model backend swappable between a
-cloud and a local provider without code changes.}
-\label{tab:stack}
 \end{table}
 
 \paragraph{Language and project tooling.} The backend is written in Python~3.12, a
@@ -285,13 +285,13 @@ executes inside an ephemeral Docker container, driven from the backend through t
 \texttt{docker} SDK. Containerisation is how the safety argument is \emph{enforced}
 rather than merely stated, and the mechanism is worth being precise about, because
 it is easy to overclaim. Each retest session creates its own Docker network in
-\texttt{internal} mode --- a network for which the daemon installs no gateway ---
+\texttt{internal} mode, a network for which the daemon installs no gateway,
 and, when the retest is scoped to the local lab, attaches exactly two members to
 it: the authorised target and the container the agent works in. (A retest scoped to
 a host outside the lab is instead confined by a per-session \emph{egress gateway}:
 a helper container holds a packet-filter allowlist for the scoped host's addresses,
 and the sandbox runs inside that gateway's network namespace without the privilege
-to alter it --- so every tool, not only HTTP clients, can reach the scoped host and
+to alter it, so every tool, not only HTTP clients, can reach the scoped host and
 nothing else, and no command the agent runs can widen that. The session is torn
 down rather than run if the gateway cannot be provisioned.) Because the sandbox
 has no route off that network, anything the agent may need must already be present,
@@ -311,16 +311,16 @@ Three limits of that boundary are stated here rather than left implicit, because
 guarantee a reader cannot check is worth little. First, the lock confines \emph{the
 agent}; it does not confine code the agent successfully executes \emph{on the
 target}, which retains its own connectivity, since attaching the internal network
-does not detach the target from the one it was started on --- a distinction that
+does not detach the target from the one it was started on, a distinction that
 matters exactly when a retest of a remote-code-execution finding succeeds. Second,
 \texttt{internal} mode blocks routed traffic but not name resolution: where the host
-uses a loopback DNS stub --- the default on Debian and Ubuntu --- the daemon's
+uses a loopback DNS stub, the default on Debian and Ubuntu, the daemon's
 embedded resolver still forwards external queries from its own namespace, leaving a
 low-bandwidth covert channel out of an otherwise TCP-isolated container. Third, the
 automated test that asserts the lock proves less than it appears to: it checks only
 that a request to an external name fails, which a failed lookup alone satisfies, and
 never attempts a bare address. That third limit is an instance of the lesson
-Section~\ref{sec:ci} closes on --- a check verifies only what it is aimed at --- here
+Section~\ref{sec:ci} closes on, that a check verifies only what it is aimed at, here
 applied to the safety claim itself. All three are recorded in ADR-0025 alongside the
 guarantee.
 
@@ -348,14 +348,14 @@ a specific tool.
 and formatter that consolidates the roles of many older tools; here it enforces
 formatting, import order, code modernisation, common-bug patterns, the \texttt{bandit}
 security rules (pertinent for a security tool), a complexity ceiling and Google-style
-docstrings --- the last because those docstrings feed the generated API documentation
---- in a single pass. \texttt{mypy} is the static type checker, run in
+docstrings, the last of these because those docstrings feed the generated API
+documentation, all in a single pass. \texttt{mypy} is the static type checker, run in
 \texttt{-{}-strict} mode so that every function is fully typed and type errors are
 caught before runtime. \texttt{xenon}, over the \texttt{radon} metrics library, fails
-the build whenever a function exceeds the agreed cyclomatic-complexity ceiling ---
-what makes the ``refactor, don't suppress'' rule mechanical rather than aspirational.
-Three secondary tools --- \texttt{vulture} for dead code, \texttt{pylint} for deeper
-analysis and \texttt{pydeps} for import-dependency graphs --- feed the pre-milestone
+the build whenever a function exceeds the agreed cyclomatic-complexity ceiling, which
+is what makes the ``refactor, don't suppress'' rule mechanical rather than aspirational.
+Three secondary tools (\texttt{vulture} for dead code, \texttt{pylint} for deeper
+analysis and \texttt{pydeps} for import-dependency graphs) feed the pre-milestone
 \emph{codebase-sanity} audit against the duplication and drift that AI-assisted
 development tends to accumulate, and \texttt{pre-commit} runs the quickest checks as a
 git hook so problems are caught before they are committed.
@@ -417,13 +417,13 @@ generated pages and affected diagrams are updated together, and the
 \label{sec:ci}
 
 The tools of Section~\ref{subsec:qa} are only as good as the discipline with which
-they are run, and a developer working alone --- with an assistant that writes most of
-the code --- cannot rely on running them by hand. This project therefore follows the
+they are run, and a developer working alone, with an assistant that writes most of
+the code, cannot rely on running them by hand. This project therefore follows the
 classical continuous-integration practice: every
 change is verified automatically, on a build machine, against a reproducible
 environment, and the verification is what authorises the merge. The motivation is
 sharper here than in a conventional project. There is no second developer to review a
-diff, and machine-written code fails in a characteristic way --- it is syntactically
+diff, and machine-written code fails in a characteristic way: it is syntactically
 clean, idiomatic and plausible on reading, while being wrong about a type, an edge
 case or a dependency. A gate that executes the code is a far better detector of that
 failure mode than a careful read, and it is the mechanism by which the author's
@@ -437,6 +437,16 @@ that keep the project's published artefacts, and its record of work, in step wit
 code.
 
 \begin{table}[!htbp]
+\caption[The seven continuous-integration workflows]{The seven GitHub~Actions
+workflows and what each enforces. All ten jobs of the two per-change workflows ---
+CI and Security --- are declared required in branch protection and therefore block
+the merge, which is what ADR-0003 asks of the gate: the required set is the
+\emph{complete} set of per-change jobs, so no check can quietly become advisory.
+The slow and longitudinal checks run on a
+schedule instead, so that a flaky lab container or a weekly metrics run never stops
+an unrelated change; the last three workflows perform no verification (``n/a'') but
+keep the project's published artefacts and its board in step with the code.}
+\label{tab:workflows}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -453,16 +463,6 @@ Thesis PDF & any push touching \texttt{thesis/}, on demand & XeLaTeX build of th
 Kanban board & issue and pull-request events, CI completion & Moves the board card: Backlog $\rightarrow$ In~Progress $\rightarrow$ Verify $\rightarrow$ Done & n/a \\ \hline
 \end{tabular}
 \end{center}
-\caption[The seven continuous-integration workflows]{The seven GitHub~Actions
-workflows and what each enforces. All ten jobs of the two per-change workflows ---
-CI and Security --- are declared required in branch protection and therefore block
-the merge, which is what ADR-0003 asks of the gate: the required set is the
-\emph{complete} set of per-change jobs, so no check can quietly become advisory.
-The slow and longitudinal checks run on a
-schedule instead, so that a flaky lab container or a weekly metrics run never stops
-an unrelated change; the last three workflows perform no verification (``n/a'') but
-keep the project's published artefacts and its board in step with the code.}
-\label{tab:workflows}
 \end{table}
 
 \paragraph{The per-change gate.} The CI workflow runs six independent jobs: static
@@ -483,15 +483,15 @@ releases a pull request only when all of them report success --- which is what t
 superseded by a new push is cancelled automatically, keeping feedback fast enough to
 stay inside the developer's working loop.
 
-The gate is not a formality, and it is cheap. At the time of writing it had executed
-289~CI runs and 295~security runs over the 121~pull requests merged into
-\texttt{main}, with a median wall-clock time of 38~seconds and a ninety-fifth
-percentile of 90~seconds; two runs exceeded ten minutes, both while waiting for a
-runner rather than while executing. Seventeen CI runs and ten security runs ended
-red. Sixteen of those were on a pull request --- a change stopped before it reached
-the main branch --- and the rest on a push to \texttt{main} or on the weekly
-schedule, catching what had already landed or what a newly published advisory had
-just made unsafe.
+The gate is not a formality, and it is cheap. As of 25~July~2026 it had executed
+336~CI runs and 342~security runs over the 143~pull requests merged into
+\texttt{main}, with a median wall-clock time of 43~seconds and a ninety-fifth
+percentile of 94~seconds. Four runs exceeded ten minutes and none of them finished:
+each was cancelled, two after a job hung until the platform's six-hour ceiling.
+Thirty runs ended red --- nineteen CI and eleven security. Nineteen of those thirty
+were on a pull request, a change stopped before it reached the main branch; the other
+eleven were on a push to \texttt{main} or on the weekly schedule, catching what had
+already landed or what a newly published advisory had just made unsafe.
 
 \paragraph{Security scanning in depth.} A tool that runs commands against live
 systems, handles API credentials and parses untrusted files must hold itself to the
@@ -499,7 +499,7 @@ standard it is built to check, so security scanning is a merge gate rather than 
 occasional exercise, and it is deliberately layered: each of its four jobs sees a
 class of defect the others are blind to. \texttt{pip-audit} resolves the project's
 locked dependency set and matches it against published advisories, covering the
-supply chain --- the code the project did not write but does ship --- while
+supply chain, the code the project did not write but does ship, while
 Dependabot proposes the corresponding upgrade weekly for the Python, front-end and
 workflow dependency sets. Bandit performs pattern-based
 static application-security testing over the application and its supporting
@@ -509,7 +509,7 @@ cryptographic primitives. The severity floor is deliberate, since a tool that mu
 legitimately spawn processes would otherwise drown in low-severity notices about the
 very behaviour it exists to perform. CodeQL goes further by querying a
 semantic model of the program, tracing whether data from an untrusted source reaches a
-sensitive sink --- reasoning that pattern matching cannot perform. It analyses the
+sensitive sink, reasoning that pattern matching cannot perform. It analyses the
 Python sources and the TypeScript front end alike; that second language was added
 late, after the audit discussed at the end of this section observed that the browser
 code was covered by its type checker and linter but by no data-flow analysis, and
@@ -528,13 +528,13 @@ quietly ageing into vulnerability.
 check belongs in the merge gate. The system tests bring up the dockerised lab
 targets, wait for them to become healthy, run the end-to-end suite against them and
 tear them down unconditionally; they are slow and depend on external images, and
-making them blocking would mean that an unrelated container hiccup stops all work ---
-the reliable way to end up disabling a test suite. Run nightly instead, they still
+making them blocking would mean that an unrelated container hiccup stops all work,
+which is the reliable way to end up disabling a test suite. Run nightly instead, they still
 surface a regression within a day, at no cost to flow. The weekly sanity-metrics
 workflow serves a different purpose again: it collects complexity, dead-code and
 duplication measurements into a report artefact that feeds the pre-milestone audit.
-These are \emph{longitudinal} signals --- the slow accumulation of duplicated helpers
-and drifting patterns that AI-assisted development is prone to --- and by
+These are \emph{longitudinal} signals, the slow accumulation of duplicated helpers
+and drifting patterns that AI-assisted development is prone to, and by
 construction no review of a single diff can see them.
 
 \paragraph{Publication and traceability.} The remaining three workflows keep the
@@ -581,7 +581,7 @@ A subtler failure mode emerged late in the project and deserves recording, becau
 it is invisible from inside the practice that produces it. A gate verifies only what
 it is aimed at, and the boundary of what it is aimed at is itself a decision that
 nobody revisits once made. An audit the author ran across the whole repository found
-that \texttt{scripts/} --- 1{,}076 lines, of which 641 are the demonstration
+that \texttt{scripts/} --- then 1{,}076 lines, of which 641 were the demonstration
 programs --- sat outside every check: outside the type checker, the linter and the
 security scanner, and outside the test suite. That directory is not incidental. The
 project's own Definition of Done makes a runnable demonstration the mandatory
@@ -622,32 +622,35 @@ it absorbs.
 
 \paragraph{Tools used.} The single AI tool used for development was Claude Code,
 Anthropic's agentic command-line assistant, driven by Anthropic's Claude family of
-models. The specific model versions used in the earliest milestones are not recorded
-in the project's audit trail; from the point at which the log began recording them,
-three model identities appear --- Fable~5, Opus~4.8 and, for the final sessions and
-much of the assistance with this dissertation, Opus~5. Local open-weight models
+models. Three model identities appear in the log: Fable~5 through the early
+milestones, Opus~4.8 from 20~July~2026, and Opus~5 for the final sessions and for
+most of the assistance with this dissertation. Six sessions, between 14 and
+19~July~2026, were reconstructed after the fact from the automatic session files and
+the git history and are recorded without a model identity; on the surrounding
+evidence they were Fable~5, but the log does not state it, so the declaration does
+not either. Local open-weight models
 (Ollama, \texttt{qwen} family) were used only \emph{as a component and comparison
 condition of the system under study}, never to author the thesis or the code.
 
 \paragraph{Type of use.} The assistance spanned seven categories, in every case under
 the author's direction and subject to the author's review:
 \begin{itemize}
-\item \emph{Research and analysis} --- reading the regulations and the proposal and
+\item \emph{Research and analysis}: reading the regulations and the proposal and
   surveying related work.
-\item \emph{Code generation} --- implementing the backend (\texttt{src/revalid}) and
+\item \emph{Code generation}: implementing the backend (\texttt{src/revalid}) and
   the React front end (\texttt{frontend/src}) from the author's specifications.
-\item \emph{Test writing} --- unit, integration and system tests across the pyramid.
-\item \emph{Diagnosis and debugging} --- reproducing defects the author found in live
+\item \emph{Test writing}: unit, integration and system tests across the pyramid.
+\item \emph{Diagnosis and debugging}: reproducing defects the author found in live
   use and locating their cause, including the two failures that made online-scope
   egress unreachable, a schema that permitted an empty model answer to pass as a
   successful enrichment, and a test that hung rather than failed.
-\item \emph{Refactoring and security remediation} --- consolidating duplicated logic,
+\item \emph{Refactoring and security remediation}: consolidating duplicated logic,
   retiring superseded code paths, and closing findings raised by the static-analysis
   gate.
-\item \emph{Documentation generation} --- API documentation, the C4 architecture,
+\item \emph{Documentation generation}: API documentation, the C4 architecture,
   class, activity and sequence diagrams, the requirements specification and the
   project roadmap.
-\item \emph{Thesis writing assistance} --- drafting and editing chapters, including
+\item \emph{Thesis writing assistance}: drafting and editing chapters, including
   verifying that every cited reference resolves to a real source.
 \end{itemize}
 

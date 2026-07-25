@@ -6,31 +6,44 @@
 \setlength{\emergencystretch}{3em}
 
 The preceding chapters described what the system is and how it was built. This
-chapter turns to the fourth objective (O4): whether it \emph{works} --- whether the
-verdicts it returns are trustworthy, and whether producing them with the tool is
-faster than doing the same revalidation by hand. The evaluation reported here is
+chapter turns to whether it \emph{works}. Most of it addresses the fourth objective
+(O4): whether the verdicts the system returns are trustworthy, and whether
+producing them with the tool is faster than doing the same revalidation by hand. One
+section closes the first (O1), the quality of the extraction that feeds
+everything downstream. The evaluation reported here is
 deliberately framed as \emph{preliminary}. It exercises the whole pipeline end to
 end, against a real report and a live target, and it establishes the measurement
-apparatus and a first result; what it does not do --- one report, one target, one
-operator, one backend --- is set out plainly in Section~\ref{sec:eval-threats}. What
+apparatus and a first result; what it does not do, being one report, one target, one
+operator and one backend, is set out plainly in Section~\ref{sec:eval-threats}. What
 this chapter claims is feasibility and a direction, not a final figure.
 
 \section{Evaluation design}
 \label{sec:eval-design}
 
-\paragraph{What is measured.} Two questions, mapped onto the two halves of O4.
+\paragraph{What is measured.} Three questions. Two are the halves of O4.
 \emph{Verdict reliability} (NFR-01): for each finding, does the system reach the
-correct \emph{still-open} / \emph{fixed} / \emph{inconclusive} verdict, and --- the
-constraint that matters most --- does it ever declare a still-exploitable finding
+correct \emph{still-open} / \emph{fixed} / \emph{inconclusive} verdict, and, the
+constraint that matters most, does it ever declare a still-exploitable finding
 \emph{fixed}? \emph{Effort}: how long a revalidation takes with the tool, against the
-time the same work takes by hand.
+time the same work takes by hand. The third is O1, \emph{extraction quality}: what
+fraction of a real report's findings the pipeline turns into well-formed structured
+findings (FR-03). It is measured separately, in
+Section~\ref{sec:eval-extraction}, and on a separate report, for the reason the next
+paragraph gives.
 
 \paragraph{Target and report.} The target is the reference lab of
 Appendix~\ref{ch:annex-install}: OWASP Juice Shop \cite{owasp_juiceshop}, pinned to
-version~17.1.1, a deliberately vulnerable application. The input is a real penetration-test report ---
-a twelve-finding web-application security assessment of Juice Shop --- ingested
-through the manual-entry door (FR-02) so that extraction quality, evaluated
-separately, does not confound the retest measurement. The twelve findings span the
+version~17.1.1, a deliberately vulnerable application. The input is a real
+penetration-test report: a sixty-one-page, twelve-finding web-application security
+assessment of Juice Shop written by the security consultancy Hack~\&~Fix for a
+fictitious client \cite{hackandfix_juiceshop}. It is a consultancy deliverable in
+form and language, with an executive summary, engagement description, methodology and
+per-finding detail carrying reproduction steps, which is what makes it a fair input;
+because its target is the same deliberately vulnerable application, it contains no
+real client or engagement data (NFR-04), and it is not reproduced here. The report is
+ingested through the manual-entry door (FR-02) so that extraction quality, measured
+separately in Section~\ref{sec:eval-extraction}, does not confound the retest
+measurement. The twelve findings span the
 principal web-vulnerability classes: SQL injection, stored, reflected and DOM-based
 cross-site scripting, broken access control and IDOR, server-side template
 injection, privilege escalation, missing brute-force protection, weak password
@@ -40,29 +53,65 @@ policy, outdated libraries and permissive CORS.
 expected verdict for every finding is \emph{still-open}; the ground truth was
 established \emph{independently}, by the author retesting each finding manually
 without the tool, which also produced the manual-time baseline below. This design
-sidesteps the self-reference the harness would otherwise risk --- the system is not
-graded against its own output --- but it has a direct consequence for what the result
+sidesteps the self-reference the harness would otherwise risk, since the system is not
+graded against its own output, but it has a direct consequence for what the result
 can show, discussed under threats to validity: with no genuinely \emph{fixed}
 finding in the set, the evaluation tests the system's ability to \emph{confirm} an
 open finding and, above all, to avoid the dangerous false ``fixed'', but not its
 ability to recognise a real remediation.
 
 \paragraph{Conditions.} Each finding was revalidated twice: once \emph{with the
-system}, operated in its normal gated mode --- the operator drafts the retest goal
-from the finding's reproduction steps (FR-04), then approves or rejects every command
-the agent proposes --- and once \emph{manually}, reproducing the finding by hand. The
+system}, operated in its normal gated mode, in which the operator drafts the retest
+goal from the finding's reproduction steps (FR-04) and then approves or rejects every
+command the agent proposes; and once \emph{manually}, reproducing the finding by hand. The
 language-model backend was a locally hosted model (Ollama, \texttt{qwen3.6}, 27~B
 parameters), configured with a 16\,K-token context window; no hosted model was used,
 so the accuracy figures below are a \emph{lower bound} on what the system achieves
-with a stronger reasoning backend --- a point the discussion returns to.
+with a stronger reasoning backend, a point the discussion returns to.
 
 \paragraph{Metrics.} Verdicts are scored by the FR-15 harness (\texttt{eval.py})
 over an FR-12 export of the run, into three buckets: \emph{correct} (verdict matches
-ground truth), \emph{inconclusive} (the system hedged where the truth was definite ---
-a safe miss), and \emph{wrong} (a confident verdict contradicting the truth --- the
+ground truth), \emph{inconclusive} (the system hedged where the truth was definite: a
+safe miss), and \emph{wrong} (a confident verdict contradicting the truth: the
 dangerous case, which on this all-open set means a false ``fixed''). NFR-01 sets the
 bar at $\geq 70\%$ correct with \emph{zero} confidently-wrong verdicts. Time is
 wall-clock per finding in each condition.
+
+\section{Extraction quality}
+\label{sec:eval-extraction}
+
+Before the retest can be judged, the step that feeds it has to be. The first
+objective (O1) is to turn a human-written report into structured findings, and FR-03
+sets the bar at \emph{at least 90\% well-formed findings} from a real report. Because
+the study above deliberately bypasses extraction, that figure is measured on its own,
+on a second real document: the public nine-finding TryHackMe Juice Shop write-up
+\cite{mthimunye_juiceshop}, chosen because it is openly available and can therefore be
+re-run by a reader.
+
+The measured result splits in a way worth separating, because the two halves of the
+pipeline behave very differently. On the language-model half the bar is cleared
+outright: of the eight finding candidates the deterministic stage handed it, the
+extractor produced eight well-formed, schema-valid findings: 100\%, in 78~seconds
+of wall-clock, and on the smaller local backend (\texttt{qwen3.5}, 9~B parameters)
+rather than a hosted model. Nothing was flagged and discarded by the FR-03 schema
+gate. The deterministic half in front of it is the weaker link. That eight is eight of
+the report's \emph{nine} findings: the segmenter's heading conventions matched all but
+one, so end-to-end recall against the document is 8/9, or 89\%. And on the
+twelve-finding assessment report used for the retest study the same segmenter
+recovered \emph{nothing}. Its findings are numbered subsections, which match none
+of the conventions, so the whole 61-page document collapsed into a single
+94\,000-character candidate that no locally hosted model could ingest.
+
+That failure is the reason the manual-entry door exists (ADR-0020,
+Section~\ref{sec:design-ingest}) and the reason the study of
+Section~\ref{sec:eval-verdicts} uses it. It also locates the limitation precisely: the
+model is not what fails on an unfamiliar report format, the regular expressions ahead
+of it are. The design response was deliberately not more pattern-matching but a human
+fallback, on the reasoning that a large-context model consuming a whole document is
+the right long-term fix and more heading conventions merely postpone the same failure
+on the next report. O1 is therefore met on the criterion as written, and met with a
+stated boundary: extraction is reliable once a finding reaches the model, and
+format-bound before it does.
 
 \section{Verdict reliability}
 \label{sec:eval-verdicts}
@@ -79,6 +128,14 @@ retest retrieved the confidential document; the CORS retest read back a wildcard
 \emph{inconclusive}. On none did it return \emph{fixed}.
 
 \begin{table}[htbp]
+\caption[Per-finding verdicts on the twelve-finding assessment]{Per-finding verdicts
+on the twelve-finding assessment, on the local \texttt{qwen3.6} (27~B) backend, scored
+by the FR-15 harness against the all-\emph{still-open} ground truth. \emph{Time} is
+machine wall-clock (model latency, sandbox provisioning and command execution; the
+operator's approvals were issued programmatically, so human decision time is
+excluded); \emph{Cmds} is the number of gated commands approved. Eight correct, four
+safe \emph{inconclusive} hedges, zero wrong.}
+\label{tab:eval-verdicts}
 \footnotesize
 \renewcommand{\arraystretch}{1.25}
 \begin{center}
@@ -99,17 +156,9 @@ Weak password policy & still-open & 1 & 1:24 & correct \\ \hline
 Outdated JS libraries & still-open & 4 & 4:42 & correct \\ \hline
 Permissive CORS & still-open & 2 & 6:18 & correct \\ \hline
 \rowcolor{tema!5}
-\bft{Total (12 findings)} & \bft{8 open, 4 inconc.} & \bft{48} & \bft{52:19} & \bft{8 correct} \\ \hline
+\bft{Total (12 findings)} & \bft{8 open, 4 inconc.} & \bft{58} & \bft{52:19} & \bft{8 correct} \\ \hline
 \end{tabular}
 \end{center}
-\caption[Per-finding verdicts on the twelve-finding assessment]{Per-finding verdicts
-on the twelve-finding assessment, on the local \texttt{qwen3.6} (27~B) backend, scored
-by the FR-15 harness against the all-\emph{still-open} ground truth. \emph{Time} is
-machine wall-clock (model latency, sandbox provisioning and command execution; the
-operator's approvals were issued programmatically, so human decision time is
-excluded); \emph{Cmds} is the number of gated commands approved. Eight correct, four
-safe \emph{inconclusive} hedges, zero wrong.}
-\label{tab:eval-verdicts}
 \end{table}
 
 Scored by the harness that is eight \emph{correct}, four \emph{inconclusive} and
@@ -125,26 +174,31 @@ declined to call, not findings it called wrongly. On the constraint that carries
 compliance risk the system was reliable; on raw accuracy, on a small local model, it
 fell three points short of the bar.
 
-The four hedges are not arbitrary. Three of them --- stored and reflected cross-site
-scripting, and server-side template injection --- are the browser-observable class of
-Section~\ref{sec:eval-threats}: a command-line retest can confirm that a payload is
+The four hedges are not arbitrary. Three of them (stored and reflected cross-site
+scripting, and server-side template injection) belong to the browser-observable class
+of Section~\ref{sec:eval-threats}: a command-line retest can confirm that a payload is
 stored or reflected, but not that it \emph{executes} or is \emph{evaluated} on render,
-so an honest verdict hedges --- which is exactly the future work of
+so an honest verdict hedges. That is exactly the future work of
 Section~\ref{subsec:future-browser}. (The one browser-class finding it \emph{did}
 confirm, DOM-based XSS, it called from an unescaped reflection: the boundary is not
-sharp.) The fourth, the basket IDOR, is a multi-step chain --- authenticate, capture a
-token, then request another user's resource --- that the small local model could not
-carry to completion. The system imposes no step limit of its own
+sharp.) The fourth, the basket IDOR, is a multi-step chain: authenticate, capture a
+token, then request another user's resource. The small local model could not carry it
+to completion. The system imposes no step limit of its own
 (Section~\ref{subsec:design-lifecycle-budget}); each of these four ran to a cut-off the
-operator chose --- about ten approved commands --- at which point they concluded
+operator chose, at about ten approved commands, at which point they concluded
 \emph{inconclusive} themselves rather than let the agent guess.
 
 A second, earlier data point corroborates the backend's central role, though it must
 be read with care because its provenance differs. Before the local-model run reported
 here, the system was run once, autonomously, on the hosted Claude backend over a
-\emph{different} report --- the nine-finding TryHackMe Juice Shop write-up, against the
-same pinned lab --- and reached roughly 87.5\% correct verdicts with, again, zero
-confident error on the set's one deliberately ambiguous finding. That figure is not
+\emph{different} report --- the nine-finding TryHackMe Juice Shop write-up
+\cite{mthimunye_juiceshop}, against the same pinned lab. It returned the correct
+\emph{still-open} verdict on seven of that report's eight exploitable findings
+(87.5\%) and reached no confident verdict on the ninth, which is the set's
+deliberately ambiguous case: a training feature the report's own author flags as ``not
+a real-world vulnerability'', encoded in the ground truth as the NFR-01 hard-constraint
+case whose only defensible answer is \emph{inconclusive}. So again, zero confident
+error. That figure is not
 directly comparable to the 67\% above: it is a different report, a different finding
 count, and --- unlike the run in Table~\ref{tab:eval-verdicts} --- its FR-12 export was
 not preserved, so it stands as a single accepted result rather than a figure this
@@ -196,6 +250,22 @@ Table~\ref{tab:eval-conditions} places that hour beside three machine conditions
 the same local backend.
 
 \begin{table}[htbp]
+\caption[Four retest conditions on the same local backend]{Four ways to retest, all on
+the local \texttt{qwen3.6} backend: the author's lean manual pass; the gated system on
+all twelve findings; the gated system on the nine non-browser findings only (excluding
+the three --- stored and reflected scripting, and template injection --- whose effect it
+cannot observe over HTTP); and the same nine run autonomously with the
+approval gate removed. The manual figure is reported, not instrumented; the machine
+figures are measured. The two nine-finding rows are \emph{separate runs}, not
+re-slices of the twelve-finding row: an agentic retest is not deterministic, so a
+finding confirmed in one run can be hedged in another --- which is why the gated
+nine-finding row scores seven where the corresponding subset of
+Table~\ref{tab:eval-verdicts} scores eight. The manual row's 12/12 is not an
+independent score: that pass is
+what established the ground truth (§\ref{sec:eval-design}), so the column records that
+every finding proved reachable by hand within the lean budget --- the yardstick the
+machine rows are then measured against.}
+\label{tab:eval-conditions}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
 \begin{center}
@@ -209,36 +279,26 @@ Guided --- non-browser subset & qwen 27B & 9 & 32.5\,min & 7/9 \\ \hline
 Autonomous --- free-launch & qwen 27B & 9 & 29.7\,min & 8/9 \\ \hline
 \end{tabular}
 \end{center}
-\caption[Four retest conditions on the same local backend]{Four ways to retest, all on
-the local \texttt{qwen3.6} backend: the author's lean manual pass; the gated system on
-all twelve findings; the gated system on the nine non-browser findings only (excluding
-the three XSS it cannot verify over HTTP); and the same nine run autonomously with the
-approval gate removed. The manual figure is reported, not instrumented; the machine
-figures are measured. The manual row's 12/12 is not an independent score: that pass is
-what established the ground truth (§\ref{sec:eval-design}), so the column records that
-every finding proved reachable by hand within the lean budget --- the yardstick the
-machine rows are then measured against.}
-\label{tab:eval-conditions}
 \end{table}
 
-Two readings stand out, and both cut against the intuition that automation --- or
-autonomy --- is obviously faster here. First, \emph{manual $\approx$ guided}: the guided
+Two readings stand out, and both cut against the intuition that automation, or
+autonomy, is obviously faster here. First, \emph{manual $\approx$ guided}: the guided
 system's twelve-finding run (52~minutes of machine time) sits within a few minutes of the
 author's roughly one-hour manual pass. On this slow local backend the tool is not
-meaningfully faster than a capable person doing the same lean checks --- and it is less
+meaningfully faster than a capable person doing the same lean checks, and it is less
 conclusive: the manual pass resolved all twelve findings, where the system hedged on
 four. Its edge over the manual operator is therefore neither raw speed nor accuracy, but
 that it constructs the checks itself, keeps an append-only audit trail of every command
-and its output, and never issues a false clearance --- the four it could not settle it
-declared \emph{inconclusive} rather than \emph{fixed}. Second, \emph{autonomous $\approx$ guided}: run on the
-nine non-browser findings, removing the approval gate entirely --- free-launch, the agent
-auto-running its own commands --- took 29.7~minutes against the gated run's 32.5,
-essentially the same. Autonomy bought no meaningful speed, because the bottleneck is the
-model's per-step latency, not the approval round-trip. What it bought was a little
-thoroughness: left to explore, the agent confirmed the basket IDOR the tightly-scoped
-gated run had hedged, lifting non-browser accuracy from seven of nine to eight --- at the
-price of wandering, twenty-two commands on the SSTI it still could not confirm against the
-gated run's ten.
+and its output, and never issues a false clearance. The four it could not settle it
+declared \emph{inconclusive} rather than \emph{fixed}. Second, \emph{autonomous
+$\approx$ guided}: run on the nine non-browser findings, removing the approval gate
+entirely so that the agent auto-ran its own commands, took 29.7~minutes against the
+gated run's 32.5, essentially the same. Autonomy bought no meaningful speed, because
+the bottleneck is the model's per-step latency, not the approval round-trip. What it
+bought was a little thoroughness: left to explore, the agent confirmed the basket IDOR
+the tightly-scoped gated run had hedged, lifting non-browser accuracy from seven of
+nine to eight. The price was wandering, twenty-two commands on the SSTI it still could
+not confirm against the gated run's ten.
 
 The conclusion inverts the usual speed-for-safety trade. Here the human gate is nearly
 free in wall-clock: surrendering it bought a single extra confirmation and no time, while
@@ -257,17 +317,35 @@ contract the reliability result showed.
 The result is a first data point, and its limits should be read alongside it.
 \emph{Construct:} the target is deliberately vulnerable, so ground truth is
 uniformly \emph{still-open}; the evaluation therefore measures confirmation of open
-findings and the avoidance of false clearances --- the NFR-01 constraint --- but not
+findings and the avoidance of false clearances, the NFR-01 constraint, but not
 the recognition of a genuine fix. A target with some remediated findings is the first
 item of future work. \emph{Backend:} a single 27~B local model was used; a hosted
 frontier model would very likely raise accuracy, so these figures understate the
-system's ceiling. \emph{Scale:} one report, twelve findings, one operator ---
-enough to demonstrate the pipeline and the harness, not to generalise. \emph{Method:}
+system's ceiling. \emph{Scale:} one report, twelve findings, one operator, which is
+enough to demonstrate the pipeline and the harness but not to generalise.
+\emph{Determinism:} an agentic retest is not reproducible run to run. The model may
+propose different commands from the same starting point, and Table~\ref{tab:eval-conditions}
+shows the same finding confirmed in one run and hedged in another. Every figure
+here is therefore a single sample, and a defensible accuracy claim would need repeated runs per
+finding, which this study does not have. \emph{Method:}
 the operator drafted each retest goal from the report's reproduction steps, which is
 the intended workflow (FR-04) but does inject operator knowledge; and some findings
 (stored and reflected XSS, and SSTI, in particular) are only partially decidable over
 HTTP without a browser, which pushes the honest verdict toward \emph{inconclusive}
 rather than a confident call.
+
+\emph{Reproducibility of these figures.} It is worth being exact about what a reader
+can recheck, because the chapter claims a measured result. What survives of the
+twelve-finding study is its input --- the report, and the manual-entry payload the
+findings were loaded from --- and its outcomes, as reported in
+Table~\ref{tab:eval-verdicts}. What does not survive is the FR-12 export of the run
+itself, nor a committed twelve-finding answer key; the repository commits the ground
+truth for the nine-finding report only. The figures in this chapter are therefore
+re-derivable in the sense that the study can be \emph{repeated} --- the lab version is
+pinned, the backend is named and the harness is committed --- but not in the sense that
+this particular run can be re-scored from an artefact. Given the non-determinism noted
+above, a repeated run should be expected to differ; preserving each run's export, which
+the system already knows how to produce, is the cheap fix and it was not done here.
 
 \section{Discussion}
 \label{sec:eval-discussion}
@@ -292,21 +370,21 @@ without yet proving it.
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}
 
-That the hosted backend scores higher raises an obvious question --- why support a
-local one at all --- and the answer is the reason the system was built model-agnostic
+That the hosted backend scores higher raises an obvious question, why support a
+local one at all, and the answer is the reason the system was built model-agnostic
 (Section~\ref{subsec:stack}). Two properties of local deployment matter more, for this
 task, than the accuracy points a hosted model buys. The first is \emph{privacy}. A
 penetration-test report is among the most sensitive documents an organisation holds:
 it enumerates, in reproducible detail, how to compromise a live system. Sending that
 text to a third-party model API discloses it to the provider under whatever retention
-and training terms apply --- an exposure inherent to hosted inference, whatever the
+and training terms apply, an exposure inherent to hosted inference whatever the
 provider's stated policy. Running both the
 extraction and the retest against a model on the operator's own machine keeps the
 report on the loopback interface it was uploaded to (NFR-03), disclosing nothing. The
 second is \emph{independence}. A tool whose core capability is a call to a commercial
 API inherits that provider's pricing, rate limits, availability and terms, any of which
 can change, or be withdrawn, for reasons outside the operator's control. This is not a
-prediction that prices will rise --- per-token costs have in fact fallen steadily ---
+prediction that prices will rise, since per-token costs have in fact fallen steadily,
 but a question of \emph{governance}: an open-weight model run locally removes the
 dependency, and with it the exposure to a single vendor's decisions: control over the
 system's core capability stays distributed rather than concentrated. The

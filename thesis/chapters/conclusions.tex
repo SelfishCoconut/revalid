@@ -6,7 +6,7 @@
 \setlength{\emergencystretch}{3em}
 
 This dissertation set out to automate the most repetitive and least-supported phase
-of a security audit --- the revalidation of reported findings --- without
+of a security audit, the revalidation of reported findings, without
 surrendering the human judgement that a compliance-grade verdict demands. The result,
 \emph{revalid}, is a deliberately narrow tool: it does not discover or exploit
 vulnerabilities, but re-executes the reproduction steps of an already-reported finding
@@ -15,8 +15,8 @@ Whether that specialisation earns its keep is ultimately an empirical question. 
 first three objectives are realised in the artefact: penetration-test reports are
 analysed into findings and their reproduction steps, those steps are interpreted into
 gated verification commands, and a human-supervised retest turns them into an
-evidence-backed verdict. The fourth --- a quantitative evaluation of verdict
-reliability and of the effort saved over manual retesting --- is addressed by the
+evidence-backed verdict. The fourth, a quantitative evaluation of verdict
+reliability and of the effort saved over manual retesting, is addressed by the
 preliminary study of Chapter~\ref{ch:evaluation}, which exercises the whole pipeline
 against a real report on a live target and reports a first result; scaling that study
 to more reports, targets and a stronger model backend is the immediate next step
@@ -27,28 +27,28 @@ down what the work \emph{taught}, and how the degree made it possible.
 \label{sec:lessons}
 
 The largest single thing I take from this project is a working command of
-\emph{AI-assisted software development} --- not merely prompting a model, but
+\emph{AI-assisted software development}: not merely prompting a model, but
 engineering an environment in which a capable, fast-moving assistant can be directed
 reliably. Over the course of the work, Claude~Code moved from a code generator to the
 medium through which the entire lifecycle was managed: requirements captured as
 tracked issues, significant decisions recorded as architecture decision records,
 recurring procedures encoded as project-specific \emph{skills}, quality checks
 delegated to review \emph{agents}, and governance enforced automatically by
-\emph{hooks} in the editing loop. Learning to build and tune that apparatus --- and,
+\emph{hooks} in the editing loop. Learning to build and tune that apparatus, and,
 just as importantly, learning to recognise when it had grown heavier than the task
-justified, and to cut it back (Section~\ref{subsec:process-evolution}) --- is a
+justified and to cut it back (Section~\ref{subsec:process-evolution}), is a
 competence I did not have at the outset. These tools are moving quickly from novelty
 to professional expectation, and having driven one end to end, across every layer of
 a real project, is the learning I expect to carry furthest.
 
 A second lesson concerned discipline over autonomy. The very reliability failures that
-shape \emph{revalid}'s design --- hallucination, over-confident conclusions --- apply
+shape \emph{revalid}'s design, hallucination and over-confident conclusions, apply
 equally to the assistant that builds it. What made AI assistance trustworthy here was
 ordinary engineering rigour: a strict typing and test gate that no generated code
 could bypass, a continuous-integration barrier before every merge, and a human review
 on every change. The assistant accelerated the work; it never got to decide whether
 the work was correct. I also came away with a far deeper understanding of the domain
-the tool serves --- the vulnerability-management lifecycle, the safety pitfalls of
+the tool serves: the vulnerability-management lifecycle, the safety pitfalls of
 language-model agents, and the genuinely hard problem of turning a human-written
 report into something a machine can act on.
 
@@ -57,7 +57,7 @@ report into something a machine can act on.
 
 It would be easy to read a project this AI-assisted as a story about the tool. It is
 not. What made it possible to \emph{direct} the assistant, rather than be led by it,
-was the judgement built over the degree --- and that judgement showed up as concrete
+was the judgement built over the degree, and that judgement showed up as concrete
 demands I placed on the work.
 
 Requirements engineering supplied the vocabulary to specify each feature as a testable
@@ -67,22 +67,108 @@ required a full test pyramid rather than accepting whatever the assistant first
 produced: fast \emph{unit} tests isolating individual logic with the language model
 stubbed, \emph{integration} tests wiring the real components together, and dockerised
 \emph{system} tests exercising the whole pipeline against live lab targets. The
-assistant wrote much of that suite --- but it wrote it because I asked for it, to a
+assistant wrote much of that suite, but it wrote it because I asked for it, to a
 shape I had learned to specify.
 
 Version control was the other decisive competence. A working command of Git let me
 carry several features forward in parallel on isolated branches and integrate each
 cleanly through the continuous-integration gate, so that an AI-accelerated pace never
-became an unreviewable tangle --- the most recent example being the conversational
+became an unreviewable tangle, the most recent example being the conversational
 chat feature, developed on its own branch and merged once it was green. The wider
-software-engineering process --- iterative delivery, the testing layers above, and
-architectural decision records --- gave the structure that kept a large, fast-moving,
+software-engineering process (iterative delivery, the testing layers above and
+architectural decision records) gave the structure that kept a large, fast-moving,
 AI-authored codebase coherent and reviewable. Without that criterion the same tools
 would have produced volume without direction; with it, the assistant became an
 instrument for realising a design I owned, not a substitute for having one. Relying
-heavily on AI was a deliberate choice --- it is what contemporary software practice
-increasingly demands, and it would be perverse to ignore it --- but using it
+heavily on AI was a deliberate choice, since it is what contemporary software practice
+increasingly demands and it would be perverse to ignore it, but using it
 \emph{well}, rather than merely using it, is the part the degree prepared me for.
+
+\subsection{Competencies covered}
+\label{subsec:competencies-covered}
+
+Stated against the competencies of the degree, this dissertation evidences the
+following, each with the artefact that shows it rather than an assertion.
+
+The two competencies the project proposal declared are IS5 and IS6, and they are the
+ones this work is in the best position to claim.
+
+\emph{IS5 --- identifying, assessing and managing the associated risks.} A tool that
+executes attack commands against a live system is, itself, the risk it has to manage,
+and the memoir treats that as its central engineering problem rather than as a
+disclaimer. The risks were identified and each was answered by a structural control
+whose limits are then stated: unauthorised reach, answered by containment through
+network membership rather than by a check, with three limits of that boundary written
+down (Section~\ref{subsec:stack}) instead of left implicit; a false clearance,
+the failure mode that would make the tool dangerous at a compliance gate, answered
+by a conservative verdict contract and measured for it (NFR-01,
+Section~\ref{sec:eval-verdicts}); an unreviewed action, answered by the per-command
+gate; exposure of the tool itself, answered by the loopback-only posture (NFR-03) and
+by a four-layer scanning gate applied to its own code; and the risk that the model
+misleads its operator, answered by an append-only trail from which every verdict is
+re-derivable. The threats to validity of Section~\ref{sec:eval-threats} and the
+declared limits of Section~\ref{subsec:future-observability} are the same discipline
+applied to the evidence rather than to the artefact.
+
+\emph{IS6 --- designing a solution that integrates ethical, social, legal and
+economic considerations.} All four bear on this design and each changed it. The
+\emph{ethical} commitment is the gate itself: the system may not touch a target
+without a human decision, and may not declare a finding fixed on ambiguous evidence.
+The \emph{legal} constraints shaped both the tool and the dissertation: the tool
+because revalidation is an obligation imposed by standards and payment-industry rules
+(Section~\ref{subsec:revalidation}) and because it must reach only an authorised
+target; the dissertation because one of the evaluation reports carries no licence,
+which is why it is credited and linked rather than redistributed. The \emph{social}
+dimension is the privacy argument of Section~\ref{subsec:eval-local}: a
+penetration-test report is among the most sensitive documents an organisation holds,
+which is what makes a locally hosted model a first-class option rather than a
+fallback. The \emph{economic} dimension is the same section's governance argument, that
+a capability rented from one vendor is exposed to that vendor's decisions, together
+with the evaluation's most useful practical finding, that the human gate cost
+essentially no time (Section~\ref{sec:eval-time}), so the safety property is not one
+an operator has to pay for.
+
+Turning to the competencies of the degree itself, the \emph{instrumental} ones
+(INS01--INS05) are exercised across the whole
+project: a requirements specification written before the code, with nineteen
+functional and five non-functional requirements each carrying acceptance criteria
+(Table~\ref{tab:requirements}); the analysis, design and modelling of the system in
+Chapter~\ref{ch:design}, from the use-case and class models to the runtime topology;
+its implementation in Python and TypeScript; and, in particular, the recording and
+justification of every significant decision as one of forty-six architecture decision
+records, which is where the reasoning behind the design, including the decisions
+that were later reversed, is preserved rather than lost.
+
+The \emph{systemic} competencies (SIS01--SIS10) are where the project's distinctive
+work sits. Chapter~\ref{ch:design} designs and integrates a system of parts that were
+not free to be arbitrary: a language-model layer that had to remain replaceable, a
+persistence seam that had to survive a database change, an agent whose actions had to
+be gated. The specialisation competency of the software-engineering track (CO19) is
+evidenced by that same chapter together with the process of Chapter~\ref{ch:methodology}:
+requirements, architecture, an enforced quality gate and a measured evaluation, applied
+to a system built to a standard rather than to a demonstration. Security engineering in
+particular is evidenced not by the topic of the work but by the containment argument of
+Section~\ref{sec:design-runtime}, a control moved out of the program and into the
+environment with its own limits stated, and by the four-layer scanning gate that
+holds the tool to the standard it exists to check.
+
+The \emph{personal and professional} competencies (PER03, PER04) are evidenced by the
+work's supervision and its conduct: the project was carried out under two tutors, one
+at the School and one at Airbus Helicopters, in an industrial setting, with the design
+decisions defended to both; and the memoir is written in English, which is not the
+author's first language, satisfying the second-language requirement (UCLM01) at the
+same time.
+
+The transversal UCLM competencies are covered as follows. Command of information and
+communication technologies (UCLM02) is the artefact itself and the toolchain around it.
+Correct written communication (UCLM03) is this memoir and the documentation the project
+publishes. Ethical commitment and professional deontology (UCLM04) is the competency
+this particular project could least afford to treat as a formality, and it is
+evidenced twice: in the tool's design, which refuses to touch a target without a
+per-command human decision and refuses to declare a finding fixed on ambiguous
+evidence; and in the declaration of Section~\ref{sec:ai-declaration}, which states the
+use of artificial intelligence in this work in full, including the sessions whose model
+identity the audit trail does not record.
 
 \section{Future work}
 \label{sec:future}
@@ -109,10 +195,10 @@ A sharper limitation surfaced in the preliminary evaluation of
 Chapter~\ref{ch:evaluation}: a whole class of vulnerabilities can be confirmed only by
 observing its effect take shape in a rendered page, which a purely command-line, HTTP
 retest cannot see. Stored cross-site scripting and server-side template injection are
-the clearest cases --- with DOM-based and reflected scripting alongside them: a retest
+the clearest cases, with DOM-based and reflected scripting alongside them: a retest
 over HTTP can establish that a payload is stored or reflected, but not that the injected
 script \emph{executes} in the browser or that the template expression is
-\emph{evaluated} on render. Faced with that gap the system did what NFR-01 demands ---
+\emph{evaluated} on render. Faced with that gap the system did what NFR-01 demands:
 it returned an \emph{inconclusive} verdict rather than guessing \emph{fixed}, a safe
 hedge noted among the threats to validity (Section~\ref{sec:eval-threats}) rather than a
 confident call.
@@ -120,7 +206,7 @@ confident call.
 The natural improvement is to give the retest sandbox eyes. A headless browser, driven
 inside the same network-isolated sandbox and under the same per-command human gate as
 every other action, would let the agent load the response, run its scripts and watch
-whether the payload actually fires --- turning a principled hedge into a confident
+whether the payload actually fires, turning a principled hedge into a confident
 confirmation on exactly the findings the current design must otherwise leave open.
 Browser-driven verification in fact existed in an earlier iteration of the project and
 was retired when the batch architecture it belonged to was removed; reviving it as one
@@ -135,20 +221,20 @@ the evaluation of Chapter~\ref{ch:evaluation} is what makes it pressing. Reprodu
 (NFR-02) is met at the level of the \emph{verdict}: the session transcript records every
 command, its real output and the determination drawn from them, and the audit re-derives
 each stored verdict from it. What the trail does \emph{not} capture is the model's side
-of each exchange --- the exact prompt, the parameters, the token usage and the latency of
+of each exchange: the exact prompt, the parameters, the token usage and the latency of
 every individual call. That gap is tolerable for the claim actually made, since a verdict
 is re-derivable without it, but it limits precisely the questions the preliminary study
 had to answer by hand or leave open: why a particular turn proposed the command it did,
 whether the four hedged findings failed on reasoning or on context length, and what a
-retest costs in tokens and time on one backend against another --- the comparison
+retest costs in tokens and time on one backend against another, the comparison
 Section~\ref{sec:eval-time} could only make in wall-clock, and only by naming the model
 loaded at the time.
 
 Closing that gap does not require building anything, which is what makes it attractive.
 Pydantic~AI already emits OpenTelemetry spans for every agent step, so an
-LLM-observability platform such as Langfuse --- open-source and
-self-hostable, and therefore compatible with the localhost-only posture of NFR-03 and
-with the privacy argument of Section~\ref{subsec:eval-local} --- can ingest them with an
+LLM-observability platform such as Langfuse, open-source and
+self-hostable and therefore compatible with the localhost-only posture of NFR-03 and
+with the privacy argument of Section~\ref{subsec:eval-local}, can ingest them with an
 instrumentation call rather than a redesign. A wider evaluation instrumented that way
 would report not only how often the system is right, but what each verdict cost and
 which prompt produced it, turning the backend comparison from an observation into a
@@ -161,19 +247,19 @@ system itself rather than by an optional external collector.
 \subsection{Growing the application}
 \label{sec:scaling}
 
-\emph{revalid} was deliberately scoped as a local, single-operator application, a
+The tool was deliberately scoped as a local, single-operator application, a
 decision that traded reach for the focus a thesis needs
 (Section~\ref{subsec:prior-attempts}). The most natural line of future development is
 to lift that restriction and grow it from a single-operator tool into a multi-user,
-client--server platform --- this time on the disciplined foundation the project
+client--server platform, this time on the disciplined foundation the project
 established, rather than the over-broad one it set out from.
 
 Several upgrades follow from that goal. The single process that today serves one
 operator would separate into a hosted backend and thin clients, with authentication
 and role-based access control so that auditors, developers and reviewers can share an
 engagement with appropriately different permissions. The single-file SQLite store
-would move to a full relational database --- a migration the data-access layer was
-deliberately designed to absorb without a rewrite (Section~\ref{subsec:stack}) --- and
+would move to a full relational database, a migration the data-access layer was
+deliberately designed to absorb without a rewrite (Section~\ref{subsec:stack}), and
 the agent's sandboxed executions would be dispatched to a pool of workers through a
 job queue, so that many findings, or many engagements, can be revalidated concurrently
 rather than one at a time. On top of that would sit the team-oriented features a
@@ -181,11 +267,11 @@ production tool needs: shared dashboards of open and closed findings, a cross-us
 audit trail, and integration with the issue trackers and continuous-integration
 pipelines where remediation actually happens, so that a revalidation can be triggered
 automatically the moment a fix is deployed. Each of these is an increment on the
-existing architecture rather than a rewrite --- which is exactly the property the
+existing architecture rather than a rewrite, which is exactly the property the
 disciplined, single-operator core was built to preserve.
 
 \medskip
 Beyond the artefact itself, what I value most from this work is the confidence that I
 can take a technology as new and as powerful as an agentic coding assistant and still
-hold it to the engineering standards the degree instilled --- to use it fully, but on
+hold it to the engineering standards the degree instilled, to use it fully but on
 my own terms. That, more than the tool, is what I carry forward.

@@ -30,8 +30,8 @@ shown that autonomous agents can exploit real vulnerabilities directly from thei
 public descriptions, with no prior knowledge of the flaw \cite{fang2024oneday}. In
 November 2025 this trajectory reached a milestone: the first publicly reported
 cyber-espionage campaign in which an AI agent executed the large majority of the
-intrusion --- reconnaissance, exploitation, credential harvesting and lateral
-movement --- with only sporadic human oversight \cite{anthropic_espionage}.
+intrusion (reconnaissance, exploitation, credential harvesting and lateral
+movement) with only sporadic human oversight \cite{anthropic_espionage}.
 
 The frontier has moved further still. In April 2026 Anthropic previewed
 \emph{Mythos}, a model whose cybersecurity capability, described as an emergent
@@ -45,7 +45,7 @@ AI Security Institute corroborated the scale of these results
 \cite{aisi_mythos}. Nor is such capability confined to frontier laboratories: the
 autonomous penetration-testing system XBOW climbed to the top of a major public
 bug-bounty leaderboard, out-reporting human researchers over a sustained period
-\cite{xbow}. The economics are shifting decisively --- work that took expert teams
+\cite{xbow}. The economics are shifting decisively: work that took expert teams
 weeks can increasingly be attempted overnight. Figure~\ref{fig:timeline} places
 these milestones on a single timeline; barely three years separate the first
 commodity malicious chatbot from autonomous exploitation at the frontier.
@@ -87,11 +87,11 @@ unknown vulnerabilities.}
 Defenders are not without their own AI. The same class of models has been turned to
 protective ends: Google's Big Sleep agent autonomously found a previously unknown
 vulnerability in production software and later helped pre-empt one that attackers
-were preparing to use. The difficulty is one of balance.
+were preparing to use \cite{google_bigsleep}. The difficulty is one of balance.
 Offensive capability scales cheaply and runs unattended, whereas much defensive
 work remains gated by manual, human-paced procedures. Where the two sides draw on
 the same technology, the advantage accrues to whoever removes the human bottleneck
-first --- and, on the defensive side, many of the most important bottlenecks have
+first, and, on the defensive side, many of the most important bottlenecks have
 not yet been addressed. This asymmetry is the central motivation of this work: if
 attackers are compounding their productivity with AI, defenders must do the same,
 or fall behind.
@@ -104,18 +104,18 @@ automated it remains: the \emph{revalidation} (or retest) of penetration-test
 findings. A
 security audit ends with a report that lists each discovered vulnerability and the
 steps needed to reproduce it. Once the development team applies fixes, someone must
-confirm that those fixes actually work --- that each reported finding is genuinely
+confirm that those fixes actually work, that each reported finding is genuinely
 closed and not merely hidden by an incidental change. The stakes are not academic:
 known, previously identified vulnerabilities that are never properly closed remain a
-leading cause of breaches --- in a survey of nearly 3{,}000 practitioners, 60\% of
+leading cause of breaches: in a survey of nearly 3{,}000 practitioners, 60\% of
 breach victims traced their compromise to a known vulnerability whose patch was
 available but had not been applied \cite{ponemon_vulnerability_2019}. This re-testing
 is still performed largely by hand, one finding at a time, on every remediation cycle,
 and it demands careful judgement to avoid declaring a still-exploitable weakness
 ``fixed''. It is exactly the kind of high-volume, judgement-laden, evidence-driven task
 at which a well-supervised AI assistant is well suited to help. Retesting is not wholly
-unautomated --- breach-and-attack-simulation and continuous-validation platforms
-already re-run a tester's \emph{own} checks (Section~\ref{subsec:bas}) --- but the
+unautomated, since breach-and-attack-simulation and continuous-validation platforms
+already re-run a tester's \emph{own} checks (Section~\ref{subsec:bas}), but the
 recent surge of AI agents has concentrated on discovering, exploiting or patching
 vulnerabilities rather than on re-verifying that a specific reported one is closed, so
 the report-driven re-verification of an externally reported finding remains a largely
@@ -126,8 +126,8 @@ Section~\ref{subsec:revalidation}.
 \label{sec:objectives}
 
 The goal of this project is to advance the defensive side of this arms race by
-giving security professionals --- the cybersecurity architects, auditors and
-developers responsible for closing the loop on an audit --- an AI-driven tool that
+giving security professionals, the cybersecurity architects, auditors and
+developers responsible for closing the loop on an audit, an AI-driven tool that
 accelerates the revalidation of vulnerabilities through \emph{assistance} rather
 than replacement. Concretely, the general objective is:
 
@@ -150,12 +150,28 @@ work reported in the remaining chapters:
   concrete, non-destructive verification commands.
 \item \bft{Develop an automated, human-supervised retesting system} that executes
   those verification actions against authorised targets and produces an
-  evidence-backed verdict --- \emph{still-open}, \emph{fixed} or
-  \emph{inconclusive} --- for each finding.
+  evidence-backed verdict of \emph{still-open}, \emph{fixed} or
+  \emph{inconclusive} for each finding.
 \item \bft{Evaluate the accuracy and usefulness of the system}, comparing its
   verdicts against ground truth and against the effort of traditional manual
   revalidation, in terms of reliability and time saved.
 \end{enumerate}
+
+One deliberate departure from the original project proposal should be recorded here
+rather than discovered later. The proposal described a system that would execute
+retests \emph{autonomously}. The system delivered does not: it stops before every
+command that would touch a target and waits for a human decision, and O3 above is
+worded accordingly. The change is a refinement forced by the state of the art rather
+than a retreat from it. Section~\ref{subsec:llm-safety} sets out why an unsupervised
+language-model agent is the wrong instrument for a verdict that a compliance process
+will rely on, since hallucination and over-confident conclusions are not incidental
+defects of these systems but documented properties of them, and
+Section~\ref{sec:design-retest} shows what the gate buys. The obvious objection is
+that oversight must cost speed, which is exactly what the retested objective O4 was
+able to check: Section~\ref{sec:eval-time} finds that removing the gate entirely
+bought no meaningful time, because the bottleneck is the model's own per-step
+latency. The autonomous mode still exists and was measured; it is the default that
+changed, and it changed on evidence.
 
 \section{Proposed solution}
 \label{sec:solution}
@@ -194,8 +210,8 @@ shows the pipeline at a glance.
 }
 \caption[What \emph{revalid} does]{The \emph{revalid} pipeline. A report is parsed into
 findings and their reproduction steps, a retest goal is derived, and a sandboxed agent
-re-verifies the finding one gated command at a time --- the operator approves each
-command before it runs --- ending in an evidence-backed verdict. The gated retest
+re-verifies the finding one gated command at a time, the operator approving each
+command before it runs, ending in an evidence-backed verdict. The gated retest
 (highlighted) is where human control is exercised.}
 \label{fig:concept}
 \end{figure}
@@ -234,6 +250,6 @@ Chapter~\ref{ch:evaluation} then reports a preliminary evaluation of the system
 against a real penetration-test report on a live target: the reliability of its
 verdicts, and the effort it saves over manual retesting. Chapter~\ref{ch:conclusions},
 finally, draws together what the work achieved and what it taught, and sets out the
-directions it opens --- chief among them a larger-scale evaluation building on the
+directions it opens, chief among them a larger-scale evaluation building on the
 one reported here. Finally, Appendix~\ref{ch:annex-install} provides a step-by-step
 guide to installing and operating the system.

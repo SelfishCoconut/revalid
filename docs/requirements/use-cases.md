@@ -25,35 +25,26 @@ the LLM is an actor that can only *propose*; the target is an actor that can onl
 
 <!-- thesis-fig: use-cases -->
 ```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false, "wrappingWidth": 120}, "themeVariables": {"fontSize": "22px"}}}%%
 flowchart TB
     AUD(["👤 Auditor"])
     LLM(["LLM backend"])
-    TGT(["Authorised target"])
 
     subgraph SYS["revalid"]
-        direction TB
+        direction LR
 
         subgraph UND["Understand the report"]
-            direction LR
+            direction TB
             U1(["Ingest a PDF report<br/>FR-01 · FR-03 · FR-19"])
             U2(["Import a structured export<br/>FR-02"])
             U3(["Enter a report manually<br/>FR-02 · ADR-0020"])
             U4(["Correct and annotate<br/>a finding — FR-16"])
         end
 
-        subgraph RET["Revalidate a finding"]
-            direction LR
-            U5(["Set the retest goal<br/>FR-17 · ADR-0032"])
-            U6(["Run a gated<br/>retest session — FR-17"])
-            U7(["Approve or reject<br/>a command — AC2"])
-            U8(["Run a command<br/>personally<br/>ADR-0026"])
-            U9(["Steer the agent<br/>by message<br/>ADR-0028"])
-            U10(["Hand over the wheel<br/>Auto-run — ADR-0029"])
-            U11(["Conclude or adjudicate<br/>FR-09 · ADR-0030"])
-        end
+        RET(["Revalidate a finding<br/>7 use cases, expanded below"])
 
         subgraph OUT["Account for the work"]
-            direction LR
+            direction TB
             U12(["Re-derive the<br/>audit trail — FR-10"])
             U13(["Export a run<br/>FR-12"])
             U14(["Score against<br/>ground truth — FR-15"])
@@ -65,24 +56,55 @@ flowchart TB
     AUD --- UND
     AUD --- RET
     AUD --- OUT
+    U1 -.->|"«include»"| U4
+    UND --- LLM
+    OUT --- LLM
 
+    classDef actor fill:#dbe4ff,stroke:#3b5bdb,stroke-width:2px
+    classDef uc fill:#e7f5ff,stroke:#1971c2
+    class AUD,LLM actor
+    class U1,U2,U3,U4,U12,U13,U14,U15,U16,RET uc
+    style SYS fill:none,stroke:#1971c2,stroke-dasharray:6 4
+```
+
+The retest group is expanded on its own, because its `«include»` and `«extend»`
+relations are where the design's claims live.
+
+<!-- thesis-fig: use-cases-retest -->
+```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false, "wrappingWidth": 120}, "themeVariables": {"fontSize": "22px"}}}%%
+flowchart LR
+    AUD(["👤 Auditor"])
+    LLM(["LLM backend"])
+    TGT(["Authorised target"])
+
+    subgraph RET["Revalidate a finding"]
+        direction LR
+        U5(["Set the retest goal<br/>FR-17 · ADR-0032"])
+        U6(["Run a gated retest session<br/>FR-17"])
+        U7(["Approve or reject<br/>a command — AC2"])
+        U11(["Conclude or adjudicate<br/>FR-09 · ADR-0030"])
+        U8(["Run a command<br/>personally — ADR-0026"])
+        U9(["Steer the agent<br/>by message — ADR-0028"])
+        U10(["Hand over the wheel<br/>Auto-run — ADR-0029"])
+    end
+
+    AUD --- U5
+    AUD --- U6
+    U5 --> U6
     U6 -.->|"«include»"| U7
+    U6 -.->|"«include»"| U11
     U6 -.->|"«extend»"| U8
     U6 -.->|"«extend»"| U9
     U6 -.->|"«extend»"| U10
-    U6 -.->|"«include»"| U11
-    U1 -.->|"«include»"| U4
-
-    UND --- LLM
-    RET --- LLM
-    OUT --- LLM
-    RET --- TGT
+    U6 --- LLM
+    U6 --- TGT
 
     classDef actor fill:#dbe4ff,stroke:#3b5bdb,stroke-width:2px
     classDef uc fill:#e7f5ff,stroke:#1971c2
     class AUD,LLM,TGT actor
-    class U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11,U12,U13,U14,U15,U16 uc
-    style SYS fill:none,stroke:#1971c2,stroke-dasharray:6 4
+    class U5,U6,U7,U8,U9,U10,U11 uc
+    style RET fill:none,stroke:#1971c2,stroke-dasharray:6 4
 ```
 
 ## The decisive use case
