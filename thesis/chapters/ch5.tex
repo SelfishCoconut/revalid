@@ -26,8 +26,8 @@ constraint that matters most --- does it ever declare a still-exploitable findin
 time the same work takes by hand.
 
 \paragraph{Target and report.} The target is the reference lab of
-Appendix~\ref{ch:annex-install}: OWASP Juice Shop, pinned to version~17.1.1, a
-deliberately vulnerable application. The input is a real penetration-test report ---
+Appendix~\ref{ch:annex-install}: OWASP Juice Shop \cite{owasp_juiceshop}, pinned to
+version~17.1.1, a deliberately vulnerable application. The input is a real penetration-test report ---
 a twelve-finding web-application security assessment of Juice Shop --- ingested
 through the manual-entry door (FR-02) so that extraction quality, evaluated
 separately, does not confound the retest measurement. The twelve findings span the
@@ -299,8 +299,8 @@ task, than the accuracy points a hosted model buys. The first is \emph{privacy}.
 penetration-test report is among the most sensitive documents an organisation holds:
 it enumerates, in reproducible detail, how to compromise a live system. Sending that
 text to a third-party model API discloses it to the provider under whatever retention
-and training terms apply --- a class of exposure that surveys of language-model privacy
-treat as inherent to hosted inference \cite{das2024security}. Running both the
+and training terms apply --- an exposure inherent to hosted inference, whatever the
+provider's stated policy. Running both the
 extraction and the retest against a model on the operator's own machine keeps the
 report on the loopback interface it was uploaded to (NFR-03), disclosing nothing. The
 second is \emph{independence}. A tool whose core capability is a call to a commercial
@@ -308,9 +308,8 @@ API inherits that provider's pricing, rate limits, availability and terms, any o
 can change, or be withdrawn, for reasons outside the operator's control. This is not a
 prediction that prices will rise --- per-token costs have in fact fallen steadily ---
 but a question of \emph{governance}: an open-weight model run locally removes the
-dependency, and with it the exposure to a single vendor's decisions, which the
-literature on open versus closed foundation models frames as distributing rather than
-concentrating control \cite{bommasani2021foundation, kapoor2024openfoundation}. The
+dependency, and with it the exposure to a single vendor's decisions: control over the
+system's core capability stays distributed rather than concentrated. The
 evaluation's honest conclusion is therefore not that local models are as capable, but
 that the accuracy gap is a price some deployments should choose to pay --- and that the
 two levers above narrow it without surrendering the local option.

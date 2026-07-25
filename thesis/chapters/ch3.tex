@@ -28,11 +28,11 @@ software project: the scarce effort was spent on design, software-engineering
 judgement and architecture, not on typing code.
 
 The evidence for this model is the decision trail. Every significant choice was
-recorded as an Architecture Decision Record (ADR) in the lightweight MADR format
-\cite{madr, nygard_adr}; the repository contains \textbf{forty-six} such records,
+recorded as an Architecture Decision Record (ADR) in the lightweight MADR format;
+the repository contains \textbf{forty-six} such records,
 each stating a context, the options considered, and the decision with its
 consequences. Requirements were captured in a Software Requirements Specification
-following the structure of ISO/IEC/IEEE~29148 \cite{iso29148}. These artefacts ---
+following the structure of ISO/IEC/IEEE~29148. These artefacts ---
 the ADRs and the requirements specification --- were authored by the developer and
 precede the code they govern.
 
@@ -108,15 +108,15 @@ machinery for discipline.
 \label{sec:process}
 
 AI-assisted development compresses the cycle time of a feature from weeks to hours,
-which makes the fixed-length sprints of Scrum \cite{scrumguide} a poor fit. The
+which makes the fixed-length sprints of Scrum a poor fit. The
 project therefore adopted a continuous-flow \textbf{Kanban} process
 \cite{kanban_anderson} on a GitHub Projects board, as an explicit adaptation of the
-values of the Agile Manifesto \cite{agilemanifesto} to a single developer working
+values of the Agile Manifesto to a single developer working
 with an assistant. Work flows continuously from a prioritised backlog; there are no
 sprints and no meetings; and \emph{milestones} mark feature-complete increments
 rather than time boxes. The project passed through six such milestones, from the M1
 walking skeleton to the M6 agentic console, each closing with a semantically
-versioned release \cite{semver}: v0.1.0 through v0.4.0 for the first four, and a
+versioned release: v0.1.0 through v0.4.0 for the first four, and a
 single v1.0.0 closing both M6 and M5 --- the agentic console was feature-complete
 before the evaluation that measures it could be run, so the two closed together.
 Figure~\ref{fig:milestones} lays out this milestone sequence.
@@ -148,8 +148,8 @@ measures it could be run --- which is also why the two appear out of numerical o
 
 Three rules give the flow its discipline. First, work is \emph{issue-first}: no
 feature is written before a board card exists for it, so every change is traceable
-to a requirement. Second, every commit follows the Conventional Commits convention
-\cite{conventionalcommits}, and every AI-assisted commit carries a
+to a requirement. Second, every commit follows the Conventional Commits convention,
+and every AI-assisted commit carries a
 \texttt{Co-Authored-By: Claude} trailer, making AI involvement auditable from the
 git history alone. Third, integration is governed by a \emph{CI-gated auto-merge}
 (ADR-0003): a pull request merges only once the required checks are green ---
@@ -419,7 +419,7 @@ generated pages and affected diagrams are updated together, and the
 The tools of Section~\ref{subsec:qa} are only as good as the discipline with which
 they are run, and a developer working alone --- with an assistant that writes most of
 the code --- cannot rely on running them by hand. This project therefore follows the
-classical continuous-integration practice \cite{fowler_ci, humble_farley}: every
+classical continuous-integration practice: every
 change is verified automatically, on a build machine, against a reproducible
 environment, and the verification is what authorises the merge. The motivation is
 sharper here than in a conventional project. There is no second developer to review a
@@ -507,7 +507,7 @@ scripts, reporting findings of medium
 severity and above: insecure temporary files, disabled certificate verification, weak
 cryptographic primitives. The severity floor is deliberate, since a tool that must
 legitimately spawn processes would otherwise drown in low-severity notices about the
-very behaviour it exists to perform. CodeQL \cite{codeql} goes further by querying a
+very behaviour it exists to perform. CodeQL goes further by querying a
 semantic model of the program, tracing whether data from an untrusted source reaches a
 sensitive sink --- reasoning that pattern matching cannot perform. It analyses the
 Python sources and the TypeScript front end alike; that second language was added
