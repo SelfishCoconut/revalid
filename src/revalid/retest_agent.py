@@ -22,7 +22,13 @@ from pydantic_ai.models import KnownModelName, Model
 
 from revalid.domain import VerdictStatus
 from revalid.llm import resolve_model
-from revalid.sandbox import TIMEOUT_EXIT_CODES, CommandResult, Sandbox
+from revalid.sandbox import (
+    TIMEOUT_EXIT_CODES,
+    CommandResult,
+    Sandbox,
+    is_lab_scope,
+    online_scope_hosts,
+)
 
 _MAX_TOOL_RETRIES = 2
 
@@ -42,12 +48,11 @@ def clamp_timeout(seconds: int) -> int:
 
 _BASE_INSTRUCTIONS = """\
 You are a penetration-test *retester*. You are given one finding to re-verify \
-against an authorised lab target that is reachable from your sandbox.
+against an authorised target that is reachable from your sandbox.
 
 Rules:
 - Work one command at a time. Propose a single shell command plus a \
 one-line rationale; a human approves or rejects each before it runs.
-- The sandbox can reach ONLY the lab target — never the internet or the host.
 - Every command must be NON-INTERACTIVE and self-terminating: never wait on \
 stdin, and never background a command (no trailing `&`) — you only see output \
 once it exits.
@@ -92,6 +97,31 @@ wheel. Keep going on your own — reason, run a command, observe its output, and
 continue — until you can make a determination. When you are confident, conclude \
 `still_open` (the issue reproduces) or `fixed` (it does not). That ends the session.
 """
+
+
+def _scope_reachability(scope_hosts: tuple[str, ...]) -> str:
+    """State what this session's sandbox can actually reach (issue #247).
+
+    The reachability rule is a *per-session* fact, not a constant: since ADR-0045 a
+    scope may be an online host, provisioned behind a per-session L3 egress gateway
+    that lets every tool reach it. The instructions used to assert "only the lab
+    target — never the internet" unconditionally, which is false for such a session
+    and invites the model to dismiss a target it could in fact probe.
+
+    Either way the sentence is a *description* of the topology, never the thing that
+    enforces it: containment is the network the sandbox lives in (ADR-0025/0045), so a
+    model that ignored this text still could not reach anything else.
+    """
+    if is_lab_scope(scope_hosts):
+        return "- Your sandbox can reach ONLY the lab target — never the internet or the host."
+    hosts = ", ".join(online_scope_hosts(scope_hosts))
+    return (
+        f"- Your sandbox can reach ONLY the scoped target(s): {hosts}. That host is in "
+        "scope and reachable — probe it directly. Everything else, including any other "
+        "host and the machine running this tool, is unreachable by construction, so "
+        "there is nothing to gain by trying."
+    )
+
 
 #: Appended in the default guided mode (ADR-0040): the operator drives one step at
 #: a time, so the agent does a single action and hands back rather than racing to a
@@ -165,6 +195,12 @@ class RetestSessionDeps:
     #: Auto-run toggle takes effect on the agent's next turn. Default ``False`` —
     #: the guided persona — so agent-unit constructions need not set it.
     free_launch: bool = False
+    #: This session's parsed scope hosts (issue #247). Drives the reachability line in
+    #: the instructions, so an online-scope session is told the truth about what it can
+    #: reach (ADR-0045) instead of the old hardcoded "lab only". Rebuilt each turn like
+    #: the rest of the deps; the default — empty, i.e. the lab — keeps agent-unit
+    #: constructions and lab sessions on the original wording.
+    scope_hosts: tuple[str, ...] = ()
 
 
 def _format_result(result: CommandResult) -> str:
@@ -236,6 +272,16 @@ def build_retest_agent(
         """
         return _AUTONOMOUS_GUIDANCE if ctx.deps.free_launch else _GUIDED_GUIDANCE
 
+    @agent.instructions
+    def _scope_guidance(ctx: RunContext[RetestSessionDeps]) -> str:
+        """State what this session can reach (issue #247).
+
+        Dynamic for the same reason as the persona above: the scope is a property of
+        the session, not of the build, so a lab and an online retest must be told
+        different — and true — things about their reachability.
+        """
+        return _scope_reachability(ctx.deps.scope_hosts)
+
     @agent.tool(requires_approval=True)
     def run_command(
         ctx: RunContext[RetestSessionDeps],
@@ -247,7 +293,7 @@ def build_retest_agent(
 
         Args:
             ctx: The run context carrying the sandbox + output-emit callback.
-            command: The exact shell command to execute (lab target only).
+            command: The exact shell command to execute (against the scoped target).
             rationale: A one-line reason this command advances the retest.
             timeout_seconds: How long the command may run before it is killed —
                 pick a value that fits it (a few seconds for a curl, more for a

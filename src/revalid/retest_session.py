@@ -629,6 +629,10 @@ def _make_deps(session: Session, session_id: int, live: LiveSession) -> RetestSe
         # Selects the agent's persona for this turn (ADR-0040): read live so a
         # mid-session Auto-run toggle switches guided ↔ autonomous next turn.
         free_launch=live.free_launch,
+        # What this session can actually reach (issue #247) — the same scope the
+        # sandbox was provisioned against, so the instructions describe the real
+        # topology instead of assuming the lab.
+        scope_hosts=scope_hosts(session_scope(session, session_id)),
     )
 
 
