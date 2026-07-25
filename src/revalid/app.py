@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import logging
 from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import datetime
 from pathlib import Path
@@ -137,6 +138,12 @@ from revalid.settings import ProbeResult, discover_models, load_or_seed, probe_p
 # Repo-root-relative location of the built SPA (frontend/dist); served at "/"
 # when present (FR-11). Absent in backend-only dev and CI unit runs.
 _SPA_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+# Where a failure's real cause goes when it is not safe to hand to the client.
+# Unconfigured on purpose: with no handler attached, Python's last-resort handler
+# writes ERROR records to stderr -- the terminal the operator launched the app in,
+# which for a local single-user tool (ADR-0008) is exactly where they are looking.
+logger = logging.getLogger(__name__)
 
 
 class FindingOut(Finding):
@@ -2258,6 +2265,13 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+#: What a failed reply stream tells the SPA. A fixed string carrying nothing about
+#: the failure -- the diagnosis belongs in the log, not in a payload the SPA renders.
+#: It does say *where* the diagnosis went, so the generic text is a signpost rather
+#: than a dead end for the operator reading it.
+STREAM_ERROR_DETAIL = "internal server error - see the server log for details"
+
+
 def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Session]) -> None:
     """Register the FR-18 chat message route: ask the read-only reports assistant.
 
@@ -2324,8 +2338,16 @@ def _register_chat_message_route(router: APIRouter, sessions: sessionmaker[Sessi
                 try:
                     async for delta in stream_answer(agent, stream_session, chat, body.content):
                         yield _sse("token", {"text": delta})
-                except Exception as exc:
-                    yield _sse("error", {"detail": str(exc)})
+                except Exception:
+                    # The detail is framed into an SSE payload the SPA renders, so it
+                    # must not carry the raw exception text (CodeQL py/stack-trace-
+                    # exposure): an SQLAlchemy or httpx error drags filesystem paths
+                    # and provider URLs into it. The operator still needs to tell
+                    # "Ollama is down" from "bad model", so the real cause -- with its
+                    # traceback -- goes to the log instead, i.e. the terminal the app
+                    # was launched in.
+                    logger.exception("chat %d: reply stream failed", chat_id)
+                    yield _sse("error", {"detail": STREAM_ERROR_DETAIL})
                     return
                 yield _sse("done", {})
 
