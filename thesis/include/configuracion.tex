@@ -294,6 +294,10 @@
 % Tamaño de letra y separadores
 \makeatletter
 \renewcommand{\ALG@beginalgorithmic}{{\color{gris50}\small\hrule\vskip10pt}}
+% Widen the ToC/LoF/LoT page-number box: the memoir passed 100 pages, and the
+% default \@pnumwidth is too narrow for a bold three-digit number, which otherwise
+% overfills its box by a few points in the contents.
+\renewcommand{\@pnumwidth}{1.9em}
 \makeatother
 % Variables y funciones
 \newcommand{\va}[1]{{\it {#1}}}

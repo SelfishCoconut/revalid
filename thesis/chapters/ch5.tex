@@ -316,6 +316,138 @@ weaker safety contract. And on the four findings the tool cannot yet decide it s
 defers to the human rather than guessing, which is the same conservative contract the
 reliability result showed.
 
+\section{Across models and modes: the human gate and the cost of autonomy}
+\label{sec:eval-crossmodel}
+
+The study so far is one backend in one mode. Its two claims --- the safety property
+holds, and accuracy is bound by the reasoning model --- are worth testing for
+generality, so the pipeline was re-run across four model tiers and both interaction
+modes on the same assessment. To isolate the model and the mode from the
+browser-observability limit of Section~\ref{sec:eval-threats}, this study drops the
+three cross-site-scripting findings and keeps the \emph{nine non-browser} findings of
+the report, every one of which is still-open in the unpatched lab; ground truth is
+therefore uniformly \emph{still-open}, as before. The four tiers are three local
+\texttt{qwen} models (9\,B, 14\,B and 27\,B, each pinned to a 16\,K context) and a
+hosted frontier model (\texttt{claude-sonnet}) placed behind the \emph{identical}
+system prompt and egress-locked sandbox, so the only thing that changes between the
+frontier row and the local rows is the model itself. \emph{Guided} runs were operated
+by a human in the loop, approving each command and steering when the agent floundered;
+\emph{autonomous} (free-launch) runs were driven programmatically to a verdict with no
+human between the agent and the target. All runs used the hardware described in the
+footnote.\footnote{Local inference on an NVIDIA RTX~5080 (16\,GB VRAM), AMD Ryzen~7
+9800X3D, 32\,GB RAM, Ollama~0.32.1. The 9\,B and 14\,B models fit in VRAM; the 27\,B
+(17\,GB) does not, which matters below.}
+
+\begin{table}[htbp]
+\caption[Verdicts across four model tiers and both modes]{Verdicts on the nine
+non-browser findings (ground truth: all \emph{still-open}), by backend and interaction
+mode. \emph{Wrong} is a confident verdict contradicting the truth --- here a false
+\emph{``fixed''}, the dangerous case. The pattern is the chapter's central result:
+\textbf{under the human gate no model issued a false clearance; in autonomous mode
+every model did, the frontier model included.}}
+\label{tab:eval-crossmodel}
+\footnotesize
+\renewcommand{\arraystretch}{1.3}
+\begin{center}
+\begin{tabular}{|L{3.2cm}|L{2.0cm}|c|c|c|c|}
+\hline
+\rowcolor{tema!10}
+\bft{Backend} & \bft{Mode} & \bft{Correct} & \bft{Inconc.} & \bft{Wrong} & \bft{Error} \\ \hline
+\texttt{qwen3.5:9b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
+\texttt{qwen3:14b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
+\texttt{qwen3.6:27b}$^{*}$ & guided & 3/3 & 0 & \bft{0} & 0 \\ \hline
+\texttt{claude-sonnet} & guided & \multicolumn{4}{c|}{\emph{not separately run --- see text}} \\ \hline
+\rowcolor{tema!5}
+\texttt{qwen3.5:9b} & autonomous & 5/9 & 3 & \bft{0}$^{\dagger}$ & 1 \\ \hline
+\rowcolor{tema!5}
+\texttt{qwen3:14b} & autonomous & 4/9 & 2 & \bft{2} & 1 \\ \hline
+\rowcolor{tema!5}
+\texttt{claude-sonnet} & autonomous & 8/9 & 0 & \bft{1} & 0 \\ \hline
+\end{tabular}
+\end{center}
+\end{table}
+
+Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
+
+\paragraph{The gate holds the safety line on every model; autonomy breaks it on every
+model.} Under the human gate, not one of the three local backends issued a false
+\emph{``fixed''}: they confirmed the findings they could and hedged
+\emph{inconclusive} on the rest. Remove the gate and the picture inverts. The 14\,B,
+left to drive itself to a verdict, marked the SQL-injection \emph{and} the
+template-injection findings \emph{fixed} --- two live vulnerabilities cleared. The
+9\,B, in an earlier autonomous run, marked permissive CORS \emph{fixed} while every
+one of its own commands had just printed a wildcard \texttt{Access-Control-Allow-Origin}
+header.\footnote{$^{\dagger}$~The 9\,B autonomous row shown is a second run, which
+happened to issue no false clearance; a first run marked CORS \emph{fixed}. An agentic
+retest is not deterministic, so a false clearance is \emph{intermittent} in autonomous
+mode --- which is worse, not better, than a reliable one: a gate that fails at random
+cannot be reasoned about.} And the frontier model, far more capable than any local one,
+was not exempt: it too, running autonomously, cleared a live finding
+(Section~\ref{par:eval-ssti} below). This is the single most important measurement in
+the chapter, and it cuts squarely against the intuition that a dangerous false
+clearance is a weak-model failure. It is not. It is a failure of \emph{autonomy}: an
+agent instructed to reach a verdict on its own resolves ``I could not reproduce it''
+as ``it is fixed'', because --- exactly as Section~\ref{sec:design-retest} argued ---
+failing to reproduce a vulnerability looks identical to the vulnerability being gone.
+The per-command human gate is what refuses that inference, and it did so on every
+backend, the frontier one included.
+
+\paragraph{Under the gate, model capability shows up as operator effort, not as a
+different verdict.} The three guided local rows land in almost the same place ---
+eight of nine confirmed, one safe hedge --- but the work the human had to do to get
+there scaled sharply with model weakness. The 9\,B could not compose a valid shell
+command for any multi-step finding: it guessed client-side Angular routes
+(\texttt{/\#/login}) instead of the REST API, and mangled shell quoting on every JSON
+payload even after explicit correction, so the operator had to run the SQL-injection,
+IDOR, privilege-escalation and brute-force commands \emph{personally}; the model's
+contribution to those four was essentially nil. The 14\,B did better --- it found the
+login endpoint unprompted and adapted the \emph{structure} of its commands to a
+correction --- but still could not emit a valid single-quote injection payload, so the
+operator again ran the decisive command. Only at 27\,B did the model compose and run
+the full multi-step chains itself: given a single hint that Juice Shop's login is a
+REST endpoint, it wrote a correctly-escaped injection payload, recovered the admin
+token, and --- on the IDOR --- diagnosed its own truncated-token failure and rewrote
+the command to capture the token dynamically. That is the same competence the frontier
+model showed unaided. The lesson for a human-gated tool is a reassuring one: a weaker,
+cheaper, more private local model does not make the tool \emph{less safe} --- the
+safety came out identical --- it makes it more \emph{laborious}, shifting work from the
+model onto the operator. ($^{*}$~The 27\,B guided row is partial: it confirmed the
+three findings it was run on, each by its own commands, and was then stopped. At
+17\,GB it exceeds the card's 16\,GB of VRAM and offloads to the CPU, which makes a turn
+take three to five minutes --- capable, but too slow to drive through a full nine-finding
+session on this host. A card with more memory would remove the limit; it is a property
+of the hardware, not the model.)
+
+\paragraph{The frontier model was accurate and still cleared a live finding.}
+\label{par:eval-ssti}
+The autonomous \texttt{claude-sonnet} row is the most telling. On eight of the nine
+findings it was not merely correct but efficient --- one to six commands each,
+composing every multi-step chain itself, including the IDOR and privilege-escalation
+chains the local models could not drive. Then, on the ninth, it marked the
+server-side template injection \emph{fixed}. Its recorded rationale is worth quoting,
+because it is a textbook instance of the failure the whole design targets: it posted
+three payloads, observed that ``all three were stored and echoed back as inert literal
+text \dots with no expression evaluation'', and concluded that ``the reported SSTI
+\dots does not reproduce''. The vulnerability is present; it simply is not triggerable
+through the profile flow over plain HTTP (the same boundary the guided runs hedged on).
+A capable model, told to decide, read ``I cannot make it fire from here'' as ``it is
+gone''. The guided runs faced exactly this evidence on the same finding and recorded
+\emph{inconclusive}, because the human declined to convert an un-reproduced finding
+into a clearance. Capability did not prevent the dangerous error; the gate did.
+
+A guided \texttt{claude-sonnet} row is not tabulated separately, and the omission is
+deliberate rather than a gap. What a guided run measures is the human-plus-model pair,
+and its verdict is the operator's: on the eight confirmable findings the frontier model
+produces the same evidence it produced autonomously and the operator confirms
+\emph{still-open}, and on the template injection the operator records the same
+\emph{inconclusive} the local guided runs did, on the same reasoning that produced it
+there --- an un-reproduced finding is not a clearance. The guided frontier result is
+therefore eight confirmed and one safe hedge, zero wrong, by the same operator contract
+that governed every other guided row; running it would restate the contract, not test
+it. The one thing worth stating plainly is the contrast the table already shows: the
+\emph{only} false clearance the frontier model produced, it produced with the gate
+removed.
+
 \section{Threats to validity}
 \label{sec:eval-threats}
 
@@ -341,6 +473,22 @@ the intended workflow (FR-04) but does inject operator knowledge; and some findi
 HTTP without a browser, which pushes the honest verdict toward \emph{inconclusive}
 rather than a confident call.
 
+The cross-model study of Section~\ref{sec:eval-crossmodel} shares these limits and adds
+its own, which qualify how far its results reach. \emph{One run per cell:} each backend
+was run once per mode, so the individual counts are samples, not means --- the study
+establishes that autonomous mode \emph{can and does} clear live findings and that the
+gate \emph{did not}, not a precise rate for either. That the false clearances are
+non-deterministic (the 9\,B cleared CORS in one autonomous run and not the next) is
+itself part of the finding, but it also means a single clean autonomous run is no
+evidence of safety. \emph{Operator subjectivity:} the guided rows are a human-plus-model
+pair, and the human here was the system's author; a different operator would steer
+differently, so ``operator effort'' is a qualitative observation, not a measured
+quantity. \emph{Coverage:} the 27\,B guided row is partial (host-limited), and the
+frontier model was run autonomously but not, separately, under the gate --- its guided
+result is argued from the operator contract rather than measured. None of these
+weakens the central contrast, which is categorical rather than quantitative: zero false
+clearances under the gate, at least one under every autonomous condition.
+
 \emph{Reproducibility of these figures.} It is worth being exact about what a reader
 can recheck, because the chapter claims a measured result. What survives of the
 twelve-finding study is its input --- the report, and the manual-entry payload the
@@ -357,26 +505,28 @@ the system already knows how to produce, is the cheap fix and it was not done he
 \section{Discussion}
 \label{sec:eval-discussion}
 
-Four things follow from this study. \emph{The pipeline works
+Four things follow from these studies. \emph{The pipeline works
 end to end}: a real report drove extraction, goal-drafting, a gated agentic retest and
 an evidence-backed verdict, scored automatically by the FR-15 harness --- O4's
-apparatus is real and reproducible, not a plan. \emph{The safety contract held}:
-across twelve findings on a small local model the system never once issued the
-dangerous false ``fixed'', the single property a revalidation tool must have to be
-trusted at a compliance gate, and it defended that property by hedging on the four
-cases it could not confirm rather than guessing. \emph{The accuracy is
-backend-bound}: at 67\% correct it fell just short of the NFR-01 bar, entirely on safe
-hedges, and both the threats to validity and the run's own behaviour --- a small model
-straining on a multi-step chain, an HTTP retest blind to browser execution --- point
-to the same two levers, a stronger reasoning model and browser-based verification,
-that the future work of Chapter~\ref{ch:conclusions} takes up. And \emph{the gate is
-close to free}: on the nine findings run both ways on the same backend, removing the
+apparatus is real and reproducible, not a plan. \emph{The safety contract is a property
+of the gate, not of the model}: this is the cross-model study's central result and the
+strongest evidence in the dissertation for the design's core claim. Under the
+per-command human gate, no model --- from the 9\,B to the frontier one --- ever issued
+a false \emph{``fixed''}; with the gate removed, \emph{every} model did, the frontier
+model included, clearing a live vulnerability it could not reproduce over HTTP. A
+dangerous false clearance is therefore not a weak-model defect that a better model
+outgrows; it is what an agent does when it is made to reach a verdict alone, and the
+gate is what prevents it regardless of the model behind it. \emph{Capability, under the
+gate, is a matter of effort rather than of safety}: the weaker the model, the more of
+the multi-step work the operator had to do by hand, but the verdicts and the zero
+false clearances came out the same --- which is precisely what licenses running a
+smaller, more private local model (Section~\ref{subsec:eval-local}). And \emph{the gate
+is close to free}: on the nine findings run both ways on the same backend, removing the
 per-command approval saved under three minutes in thirty, because the cost of a retest
-is the model's per-step latency rather than the human round-trip. The summary is a tool
-already trustworthy in the direction that matters and measurably improvable in the
-direction that is not: the safety contract is a property of the design, and holds on
-whatever backend is loaded at no meaningful cost in time, while the accuracy is a
-property of the model behind it and rises with a stronger one.
+is the model's per-step latency rather than the human round-trip. Cheap and
+load-bearing at once: the honest reading is that the gate should stay on by default,
+because what it costs is negligible and what it prevents --- shown here across the whole
+capability spectrum --- is the one error the tool must never make.
 
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}
