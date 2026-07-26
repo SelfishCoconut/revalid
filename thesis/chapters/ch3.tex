@@ -261,8 +261,9 @@ layout-aware renderer was preferred over a plain text extractor because the
 multi-column, table-heavy layout of real reports otherwise scrambles the very
 reproduction steps the model must read. That Markdown is the single input the model
 structures into findings in one call --- there is no heading segmentation ahead of
-it. \texttt{PyMuPDF} is AGPL-licensed; the copyleft is compatible with this local,
-single-operator tool whose source is already public (ADR-0008, ADR-0047).
+it. \texttt{PyMuPDF4LLM} and its \texttt{PyMuPDF} core are AGPL-licensed, so revalid
+itself is released under the GNU~Affero~GPL~v3-or-later; the copyleft is immaterial for
+a local, single-operator tool whose source is already public (ADR-0008, ADR-0047).
 
 \paragraph{The language-model layer.} The heart of the system is Pydantic~AI, a
 model-agnostic framework for building tool-using language-model agents with typed,

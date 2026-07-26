@@ -3,7 +3,7 @@ name = "revalid"
 version = "1.0.0"
 description = "AI-Driven System for the Revalidation of Pentest Findings (TFG, ESII-UCLM)"
 readme = "README.md"
-license = "Beerware"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Álvaro Navarro", email = "alvaronavaqui@proton.me" }]
 requires-python = ">=3.12"
