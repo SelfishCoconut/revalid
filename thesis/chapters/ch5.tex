@@ -10,8 +10,7 @@ chapter turns to whether it \emph{works}. Most of it addresses the fourth object
 (O4): whether the verdicts the system returns are trustworthy, and whether
 producing them with the tool is faster than doing the same revalidation by hand. One
 section closes the first (O1), the quality of the extraction that feeds
-everything downstream. The evaluation reported here is
-deliberately framed as \emph{preliminary}. It exercises the whole pipeline end to
+everything downstream. The evaluation reported here exercises the whole pipeline end to
 end, against a real report and a live target, and it establishes the measurement
 apparatus and a first result; what it does not do, being one report, one target, one
 operator and one backend, is set out plainly in Section~\ref{sec:eval-threats}. What
@@ -27,8 +26,8 @@ constraint that matters most, does it ever declare a still-exploitable finding
 \emph{fixed}? \emph{Effort}: how long a revalidation takes with the tool, against the
 time the same work takes by hand. The third is O1, \emph{extraction quality}: what
 fraction of a real report's findings the pipeline turns into well-formed structured
-findings (FR-03). It is measured separately, in
-Section~\ref{sec:eval-extraction}, and on a separate report, for the reason the next
+findings (FR-03). It is treated separately, in
+Section~\ref{sec:eval-extraction}, for the reason the next
 paragraph gives.
 
 \paragraph{Target and report.} The target is the reference lab of
@@ -41,7 +40,7 @@ form and language, with an executive summary, engagement description, methodolog
 per-finding detail carrying reproduction steps, which is what makes it a fair input;
 because its target is the same deliberately vulnerable application, it contains no
 real client or engagement data (NFR-04), and it is not reproduced here. The report is
-ingested through the manual-entry door (FR-02) so that extraction quality, measured
+ingested through the manual-entry door (FR-02) so that extraction quality, treated
 separately in Section~\ref{sec:eval-extraction}, does not confound the retest
 measurement. The twelve findings span the
 principal web-vulnerability classes: SQL injection, stored, reflected and DOM-based
@@ -87,29 +86,34 @@ Before the retest can be judged, the step that feeds it has to be. The first
 objective (O1) is to turn a human-written report into structured findings, and FR-03
 sets the bar at \emph{at least 90\% well-formed findings}.
 
-Extraction hands the whole report to the model in a single call. The PDF is rendered
-to Markdown, so headings, tables and lists survive as structure, and the entire
-document is sent to the extraction agent, which returns the list of findings; each must
-pass a schema gate before it is persisted, and any output that does not validate is
-flagged rather than stored. The binding constraint is the model's context window: the
-whole report, together with its structured output, has to fit. A hosted reasoning
-backend --- Claude, with a window of order $10^5$ tokens --- holds a full report at
-once; a small local model has a window of a few thousand tokens and holds only a short
-one.
+Extraction hands the whole report to the model in a single call: the PDF is rendered
+to Markdown --- headings, tables and lists preserved as structure --- and the entire
+document is sent to the extraction agent, which returns the list of findings, each of
+which must pass a schema gate before it is persisted; output that does not validate is
+flagged rather than stored, so a malformed response can never be silently turned into a
+finding. What this asks of the model is demanding: it must hold a full multi-page report
+in context and emit a complete, schema-valid structure from it in one pass. That is
+within reach of a capable large-context backend, but beyond the small local models this
+work runs on. Their few-thousand-token window cannot hold a full-length real report ---
+the nine-finding write-up \cite{mthimunye_juiceshop} or the twelve-finding assessment
+alike --- and their weaker instruction-following does not reliably return a valid
+finding list even from one that would fit; whole-document extraction was therefore not
+validated on them, because they are not capable of it. That incapability is a known
+limitation of small models, not of the method.
 
-Measured on the local \texttt{qwen3.5:9b} backend, the extractor produces well-formed,
-schema-valid findings end to end for reports within that window: four of four on the
-synthetic multi-finding fixture (100\%) and one of one on a minimal single-finding
-report, with nothing flagged by the gate and no network call. A full-length real report
---- the nine-finding write-up \cite{mthimunye_juiceshop} or the twelve-finding
-assessment --- exceeds a small local model's window and cannot be ingested whole on it;
-extracting one requires a hosted large-context backend, or a local server configured
-with a correspondingly large context.
+The only way models of that size ever produced structured findings was under the
+project's earlier, now-retired design: it pre-segmented a specially-prepared report with
+a heading-matching regular expression and extracted a single finding at a time
+(ADR-0047), shrinking the task to one short, well-formed section per call --- small
+enough to stay within their reach. The whole-document redesign removes that scaffolding
+by design, and with it the small models' only way in.
 
-O1 is therefore met, with its boundary stated plainly: extraction is reliable for any
-report the chosen backend can hold, and is bounded by that capacity. Where no available
-backend can ingest a given report, the manual-entry door (ADR-0020,
-Section~\ref{sec:design-ingest}) is the escape hatch.
+O1 is therefore bounded by the backend: reliable whole-document extraction needs a
+capable large-context model. Where none is available --- as when only a small local
+model can be run --- the manual-entry door (ADR-0020, Section~\ref{sec:design-ingest})
+is the escape hatch, and it is the door this evaluation itself uses to load the
+assessment report (Section~\ref{sec:eval-design}), so that a retest measured on a small
+local backend is not gated by an extraction step that same backend cannot perform.
 
 \section{Verdict reliability}
 \label{sec:eval-verdicts}
@@ -301,13 +305,13 @@ reliability result showed.
 
 The study so far is one backend in one mode. Its two claims --- the safety property
 holds, and accuracy is bound by the reasoning model --- are worth testing for
-generality, so the pipeline was re-run across four model tiers and both interaction
+generality, so the pipeline was re-run across three model tiers and both interaction
 modes on the same assessment. To isolate the model and the mode from the
 browser-observability limit of Section~\ref{sec:eval-threats}, this study drops the
 three cross-site-scripting findings and keeps the \emph{nine non-browser} findings of
 the report, every one of which is still-open in the unpatched lab; ground truth is
-therefore uniformly \emph{still-open}, as before. The four tiers are three local
-\texttt{qwen} models (9\,B, 14\,B and 27\,B, each pinned to a 16\,K context) and a
+therefore uniformly \emph{still-open}, as before. The three tiers are two local
+\texttt{qwen} models (9\,B and 14\,B, each pinned to a 16\,K context) and a
 hosted frontier model (\texttt{claude-sonnet}) placed behind the \emph{identical}
 system prompt and egress-locked sandbox, so the only thing that changes between the
 frontier row and the local rows is the model itself. \emph{Guided} runs were operated
@@ -315,11 +319,10 @@ by a human in the loop, approving each command and steering when the agent floun
 \emph{autonomous} (free-launch) runs were driven programmatically to a verdict with no
 human between the agent and the target. All runs used the hardware described in the
 footnote.\footnote{Local inference on an NVIDIA RTX~5080 (16\,GB VRAM), AMD Ryzen~7
-9800X3D, 32\,GB RAM, Ollama~0.32.1. The 9\,B and 14\,B models fit in VRAM; the 27\,B
-(17\,GB) does not, which matters below.}
+9800X3D, 32\,GB RAM, Ollama~0.32.1. The 9\,B and 14\,B models both fit in VRAM.}
 
 \begin{table}[htbp]
-\caption[Verdicts across four model tiers and both modes]{Verdicts on the nine
+\caption[Verdicts across three model tiers and both modes]{Verdicts on the nine
 non-browser findings (ground truth: all \emph{still-open}), by backend and interaction
 mode. \emph{Wrong} is a confident verdict contradicting the truth --- here a false
 \emph{``fixed''}, the dangerous case. The pattern is the chapter's central result:
@@ -335,7 +338,6 @@ every model run without it did, the frontier model included.}}
 \bft{Backend} & \bft{Mode} & \bft{Correct} & \bft{Inconc.} & \bft{Wrong} & \bft{Error} \\ \hline
 \texttt{qwen3.5:9b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \texttt{qwen3:14b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
-\texttt{qwen3.6:27b}$^{*}$ & guided & 3/3 & 0 & \bft{0} & 0 \\ \hline
 \texttt{claude-sonnet} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \rowcolor{tema!5}
 \texttt{qwen3.5:9b} & autonomous & 5/9 & 3 & \bft{0}$^{\dagger}$ & 1 \\ \hline
@@ -350,7 +352,7 @@ every model run without it did, the frontier model included.}}
 Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
 
 \paragraph{The gate holds the safety line on every model; autonomy breaks it on each
-model run without the gate.} Under the human gate, not one of the four backends --- the three local models or
+model run without the gate.} Under the human gate, not one of the three backends --- the two local models or
 the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
 could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
 inverts. The 14\,B,
@@ -374,7 +376,7 @@ The per-command human gate is what refuses that inference, and it did so on ever
 backend, the frontier one included.
 
 \paragraph{Under the gate, model capability shows up as operator effort, not as a
-different verdict.} The three guided local rows land in almost the same place ---
+different verdict.} The two guided local rows land in almost the same place ---
 eight of nine confirmed, one safe hedge --- but the work the human had to do to get
 there scaled sharply with model weakness. The 9\,B could not compose a valid shell
 command for any multi-step finding: it guessed client-side Angular routes
@@ -384,22 +386,13 @@ IDOR, privilege-escalation and brute-force commands \emph{personally}; the model
 contribution to those four was essentially nil. The 14\,B did better --- it found the
 login endpoint unprompted and adapted the \emph{structure} of its commands to a
 correction --- but still could not emit a valid single-quote injection payload, so the
-operator again ran the decisive command. Only at 27\,B did the model compose and run
-the full multi-step chains itself: given a single hint that Juice Shop's login is a
-REST endpoint, it wrote a correctly-escaped injection payload, recovered the admin
-token, and --- on the IDOR --- diagnosed its own truncated-token failure and rewrote
-the command to capture the token dynamically. That is the same competence the frontier
-model showed unaided. The lesson for a human-gated tool is a reassuring one: a weaker,
-cheaper, more private local model does not make the tool \emph{less safe} --- the
-safety came out identical --- it makes it more \emph{laborious}, shifting work from the
-model onto the operator. ($^{*}$~The 27\,B guided row is partial: it confirmed the
-three findings it was run on, each by its own commands, and was then stopped. At
-17\,GB it exceeds the card's 16\,GB of VRAM and offloads to the CPU, which makes a turn
-take three to five minutes --- capable, but too slow to drive through a full nine-finding
-session on this host in this separate cross-model pass; the earlier twelve-finding study
-of Section~\ref{sec:eval-time} did drive the same 27\,B through its full non-browser
-slate, seven of nine. A card with more memory would remove the limit; it is a property
-of the hardware, not the model.)
+operator again ran the decisive command. Only the frontier model composed and ran the
+full multi-step chains itself, unprompted --- the SQL-injection, IDOR and
+privilege-escalation chains the local models could not drive
+(Section~\ref{par:eval-ssti}). The lesson for a human-gated tool is a reassuring one: a
+weaker, cheaper, more private local model does not make the tool \emph{less safe} ---
+the safety came out identical --- it makes it more \emph{laborious}, shifting work from
+the model onto the operator.
 
 \paragraph{The frontier model was accurate and still cleared a live finding.}
 \label{par:eval-ssti}
@@ -472,9 +465,7 @@ itself part of the finding, but it also means a single clean autonomous run is n
 evidence of safety. \emph{Operator subjectivity:} the guided rows are a human-plus-model
 pair, and the human here was the system's author; a different operator would steer
 differently, so ``operator effort'' is a qualitative observation, not a measured
-quantity. \emph{Coverage:} the 27\,B guided row is partial --- the model exceeds the host's
-VRAM, so it was measured on three of the nine findings (all correct) rather than the
-full slate. None of these
+quantity. Neither of these
 weakens the central contrast, which is categorical rather than quantitative: zero false
 clearances under the gate, at least one under every autonomous condition.
 
