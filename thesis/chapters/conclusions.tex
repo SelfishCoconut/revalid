@@ -22,8 +22,11 @@ live target: eight of twelve findings correctly confirmed on a small local model
 hedged, no false clearance on any of them, and a machine time of the same order as a
 manual pass. A wider study across more reports, more targets and repeated runs per
 finding is the direction those figures point; what the cross-model comparison already
-shows is that the safety of the result rests on the human gate rather than on the
-capability of the model behind it. This closing chapter steps back from the artefact
+shows is that the safety of the result rests on the approval gate rather than on the
+capability of the model behind it. That the gate in those runs was exercised
+programmatically rather than by a person is stated where the results are
+(Section~\ref{sec:eval-threats}), and validating it with human operators is the first
+item of the wider study. This closing chapter steps back from the artefact
 to set down what the work \emph{taught}, and how the degree made it possible.
 
 \section{Lessons learned}
@@ -61,6 +64,18 @@ report into something a machine can act on.
 Several directions remain open, from the workflow this tool would slot into, through
 the two capability limits the evaluation exposed, to lifting the single-operator
 scope the work deliberately adopted.
+
+One of them comes first, because the central result rests on it. The evaluation showed
+that a verdict authority separate from the retesting agent refuses the false clearance an
+autonomous agent produces --- but the seat holding that authority was filled
+programmatically and knew the expected verdicts
+(Section~\ref{sec:eval-threats}), whereas the design's claim is that a \emph{person}
+should hold it. Testing that is a human-factors study rather than a software one:
+operators who do not know the answer, working from the agent's evidence and its
+recommendation, measured on how often they accept a confident but unsupported
+\emph{fixed} --- and, in passing, on what the gate costs in a person's time, which this
+evaluation could only bracket. Until it is run, the per-command human gate is a justified
+design choice with its mechanism validated and its human half unmeasured.
 
 \subsection{Closing the loop with automated remediation}
 \label{subsec:future-remediation}

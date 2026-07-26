@@ -60,9 +60,12 @@ open finding and, above all, to avoid the dangerous false ``fixed'', but not its
 ability to recognise a real remediation.
 
 \paragraph{Conditions.} Each finding was revalidated twice: once \emph{with the
-system}, operated in its normal gated mode, in which the operator drafts the retest
-goal from the finding's reproduction steps (FR-04) and then approves or rejects every
-command the agent proposes; and once \emph{manually}, reproducing the finding by hand. The
+system}, in its normal gated mode --- the retest goal drafted from the finding's
+reproduction steps (FR-04), then every command the agent proposes either approved or
+rejected before it runs; and once \emph{manually}, reproducing the finding by hand. The
+operator's seat in every gated run reported in this chapter was filled
+\emph{programmatically} rather than by a person, which is set out in
+Section~\ref{sec:eval-crossmodel} and weighed in Section~\ref{sec:eval-threats}. The
 backend for every machine condition, and therefore for every verdict the system
 \emph{determined}, was the same locally
 hosted model (Ollama, \texttt{qwen3.6:27b}), configured with a 16\,K-token context
@@ -308,16 +311,20 @@ it still could not confirm against the gated run's ten. The extra steps bought n
 confirmation, which is why the two rows land within three minutes of each other in
 wall-clock: more exploring, no more resolved.
 
-That inverts the trade one expects. Here the per-command human gate is close to free in
-wall-clock: surrendering it bought a single extra confirmation and no time, while the
-control it provides --- a person approving every command that touches the target ---
-costs almost nothing to keep. The lever that does move wall-clock is the reasoning
-backend, not the gate, so the place to spend for speed is a stronger model rather than a
-weaker safety contract. And on the four findings the tool cannot yet decide it still
-defers to the human rather than guessing, which is the same conservative contract the
-reliability result showed.
+That inverts the trade one expects. Surrendering the gate bought no time and cost a
+confirmation, so on these runs the gate was not a tax on speed at all. Two cautions belong
+with that reading. The first is that the approvals here were issued programmatically
+(Section~\ref{sec:eval-crossmodel}), so what the comparison prices is the gate's
+\emph{mechanical} cost --- the approve-and-continue round trip --- and not the seconds or
+minutes a person spends reading a command before allowing it, which these figures do not
+capture. The second is that one run per condition cannot separate a three-minute gap from
+noise. What survives both is the direction: the lever that moves wall-clock is the
+reasoning backend, not the gate, so the place to spend for speed is a stronger model
+rather than a weaker safety contract. And on the four findings the tool cannot yet decide,
+it defers rather than guessing, which is the same conservative contract the reliability
+result showed.
 
-\section{Across models and modes: the human gate and the cost of autonomy}
+\section{Across models and modes: the approval gate and the cost of autonomy}
 \label{sec:eval-crossmodel}
 
 The study so far is one backend in one mode. Its two claims --- the safety property
@@ -331,10 +338,18 @@ therefore uniformly \emph{still-open}, as before. The three tiers are two local
 \texttt{qwen} models (9\,B and 14\,B, each pinned to a 16\,K context) and a
 hosted frontier model (\texttt{claude-sonnet}) placed behind the \emph{identical}
 system prompt and egress-locked sandbox, so the only thing that changes between the
-frontier row and the local rows is the model itself. \emph{Guided} runs were operated
-by a human in the loop, approving each command and steering when the agent floundered;
-\emph{autonomous} (free-launch) runs were driven programmatically to a verdict with no
-human between the agent and the target. All runs used the hardware described in the
+frontier row and the local rows is the model itself.
+
+The operator role needs stating precisely, because it bounds what the results mean.
+\emph{Guided} runs were exercised \emph{programmatically}: an AI coding assistant, driving
+the same \texttt{/api} endpoints the interface uses, occupied the operator's seat ---
+approving each command, supplying commands of its own where the model under test could not
+compose a working one, recording each verdict --- and it held the expected verdicts
+throughout. \emph{Autonomous} (free-launch) runs removed that seat and let the agent drive
+itself to a verdict. What separates the two modes is therefore not a \emph{human} but a
+\emph{second party} holding the authority to approve and to conclude; the gate as the
+system ships it is a human control, and this study did not test it with a person in the
+seat (Section~\ref{sec:eval-threats}). All runs used the hardware described in the
 footnote.\footnote{Local inference on an NVIDIA RTX~5080 (16\,GB VRAM), AMD Ryzen~7
 9800X3D, 32\,GB RAM, Ollama~0.32.1. The 9\,B and 14\,B models both fit in VRAM.}
 
@@ -349,7 +364,7 @@ database against the committed key
 (\texttt{tests/data/eval/ground\_truth\_assessment.json}), so they are re-derivable from
 stored data; the two hosted rows were recorded from the runs themselves. The pattern is
 the chapter's central result:
-\textbf{under the human gate no backend issued a false clearance; without it, three of
+\textbf{under the approval gate no backend issued a false clearance; without it, three of
 the four backends run autonomously did --- the frontier model included.}}
 \label{tab:eval-crossmodel}
 \footnotesize
@@ -375,7 +390,7 @@ the four backends run autonomously did --- the frontier model included.}}
 Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
 
 \paragraph{The gate holds the safety line on every model; autonomy breaks it on three of
-the four run without it.} Under the human gate, not one of the four backends --- the three local models or
+the four run without it.} Under the approval gate, not one of the four backends --- the three local models or
 the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
 could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
 inverts. The 14\,B,
@@ -400,36 +415,42 @@ clearance is a weak-model failure. It is not. It is a failure of \emph{autonomy}
 agent instructed to reach a verdict on its own resolves ``I could not reproduce it''
 as ``it is fixed'', because --- exactly as Section~\ref{sec:design-retest} argued ---
 failing to reproduce a vulnerability looks identical to the vulnerability being gone.
-The per-command human gate is what refuses that inference, and it did so on every
-backend, the frontier one included.
+The per-command gate is what refuses that inference, and it did so on every
+backend, the frontier one included --- though, as the operator's seat here was filled
+programmatically, what these runs establish is that \emph{a separate verdict authority}
+refuses it, not that a human does.
 
 \paragraph{Under the gate, model capability shows up as operator effort and as hedging,
 never as a false clearance.} The two guided local rows do not land in the same place ---
 the 9\,B confirmed eight findings of nine, the 14\,B six --- but they differ in how often
 each \emph{declined} to call a finding, not in whether either cleared a live one: both
 hedged where they could not confirm, and neither issued a false \emph{``fixed''}. What
-scaled sharply with model weakness was the work the human had to do. The 9\,B could not compose a valid shell
+scaled sharply with model weakness was the work the operator's seat had to absorb. The 9\,B could not compose a valid shell
 command for any multi-step finding: it guessed client-side Angular routes
 (\texttt{/\#/login}) instead of the REST API, and mangled shell quoting on every JSON
-payload even after explicit correction, so the operator had to run the SQL-injection,
-IDOR, privilege-escalation and brute-force commands \emph{personally}; the model's
-contribution to those four was essentially nil. The 14\,B needed less help --- it found the
+payload even after explicit correction, so the SQL-injection,
+IDOR, privilege-escalation and brute-force commands were supplied from the operator's
+side instead; the model under test contributed essentially nothing to those four. The 14\,B needed less help --- it found the
 login endpoint unprompted and adapted the \emph{structure} of its commands to a
 correction --- but still could not emit a valid single-quote injection payload, so the
-operator again ran the decisive command. Only the frontier model composed and ran the
+decisive command was again supplied for it. Only the frontier model composed and ran the
 full multi-step chains itself, unprompted --- the SQL-injection, IDOR and
 privilege-escalation chains the local models could not drive
 (Section~\ref{par:eval-ssti}).
 
 That the weaker model scored \emph{higher} follows from the same fact and is worth
-stating rather than smoothing over: where the 9\,B could compose nothing, the operator
-supplied the command, and a supplied command confirms the finding. Under a per-command
-gate the \emph{correct} column therefore measures the operator and the model together,
-not the model alone --- which is why the safety column, where the two rows agree exactly,
-carries the weight here and the accuracy column does not. The lesson for a human-gated
-tool is nonetheless a reassuring one: a weaker, cheaper, more private local model does
+stating rather than smoothing over: where the 9\,B could compose nothing, the command was
+supplied for it, and a supplied command confirms the finding. Under a per-command
+gate the \emph{correct} column therefore measures the pair --- whoever fills the operator's
+seat, and the model --- not the model alone, which is why the safety column, where the two
+rows agree exactly, carries the weight here and the accuracy column does not. The lesson
+for a gated
+tool is nonetheless a useful one: a weaker, cheaper, more private local model does
 not make the tool \emph{less safe} --- the safety came out identical --- it makes it more
-\emph{laborious}, shifting work from the model onto the operator.
+\emph{laborious}, shifting work off the model and onto whoever holds the gate. In
+deployment that is a person, and the labour is theirs; here it was the scripted operator,
+which is why this row measures the shift in workload rather than what a human would have
+made of it.
 
 \paragraph{The frontier model was accurate and still cleared a live finding.}
 \label{par:eval-ssti}
@@ -445,26 +466,35 @@ text \dots with no expression evaluation'', and concluded that ``the reported SS
 through the profile flow over plain HTTP (the same boundary the guided runs hedged on).
 A capable model, told to decide, read ``I cannot make it fire from here'' as ``it is
 gone''. The guided runs faced exactly this evidence on the same finding and recorded
-\emph{inconclusive}, because the human declined to convert an un-reproduced finding
-into a clearance. Capability did not prevent the dangerous error; the gate did.
+\emph{inconclusive} instead. Capability did not prevent the dangerous error; the gate did.
 
 The guided \texttt{claude-sonnet} row is the same experiment run once more with the gate
-back in place, and it is the cleanest illustration in the chapter of what the gate
-actually does. The frontier model, driven by the same operator contract as every other
-guided row --- the model gathers evidence and \emph{recommends}, the human records the
-verdict --- confirmed the eight findings it could reproduce and, on the template
-injection, was overruled. There the model reached exactly the conclusion it had reached
-autonomously --- on the same reflected-but-unevaluated evidence it recommended
-\emph{fixed}, marking itself \emph{confident}. The
-operator declined the recommendation and recorded \emph{inconclusive} instead, on the
-one ground the autonomous run had no one to supply --- that a finding which cannot be
-made to fire over HTTP is un-reproduced, not repaired. The same model, on the same
-finding, with the same evidence, produced a false clearance alone and a safe hedge under
-the gate. That single override is the whole thesis of the design in miniature: the gate's
-contribution is not a better command or a cleverer probe --- the frontier model needed
-no help finding or running those --- but the one judgement an agent instructed to reach a
-verdict cannot be trusted to make, that ``I could not reproduce it'' is not ``it is
-gone''.
+back in place, and it is the sharpest illustration in the chapter of what the gate
+actually does --- with one qualification, stated here rather than buried in the threats,
+because it changes what the illustration proves. The frontier model, under the same
+operator contract as every other guided row --- the model gathers evidence and
+\emph{recommends}, the operator's seat records the verdict --- confirmed the eight
+findings it could reproduce and, on the template injection, was overruled. There it
+reached exactly the conclusion it had reached autonomously: on the same
+reflected-but-unevaluated evidence it recommended \emph{fixed}, marking itself
+\emph{confident}. The recommendation was declined and \emph{inconclusive} recorded
+instead, on the one ground the autonomous run had nobody to supply --- that a finding
+which cannot be made to fire over HTTP is un-reproduced, not repaired. The same model, on
+the same finding, with the same evidence, produced a false clearance when it decided
+alone and a safe hedge when a second party decided.
+
+The qualification is that the second party was not a person: it was the scripted
+operator, and it knew the expected verdict. The override therefore demonstrates something
+narrower than a human catching a machine, and something still worth having --- that
+\emph{separating the authority to conclude from the agent that gathered the evidence}
+changes the recorded outcome, on the exact finding where it matters. It does not
+demonstrate that an operator reading that rationale cold, without the answer in hand,
+would have declined it; the model's argument was articulate and confidently made. The
+design's contribution is unchanged in kind: not a better command or a cleverer probe ---
+the frontier model needed no help finding or running those --- but the one judgement an
+agent instructed to reach a verdict cannot be trusted to make, that ``I could not
+reproduce it'' is not ``it is gone''. That placing the judgement outside the agent works,
+this chapter establishes; how well a person holds it, it does not.
 
 \section{Threats to validity}
 \label{sec:eval-threats}
@@ -501,17 +531,22 @@ establishes that autonomous mode \emph{can and does} clear live findings and tha
 gate \emph{did not}, not a precise rate for either. That the false clearances are
 non-deterministic (the 9\,B cleared CORS in one autonomous run and not the next) is
 itself part of the finding, but it also means a single clean autonomous run is no
-evidence of safety. \emph{Operator subjectivity:} the guided rows are a human-plus-model
-pair, and the human here was the system's author; a different operator would steer
-differently, so ``operator effort'' is a qualitative observation, not a measured
-quantity. That same operator had also established the ground truth beforehand, by the
-manual pass of Section~\ref{sec:eval-design}, so every refusal the gate records was made
-in knowledge of the expected answer --- an advantage a real retest, where nobody knows
-whether the finding was fixed, does not have. What the guided rows demonstrate is
-therefore that the gate \emph{gives a human the place to refuse}, not that an
-uninformed operator would refuse correctly. Neither of these
-weakens the central contrast, which is categorical rather than quantitative: zero false
-clearances under the gate, at least one under three of the four autonomous conditions.
+evidence of safety. \emph{The gate was not exercised by a human:} this is the study's
+sharpest limitation, and it belongs to the evaluation rather than to the system, which
+ships the gate as a human control (FR-05, FR-17). The operator's seat was filled
+programmatically throughout (Section~\ref{sec:eval-crossmodel}), and it held the expected
+verdicts, established beforehand by the manual pass of Section~\ref{sec:eval-design}. Two
+consequences follow. Every refusal the gate records was made in knowledge of the expected
+answer, an advantage no real retest has; and ``operator effort'' describes work that moved
+into the operator's seat, not a measurement of human labour, since a person reads,
+hesitates and tires in ways a script does not. So what these rows establish is that a
+\emph{verdict authority separate from the retesting agent} refuses the inference an
+autonomous agent makes --- whether a \emph{person} in that seat, without the answer in
+hand, refuses it as reliably is untested here, and is the first thing a wider study should
+measure. Neither limitation dissolves the central contrast, which is categorical rather
+than quantitative --- zero false clearances recorded under the gate, at least one under
+three of the four autonomous conditions --- but the second changes what that contrast is
+evidence \emph{about}.
 
 \emph{Reproducibility of these figures.} It is worth being exact about what a reader
 can recheck, because the chapter claims a measured result. What survives of the
@@ -548,12 +583,16 @@ model (Section~\ref{sec:eval-crossmodel}): under the per-command gate no backend
 the 9\,B to the frontier issued a false \emph{``fixed''}, while three of the four run
 without it cleared a live finding they could not reproduce. That reframes what a stronger
 model buys.
-Under the gate, capability is a matter of \emph{operator effort}, not of safety --- a
-weaker local model shifts the multi-step work onto the human and declines more findings,
-but it never clears a live one, which is what licenses the local option
+Under the gate, capability is a matter of \emph{effort}, not of safety --- a
+weaker local model shifts the multi-step work onto whoever holds the gate and declines
+more findings, but it never clears a live one, which is what licenses the local option
 (Section~\ref{subsec:eval-local}); and
 it is the reasoning backend, not the gate, that moves wall-clock, since removing the
-gate saved under three minutes in thirty. Cheap and load-bearing at once, the gate is
+gate saved under three minutes in thirty. One boundary belongs with all of this: the seat
+that held the gate in these runs was filled programmatically and knew the expected
+verdicts (Section~\ref{sec:eval-threats}), so what is established is the value of placing
+the verdict outside the retesting agent, not yet the reliability of a person in that seat.
+Cheap and load-bearing at once, the gate is
 the part of the contract that should stay on by default: it costs almost nothing and
 prevents, across the whole capability range, the single error the tool must never make.
 

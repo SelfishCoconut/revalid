@@ -658,11 +658,21 @@ the author's direction and subject to the author's review:
   project roadmap.
 \item \emph{Thesis writing assistance}: drafting and editing chapters, including
   verifying that every cited reference resolves to a real source.
+\item \emph{Execution of the evaluation}: driving the retest runs reported in
+  Chapter~\ref{ch:evaluation} through the application's own \texttt{/api} endpoints.
+  In the gated runs the assistant occupied the operator's seat --- approving each
+  command the retest agent proposed, supplying commands of its own where the model
+  under test could not compose a working one, and recording each verdict --- and it
+  computed the reported metrics. What this means for how those results should be read
+  is set out where they are reported (Sections~\ref{sec:eval-crossmodel}
+  and~\ref{sec:eval-threats}): the runs measure a verdict authority separate from the
+  retesting agent, not a human operator exercising the gate.
 \end{itemize}
 
 \paragraph{Affected areas.} In the repository, assistance touched the backend and
 front-end source, the test suites, the ADRs and requirements, the documentation and
-CI configuration, and the assistant's own skills, agents and hooks. In this
+CI configuration, the assistant's own skills, agents and hooks, and the execution of
+the evaluation runs. In this
 dissertation, the chapters listed above were drafted with assistance; all were
 reviewed, corrected and approved by the author.
 
