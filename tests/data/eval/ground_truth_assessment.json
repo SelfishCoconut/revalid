@@ -1,0 +1,60 @@
+{
+  "target": "OWASP Juice Shop v17.1.1 (lab, unpatched)",
+  "source_report": "Hack & Fix — Juice Shop Web Application Security Assessment (12 findings, sample deliverable for a fictitious client; kept local)",
+  "findings": [
+    {
+      "finding": "Application is vulnerable to SQL Injection",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The login form passes the email field into an unparameterised SQL string in v17.1.1, so `' OR 1=1--` returns the administrator's JWT. Present by construction in the pinned image, so still_open."
+    },
+    {
+      "finding": "Exposure of Sensitive Information to an Unauthorized Actor",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The /ftp static route is served with directory listing and no auth guard in the pinned image (acquisitions.md et al. exposed by design), so still_open."
+    },
+    {
+      "finding": "Application is vulnerable to Server-Side Template Injection (SSTI)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The profile username field is rendered through a server-side template in v17.1.1; the SSTI challenge is present and unpatched, so still_open. Note this one is only partially decidable over HTTP — evaluation of the expression is visible in the rendered response but the retest may reasonably hedge."
+    },
+    {
+      "finding": "Privilege Escalation: Users can modify their permissions",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "POST /api/Users accepts a client-supplied `role` field in the pinned image, so a registered user can create an admin account. Mass-assignment is unchanged in v17.1.1, so still_open."
+    },
+    {
+      "finding": "Insecure Direct Object References: Users can access other user's data (IDOR)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "GET /rest/basket/{id} still returns another user's basket in v17.1.1 (the 'view another basket' challenge); the missing object-level authorization is present, so still_open."
+    },
+    {
+      "finding": "Brute-Force: Login page is vulnerable to password-guessing attacks",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The login endpoint has no lockout or rate limit in the pinned image, so repeated password guesses are accepted indefinitely. still_open."
+    },
+    {
+      "finding": "Weak password requirements",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "Registration accepts trivial passwords (no length, complexity or breach check) in v17.1.1, so still_open."
+    },
+    {
+      "finding": "Outdated JavaScript Libraries",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "The pinned image ships the same vendored front-end bundle with known-vulnerable library versions; nothing in v17.1.1 upgrades them, so still_open."
+    },
+    {
+      "finding": "Cross-origin resource sharing overly permissive (CORS)",
+      "expected": "still_open",
+      "ambiguous": false,
+      "note": "Responses carry `Access-Control-Allow-Origin: *` in the pinned image, readable directly from the response headers, so still_open."
+    }
+  ]
+}

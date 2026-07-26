@@ -203,10 +203,10 @@ stateDiagram-v2
     [*] --> working: launch
     [*] --> idle: deferred / Restart
 
-    idle --> working: Start
+    idle --> working: Start / message
 
-    working --> awaiting_command: proposes a command
-    awaiting_command --> working: approve / reject / message
+    working --> awaiting_command: proposes command
+    awaiting_command --> working: approve / reject / msg
 
     working --> awaiting_operator: agent hands back
     awaiting_operator --> working: operator replies
@@ -215,12 +215,8 @@ stateDiagram-v2
     working --> stopped: Stop
     stopped --> working: Resume
 
-    awaiting_operator --> concluded: operator concludes
-    awaiting_command --> concluded: operator concludes
-    stopped --> concluded: operator concludes
-    working --> concluded: operator concludes (any live state, ADR-0046)
+    working --> concluded: operator concludes (any state)
 
-    working --> working: Restart
     working --> error: unhandled failure
     working --> ended: operator ends it
 

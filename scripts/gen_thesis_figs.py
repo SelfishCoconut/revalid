@@ -78,7 +78,14 @@ MERMAID_CONFIG = {
     # labels illegible. Wrapping long labels trades width for height, which is
     # the dimension a page has to spare, and keeps the type readable once the
     # figure is scaled to \textwidth.
-    "flowchart": {"useMaxWidth": False, "wrappingWidth": 165},
+    # subGraphTitleMargin lifts each subgraph's title clear of its top row of
+    # nodes; without it Mermaid renders the label overlapping the first node
+    # (e.g. "shared core" printed over settings.py in the component view).
+    "flowchart": {
+        "useMaxWidth": False,
+        "wrappingWidth": 165,
+        "subGraphTitleMargin": {"top": 10, "bottom": 12},
+    },
     "sequence": {"useMaxWidth": False, "width": 160, "wrap": True},
     "er": {"useMaxWidth": False},
     "class": {"useMaxWidth": False},
