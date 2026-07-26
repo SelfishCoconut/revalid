@@ -1,11 +1,11 @@
 """LLM extraction of structured findings from report text (FR-03).
 
-Turns the unstructured text/candidates produced by FR-01 (``pdf.py``) into
+Turns the whole-report Markdown produced by FR-01 (``pdf.py``) into
 schema-validated domain :class:`~revalid.domain.Finding` objects using Pydantic
-AI (ADR-0002, ADR-0009). Each FR-01 finding candidate is sent to the model,
-which must return :class:`ExtractedFinding` objects; output that fails schema
-validation is retried by Pydantic AI and, if still invalid, **flagged** as an
-:class:`ExtractionFailure` — never silently mapped to a ``Finding`` or persisted
+AI (ADR-0002, ADR-0047). The entire report is sent to the model in **one** call,
+which must return a list of :class:`ExtractedFinding` objects; output that fails
+schema validation is retried by Pydantic AI and, if still invalid, **flagged** as
+an :class:`ExtractionFailure` — never silently mapped to a ``Finding`` or persisted
 (FR-03's schema-validation gate). The model is injectable so unit tests drive it
 with Pydantic AI's ``TestModel``/``FunctionModel`` and never touch the network;
 when none is passed, the configured backend is used (``REVALID_LLM_MODEL``,
@@ -22,17 +22,30 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import KnownModelName, Model
+from pydantic_ai.settings import ModelSettings
 
 from revalid.domain import CvssCode, Finding, MitreMapping, Severity
 from revalid.llm import agent_model_name, resolve_model
-from revalid.pdf import FindingCandidate, PdfReport, segment_findings
+from revalid.pdf import PdfReport
 
 _MAX_OUTPUT_RETRIES = 2
 
+# The whole document is extracted in one call (ADR-0047), so the model emits every
+# finding at once — a far larger structured response than the old per-candidate
+# call. Without an explicit budget the backend falls back to a tiny provider
+# default and truncates before the tool call is complete (seen live on Ollama:
+# "token limit exceeded before any response was generated"). This is the *output*
+# reservation; a backend must still offer a context window large enough for the
+# report itself (trivial on a hosted model, a configuration knob for local ones).
+_MAX_OUTPUT_TOKENS = 8192
+
 _INSTRUCTIONS = """\
-You extract penetration-test findings from a slice of a report and return them
-as structured data. Extract only findings actually present in the text — never
-invent or embellish. Produce one entry per distinct finding.
+You extract penetration-test findings from the full text of a report and return
+them as structured data. The report is given as Markdown and may wrap the
+findings in a cover page, table of contents, executive summary and appendices;
+read the whole document and return every distinct finding it describes. Extract
+only findings actually present in the text — never invent or embellish. Produce
+one entry per distinct finding.
 
 For each finding set:
 - title: the finding's name.
@@ -200,18 +213,19 @@ def extract_metadata(agent: Agent[None, ReportMetadata], report: PdfReport) -> R
 
 
 class ExtractionFailure(BaseModel):
-    """A candidate whose extraction never validated — flagged, not persisted.
+    """A report whose extraction never validated — flagged, not persisted.
+
+    Extraction is a single whole-document call, so a failure is all-or-nothing:
+    one record stands for the report, not for an individual finding.
 
     Attributes:
-        heading: The source candidate's heading (may be empty).
         error: The reason extraction failed (retries exhausted, etc.).
-        source_text: The candidate text, kept so the failure is auditable and
+        source_text: The report text, kept so the failure is auditable and
             re-runnable.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    heading: str
     error: str
     source_text: str
 
@@ -221,10 +235,11 @@ class ExtractionReport(BaseModel):
 
     Attributes:
         findings: Schema-valid findings, safe to persist.
-        failures: Candidates that failed the validation gate, for review.
+        failures: A single flagged failure when the whole-document call never
+            passed the validation gate; empty otherwise.
         cancelled: Whether extraction stopped early because the operator asked it
-            to (issue #205). ``findings``/``failures`` then hold only the candidates
-            processed before the stop — a partial, still-persistable result.
+            to (issue #205). Extraction is one call, so a cancel yields no
+            findings — ``findings`` and ``failures`` are both empty.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -257,20 +272,20 @@ class EnrichmentReport(BaseModel):
 class ExtractionRegistry:
     """Process-local cancel flags for in-flight extractions (issue #205).
 
-    Extraction runs one model call per finding candidate as a background task
+    Extraction is a single whole-document model call run as a background task
     (:func:`~revalid.app.run_extraction`). This lets the request thread flag a
-    report so that worker settles cooperatively — the loop checks the flag between
-    candidates. Thread-safe: the flag is written by the request thread and read by
-    the extraction worker.
+    report so the worker settles cooperatively. Thread-safe: the flag is written
+    by the request thread and read by the extraction worker.
 
-    A flag carries a *reason*: ``"operator"`` (a Stop — keep whatever was extracted)
-    or ``"deleted"`` (the report is being removed — discard the partial result). A
-    pending delete always wins over a Stop, since the row is going away.
+    A flag carries a *reason*: ``"operator"`` (a Stop) or ``"deleted"`` (the report
+    is being removed). A pending delete always wins over a Stop, since the row is
+    going away.
 
     Beyond the flag, the registry holds the event loop + task of an in-flight
-    extraction (attached by the worker) so a cancel can *interrupt* the current
-    model call cross-thread — polling the flag alone would only stop between
-    candidates, which never helps when a single candidate's call wedges.
+    extraction (attached by the worker) so a cancel can *interrupt* the running
+    model call cross-thread. Because extraction is one call, interrupting it is
+    the only way to stop it — there is no between-candidates checkpoint — which is
+    exactly what makes Stop work when a local model wedges on a long document.
     """
 
     def __init__(self) -> None:
@@ -446,6 +461,7 @@ def build_extraction_agent(
         model if model is not None else resolve_model(),
         output_type=list[ExtractedFinding],
         instructions=_INSTRUCTIONS,
+        model_settings=ModelSettings(max_tokens=_MAX_OUTPUT_TOKENS),
         retries=_MAX_OUTPUT_RETRIES,
         defer_model_check=True,
     )
@@ -461,52 +477,40 @@ async def extract_report_async(
     report: PdfReport,
     should_cancel: Callable[[], bool] = _never_cancel,
 ) -> ExtractionReport:
-    """Extract structured findings from every candidate in a report (FR-03), async.
+    """Extract structured findings from a whole report in one call (FR-03), async.
 
-    Runs one model call per FR-01 finding candidate via ``await agent.run`` — the
+    Sends the entire report to the model in a single ``await agent.run`` — the
     async path — so the run can be *interrupted* mid-call (issue #205): cancelling
     the task cancels the in-flight HTTP request, which is what makes Stop work even
-    when a local model wedges on one candidate. ``should_cancel`` is also polled
-    between candidates for the graceful case. Either way, the candidates processed
-    so far are returned with ``cancelled=True`` so the caller keeps the partial
-    result. Valid output is mapped to domain findings; output that never passes the
-    schema gate is flagged instead of persisted.
+    when a local model wedges on a long document. ``should_cancel`` is checked once
+    up front for the case where a stop was already requested before the call began.
+    A cancel yields an empty, ``cancelled=True`` result. Valid output is mapped to
+    domain findings; output that never passes the schema gate is flagged as a
+    single failure instead of persisted.
 
     Args:
         agent: The extraction agent (from :func:`build_extraction_agent`).
         report: An extracted report from :func:`revalid.pdf.read_pdf`.
-        should_cancel: Returns ``True`` when the operator has asked to stop; polled
-            between candidates. The task may also be cancelled mid-call.
+        should_cancel: Returns ``True`` when the operator has asked to stop; checked
+            before the call begins. The task may also be cancelled mid-call.
 
     Returns:
-        The valid findings and the flagged failures, with ``cancelled`` set when the
+        The valid findings and any flagged failure, with ``cancelled`` set when the
         run stopped early.
     """
     model_name = agent_model_name(agent)
-    findings: list[Finding] = []
-    failures: list[ExtractionFailure] = []
-    for candidate in segment_findings(report):
-        if should_cancel():
-            return ExtractionReport(
-                findings=tuple(findings), failures=tuple(failures), cancelled=True
-            )
-        try:
-            result = await agent.run(candidate.text)
-        except asyncio.CancelledError:
-            # The operator interrupted this candidate's model call (Stop / delete):
-            # keep what completed and report the stop.
-            return ExtractionReport(
-                findings=tuple(findings), failures=tuple(failures), cancelled=True
-            )
-        except UnexpectedModelBehavior as exc:
-            failures.append(
-                ExtractionFailure(
-                    heading=candidate.heading, error=str(exc), source_text=candidate.text
-                )
-            )
-            continue
-        findings.extend(_to_finding(item, candidate, model_name) for item in result.output)
-    return ExtractionReport(findings=tuple(findings), failures=tuple(failures))
+    if should_cancel():
+        return ExtractionReport(findings=(), failures=(), cancelled=True)
+    try:
+        result = await agent.run(report.text)
+    except asyncio.CancelledError:
+        # The operator interrupted the model call (Stop / delete): report the stop.
+        return ExtractionReport(findings=(), failures=(), cancelled=True)
+    except UnexpectedModelBehavior as exc:
+        failure = ExtractionFailure(error=str(exc), source_text=report.text)
+        return ExtractionReport(findings=(), failures=(failure,))
+    findings = tuple(_to_finding(item, model_name) for item in result.output)
+    return ExtractionReport(findings=findings, failures=())
 
 
 def extract_report(
@@ -523,9 +527,7 @@ def extract_report(
     return asyncio.run(extract_report_async(agent, report, should_cancel))
 
 
-def _to_finding(
-    extracted: ExtractedFinding, candidate: FindingCandidate, model_name: str
-) -> Finding:
+def _to_finding(extracted: ExtractedFinding, model_name: str) -> Finding:
     """Map a validated ``ExtractedFinding`` to a domain finding with lineage."""
     return Finding(
         title=extracted.title,
@@ -540,8 +542,6 @@ def _to_finding(
         raw={
             "source": "pdf_extraction",
             "model": model_name,
-            "candidate_heading": candidate.heading,
-            "source_text": candidate.text,
             "extracted": extracted.model_dump(),
         },
     )

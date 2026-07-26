@@ -212,7 +212,7 @@ cloud and a local provider without code changes.}
 \bft{Layer} & \bft{Technology} & \bft{Role} \\ \hline
 Backend & Python 3.12 (\texttt{uv}), FastAPI, SQLAlchemy / SQLite & API, persistence, background jobs \\ \hline
 Language model & Pydantic AI (Claude API; Ollama, local) & Finding extraction and the agentic retest \\ \hline
-Report ingestion & pdfplumber & Parsing PDF reports into text \\ \hline
+Report ingestion & PyMuPDF4LLM & Rendering PDF reports to Markdown for the model \\ \hline
 Sandbox & Docker (egress-locked network) & Isolated execution of gated commands \\ \hline
 Front end & React 19, Vite, TypeScript, Tailwind CSS 4, React Query & Single-page application (FR-11) \\ \hline
 Quality gates & ruff, mypy \texttt{-{}-strict}, pytest, coverage, xenon & Lint, types, tests, complexity \\ \hline
@@ -255,10 +255,14 @@ while the mapper keeps the door open to a heavier database later without rewriti
 the data-access code.
 
 \paragraph{Report ingestion.} Penetration-test reports arrive as PDFs written for
-human readers. The \texttt{pdfplumber} library extracts their text while preserving
-layout and table structure; it was preferred over lighter extractors because the
+human readers. The \texttt{PyMuPDF4LLM} library renders the whole document to
+Markdown (ADR-0047), preserving headings, tables and lists as structure; a
+layout-aware renderer was preferred over a plain text extractor because the
 multi-column, table-heavy layout of real reports otherwise scrambles the very
-reproduction steps the system must read.
+reproduction steps the model must read. That Markdown is the single input the model
+structures into findings in one call --- there is no heading segmentation ahead of
+it. \texttt{PyMuPDF} is AGPL-licensed; the copyleft is compatible with this local,
+single-operator tool whose source is already public (ADR-0008, ADR-0047).
 
 \paragraph{The language-model layer.} The heart of the system is Pydantic~AI, a
 model-agnostic framework for building tool-using language-model agents with typed,

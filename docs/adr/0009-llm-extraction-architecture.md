@@ -1,7 +1,7 @@
 # 0009. LLM finding extraction: per-candidate Pydantic AI with a schema-validation gate
 
 Date: 2026-07-13
-Status: accepted
+Status: superseded by [0047](0047-whole-document-llm-ingestion.md)
 
 ## Context
 

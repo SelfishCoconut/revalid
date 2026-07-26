@@ -293,7 +293,7 @@ Each stage of the pipeline can also be exercised headlessly, without the browser
 which is how the individual requirements are demonstrated and verified:
 
 \begin{lstlisting}[language=bash]
-make demo-ingest-pdf      # FR-01  PDF parsing into finding candidates
+make demo-ingest-pdf      # FR-01  PDF rendered to whole-document Markdown
 make demo-extract         # FR-03  language-model extraction
 make demo-retest-session  # FR-17  gated agentic retest to a verdict
 make demo-export          # FR-12  versioned run export

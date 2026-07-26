@@ -1,4 +1,4 @@
-"""Demo for FR-01: extract a PDF pentest report into raw finding candidates.
+"""Demo for FR-01: extract a PDF pentest report into LLM-ready Markdown text.
 
 Usage::
 
@@ -15,13 +15,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from revalid.pdf import PdfError, read_pdf, segment_findings
+from revalid.pdf import PdfError, read_pdf
 
 DEFAULT_REPORT = Path(__file__).parents[2] / "tests" / "data" / "juice_shop_report_synthetic.pdf"
 
 
 def main() -> int:
-    """Run the demo: extract, segment, print candidates (or reject cleanly)."""
+    """Run the demo: extract a PDF to whole-document Markdown (or reject cleanly)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", nargs="?", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args()
@@ -33,14 +33,12 @@ def main() -> int:
         print(f"Rejected the document: {exc}", file=sys.stderr)
         return 1
 
-    candidates = segment_findings(report)
-    print(f"{report.page_count} page(s), {len(candidates)} finding candidate(s):\n")
-    for index, candidate in enumerate(candidates, start=1):
-        heading = candidate.heading or "(whole document — no headings detected)"
-        excerpt = " ".join(candidate.text.split())[:160]
-        print(f"[{index}] {heading}")
-        print(f"      {excerpt}...\n")
-    print("These candidates are the raw input FR-03's LLM will structure into findings.")
+    print(f"{report.page_count} page(s), {len(report.text)} characters of Markdown.\n")
+    excerpt = report.text[:800]
+    print(excerpt + ("\n..." if len(report.text) > len(excerpt) else ""))
+    print(
+        "\nThis whole-document Markdown is the single input FR-03's LLM structures into findings."
+    )
     return 0
 
 

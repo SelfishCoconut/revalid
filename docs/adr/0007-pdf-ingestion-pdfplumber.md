@@ -1,7 +1,7 @@
 # 0007. PDF report ingestion: pdfplumber for extraction, a text seam to LLM structuring
 
 Date: 2026-07-13
-Status: accepted
+Status: amended by [0047](0047-whole-document-llm-ingestion.md)
 
 ## Context
 

@@ -82,12 +82,12 @@ flowchart TD
 
 The PDF path is the only asynchronous one. `run_extraction` guarantees the report
 always leaves `extracting` — to `ready` with findings persisted, to `failed` with
-the error recorded, or to `cancelled` when the operator stops it mid-run (keeping
-whatever was extracted, ADR-0039) — so the SPA's status poll is guaranteed to
-terminate. Extraction runs one model call per finding candidate on a cancellable
-loop, so a Stop (or a delete) interrupts the in-flight call immediately — not just
-between candidates, which never helped when a single call wedged (#206). Document
-metadata extraction is best-effort and can never fail the report.
+the error recorded, or to `cancelled` when the operator stops it mid-run
+(ADR-0039) — so the SPA's status poll is guaranteed to terminate. Extraction is
+one whole-document model call on a cancellable loop (ADR-0047), so a Stop (or a
+delete) interrupts the in-flight call immediately; because it is a single call, a
+Stop keeps no partial findings. Document metadata extraction is best-effort and can
+never fail the report.
 
 Every finding carries a CVSS code and a MITRE ATT&CK mapping (FR-19, ADR-0037),
 but *how* it gets one depends on the door, and the difference is recorded on the
@@ -434,7 +434,7 @@ exercisable with no network and no daemon.
 | Module | Responsibility |
 |---|---|
 | `app.py` | FastAPI wiring: routes, dependencies, background tasks |
-| `pdf.py`, `extract.py` | PDF text extraction (pdfplumber) → LLM finding extraction |
+| `pdf.py`, `extract.py` | PDF → Markdown (PyMuPDF4LLM) → whole-document LLM finding extraction |
 | `ingest.py` | DefectDojo-style schema mapping (no LLM); backs import *and* manual entry |
 | `findings.py` | finding persistence, versions, notes (the taxonomy is stored here, never derived here) |
 | `domain.py` | the typed core: `Finding`, statuses, event kinds, evidence, verdicts |

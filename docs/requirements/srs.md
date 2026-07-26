@@ -28,9 +28,9 @@ non-lab targets, destructive exploitation.
 
 ### FR-01 — Ingest PDF pentest reports
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The system shall accept a PDF pentest report and extract its content for finding identification, tolerating common report layouts (headings, tables, finding sections).
+- **Description**: The system shall accept a PDF pentest report and extract its whole content to Markdown text for LLM finding extraction, tolerating common report layouts (headings, tables, multi-column).
 - **Acceptance criteria**:
-  - [x] Uploading the evaluation Juice Shop PDF report yields raw finding candidates without manual preprocessing. *(ADR-0007: the real external Juice Shop write-up — 11 pages — segmented into 8 clean finding candidates with no manual preprocessing.)*
+  - [x] Uploading a PDF report yields whole-document Markdown ready for extraction, without manual preprocessing. *(ADR-0047: PyMuPDF4LLM renders the report — headings, tables and lists preserved — with no heading segmentation ahead of the model; `test_fixture_extracts_all_findings`.)*
   - [x] A malformed/non-report PDF is rejected with a clear error, not a crash. *(`pdf.read_pdf` fails closed on non-PDF, corrupt and text-free input; `test_read_pdf_rejects_bad_input`.)*
 
 ### FR-02 — Ingest structured reports (JSON/XML)
@@ -44,10 +44,10 @@ non-lab targets, destructive exploitation.
 
 ### FR-03 — Extract structured findings
 - **Priority**: Must · **Source**: interview 2026-06-11
-- **Description**: The system shall extract, per finding: title, description, severity, impact, attack vector, affected endpoint(s), and ordered reproduction steps, into a validated schema (Pydantic). Extraction from unstructured input uses the LLM; output failing validation is retried/flagged, never silently accepted.
+- **Description**: The system shall extract, per finding: title, description, severity, impact, attack vector, affected endpoint(s), and ordered reproduction steps, into a validated schema (Pydantic). The whole report is sent to the LLM in one call (ADR-0047); output failing validation is retried/flagged, never silently accepted.
 - **Acceptance criteria**:
-  - [x] ≥ 90% of findings in the evaluation report are extracted with all mandatory fields present. *(8/8 = 100% on the real evaluation report, on the local `ollama:qwen3.5:9b` backend.)*
-  - [x] Invalid LLM output never reaches persistence (property: schema validation gate). *(ADR-0009: the `list[ExtractedFinding]` gate flags invalid output instead of persisting it.)*
+  - [x] ≥ 90% of findings are extracted with all mandatory fields present. *(ADR-0047, whole-document call: 4/4 on the synthetic fixture and 1/1 on the one-finding fixture, on the local `ollama:qwen3.5:9b` backend; a full-length report exceeds a small local model's context window and needs a large-context backend.)*
+  - [x] Invalid LLM output never reaches persistence (property: schema validation gate). *(ADR-0047: the single `list[ExtractedFinding]` call is schema-gated — invalid output is flagged, not persisted.)*
 
 ### FR-04 — Generate executable retest plans
 - **Priority**: Must · **Source**: interview 2026-06-11
