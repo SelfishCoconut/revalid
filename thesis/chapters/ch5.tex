@@ -198,24 +198,9 @@ to completion. The system imposes no step limit of its own
 operator chose, at about ten approved commands, at which point they concluded
 \emph{inconclusive} themselves rather than let the agent guess.
 
-A second, earlier data point corroborates the backend's central role, though it must
-be read with care because its provenance differs. Before the local-model run reported
-here, the system was run once, autonomously, on the hosted Claude backend over a
-\emph{different} report --- the nine-finding TryHackMe Juice Shop write-up
-\cite{mthimunye_juiceshop}, against the same pinned lab. It returned the correct
-\emph{still-open} verdict on seven of that report's eight exploitable findings
-(87.5\%) and reached no confident verdict on the ninth, which is the set's
-deliberately ambiguous case: a training feature the report's own author flags as ``not
-a real-world vulnerability'', encoded in the ground truth as the NFR-01 hard-constraint
-case whose only defensible answer is \emph{inconclusive}. So again, zero confident
-error. That figure is not
-directly comparable to the 67\% above: it is a different report, a different finding
-count, and --- unlike the run in Table~\ref{tab:eval-verdicts} --- its FR-12 export was
-not preserved, so it stands as a single accepted result rather than a figure this
-dissertation can re-score on demand. Taken only for what it is, it points the same way
-as the threats to validity: a stronger, hosted model lifts accuracy well clear of the
-NFR-01 bar, while the safety property --- no confident error on the ambiguous case ---
-holds on both backends.
+Whether a stronger backend lifts the accuracy half without disturbing the safety half
+is exactly the question the cross-model study of Section~\ref{sec:eval-crossmodel} sets
+out to answer, on this same report and against the same pinned lab.
 
 \section{Effort: system-assisted versus manual}
 \label{sec:eval-time}
@@ -351,7 +336,7 @@ non-browser findings (ground truth: all \emph{still-open}), by backend and inter
 mode. \emph{Wrong} is a confident verdict contradicting the truth --- here a false
 \emph{``fixed''}, the dangerous case. The pattern is the chapter's central result:
 \textbf{under the human gate no model issued a false clearance; in autonomous mode
-every model did, the frontier model included.}}
+every model run without it did, the frontier model included.}}
 \label{tab:eval-crossmodel}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -376,8 +361,8 @@ every model did, the frontier model included.}}
 
 Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
 
-\paragraph{The gate holds the safety line on every model; autonomy breaks it on every
-model.} Under the human gate, not one of the four backends --- the three local models or
+\paragraph{The gate holds the safety line on every model; autonomy breaks it on each
+model run without the gate.} Under the human gate, not one of the four backends --- the three local models or
 the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
 could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
 inverts. The 14\,B,
@@ -423,7 +408,9 @@ model onto the operator. ($^{*}$~The 27\,B guided row is partial: it confirmed t
 three findings it was run on, each by its own commands, and was then stopped. At
 17\,GB it exceeds the card's 16\,GB of VRAM and offloads to the CPU, which makes a turn
 take three to five minutes --- capable, but too slow to drive through a full nine-finding
-session on this host. A card with more memory would remove the limit; it is a property
+session on this host in this separate cross-model pass; the earlier twelve-finding study
+of Section~\ref{sec:eval-time} did drive the same 27\,B through its full non-browser
+slate, seven of nine. A card with more memory would remove the limit; it is a property
 of the hardware, not the model.)
 
 \paragraph{The frontier model was accurate and still cleared a live finding.}
@@ -449,8 +436,8 @@ actually does. The frontier model, driven by the same operator contract as every
 guided row --- the model gathers evidence and \emph{recommends}, the human records the
 verdict --- confirmed the eight findings it could reproduce and, on the template
 injection, was overruled. There the model reached exactly the conclusion it had reached
-autonomously: it posted its payloads, saw them ``reflected \dots verbatim and
-unevaluated'', and recommended \emph{fixed}, marking itself \emph{confident}. The
+autonomously --- on the same reflected-but-unevaluated evidence it recommended
+\emph{fixed}, marking itself \emph{confident}. The
 operator declined the recommendation and recorded \emph{inconclusive} instead, on the
 one ground the autonomous run had no one to supply --- that a finding which cannot be
 made to fire over HTTP is un-reproduced, not repaired. The same model, on the same
@@ -521,28 +508,21 @@ point to.
 \section{Discussion}
 \label{sec:eval-discussion}
 
-Four things follow from these studies. \emph{The pipeline works
-end to end}: a real report drove extraction, goal-drafting, a gated agentic retest and
-an evidence-backed verdict, scored automatically by the FR-15 harness --- O4's
-apparatus is real and reproducible, not a plan. \emph{The safety contract is a property
-of the gate, not of the model}: this is the cross-model study's central result and the
-strongest evidence in the dissertation for the design's core claim. Under the
-per-command human gate, no model --- from the 9\,B to the frontier one --- ever issued
-a false \emph{``fixed''}; with the gate removed, \emph{every} model did, the frontier
-model included, clearing a live vulnerability it could not reproduce over HTTP. A
-dangerous false clearance is therefore not a weak-model defect that a better model
-outgrows; it is what an agent does when it is made to reach a verdict alone, and the
-gate is what prevents it regardless of the model behind it. \emph{Capability, under the
-gate, is a matter of effort rather than of safety}: the weaker the model, the more of
-the multi-step work the operator had to do by hand, but the verdicts and the zero
-false clearances came out the same --- which is precisely what licenses running a
-smaller, more private local model (Section~\ref{subsec:eval-local}). And \emph{the gate
-is close to free}: on the nine findings run both ways on the same backend, removing the
-per-command approval saved under three minutes in thirty, because the cost of a retest
-is the model's per-step latency rather than the human round-trip. Cheap and
-load-bearing at once: the honest reading is that the gate should stay on by default,
-because what it costs is negligible and what it prevents --- shown here across the whole
-capability spectrum --- is the one error the tool must never make.
+These studies establish O4's apparatus and, more importantly, its central claim. The
+pipeline runs end to end on a real report --- extraction, goal-drafting, a gated
+agentic retest and an evidence-backed verdict, scored automatically by the FR-15
+harness --- so the evaluation is a working instrument, not a plan. Its load-bearing
+result is that the design's safety contract lives in the \emph{gate} rather than the
+model (Section~\ref{sec:eval-crossmodel}): under the per-command gate no backend from
+the 9\,B to the frontier issued a false \emph{``fixed''}, and every model run without it
+cleared a live finding it could not reproduce. That reframes what a stronger model buys.
+Under the gate, capability is a matter of \emph{operator effort}, not of safety --- a
+weaker local model shifts the multi-step work onto the human but reaches the same
+verdicts, which is what licenses the local option (Section~\ref{subsec:eval-local}); and
+it is the reasoning backend, not the gate, that moves wall-clock, since removing the
+gate saved under three minutes in thirty. Cheap and load-bearing at once, the gate is
+the part of the contract that should stay on by default: it costs almost nothing and
+prevents, across the whole capability range, the single error the tool must never make.
 
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}
