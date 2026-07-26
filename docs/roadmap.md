@@ -12,12 +12,17 @@
 
 ## Current state (update me)
 
-> **At a glance (2026-07-25).** The software is **done for this version and thesis-ready**
-> (Álvaro's call): **v1.0.0** tagged, all six milestones closed, the board empty, every ADR
-> from 0001 to **0046** `accepted` or `superseded`. Remaining work is the **thesis**, and
-> the memoir itself is now submission-ready: the pre-deposit findings are closed, Table 5.1's
-> command total is **confirmed at 58** by the author, and the **one** decision still open is
-> whether to trim 90 pages toward the 80-page recommendation. See the last entry.
+> **At a glance (2026-07-26).** The software shipped as **v1.0.0** (all six milestones
+> closed) and post-release work continues on `main`. Two changes landed this day: the PDF
+> ingestion was **redesigned** to render the whole report to Markdown and feed it to the
+> model in one call, deleting the regex segmenter (ADR-0047, #294), and the Evaluation
+> chapter was **de-duplicated and refocused** (#295). The board is empty. Every ADR from
+> 0001 to **0046** is `accepted` or `superseded`; **0047 is `proposed`** and is the one
+> awaiting Álvaro's ratification — its **AGPL acceptance** (PyMuPDF, reversing ADR-0007's
+> rejection under the single-user threat model, ADR-0008) is the load-bearing call. The
+> memoir is submission-ready at **127 pages** with the ingestion and evaluation updates
+> folded in; the open authoring decision remains whether to trim the ~90-page core toward
+> the 80-page recommendation. See the last entry.
 > The entries below are **chronological, oldest first** — the *last* one is the live state;
 > any "next action" in an earlier entry was true on its own date and is history now.
 
