@@ -1,7 +1,7 @@
 # 0047. Whole-document LLM ingestion: PyMuPDF4LLM Markdown, one call, no regex segmentation
 
 Date: 2026-07-26
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -88,14 +88,18 @@ entirely.
 - **Amends ADR-0007**: the library moves pdfplumber → PyMuPDF4LLM and the "text +
   best-effort candidates" output becomes "whole-document Markdown". The text seam
   ("the model never sees raw PDF bytes") and the fail-closed contract survive.
-- **License reversal — accepted.** ADR-0007 rejected PyMuPDF for being **AGPL-3.0**.
-  That call predates the single-user threat model (ADR-0008). revalid is a local,
-  single-operator tool with a public repository; AGPL's network-copyleft is
-  satisfied by source already being public, and using an AGPL dependency does not
-  relicense the project's own code or the thesis. The functional gain (robust,
-  layout-aware Markdown that removes the format brittleness) is worth it under the
-  current threat model. `pymupdf`/`pymupdf4llm` replace `pdfplumber` in
-  `pyproject.toml`.
+- **License reversal — project relicensed to AGPL-3.0-or-later.** ADR-0007 rejected
+  PyMuPDF for being **AGPL-3.0**; that call predates the single-user threat model
+  (ADR-0008). Adopting `pymupdf4llm` — which depends on `pymupdf` — brings AGPL-3.0
+  copyleft into the runtime tree, so the *distributed combined work* must be offered
+  under a compatible copyleft licence, and Beerware (ADR-0001, "do whatever you want")
+  cannot grant that over embedded AGPL code. The project is therefore relicensed from
+  Beerware to **AGPL-3.0-or-later** (`LICENSE`, `pyproject.toml`, README). This binds
+  the project's own *code*; the thesis document is a separate work and is unaffected,
+  and AGPL's network-copyleft (§13) is moot for a local single-operator tool whose
+  source is already public. The functional gain (robust, layout-aware Markdown that
+  removes the format brittleness) is worth the copyleft under the current threat model.
+  `pymupdf`/`pymupdf4llm` replace `pdfplumber` in `pyproject.toml`.
 - **Cancellation is interrupt-only.** With one call there is no between-candidates
   checkpoint, so a Stop is honoured by cancelling the in-flight call cross-thread
   (the `ExtractionRegistry` machinery, unchanged); a Stop now yields no partial
@@ -110,5 +114,6 @@ entirely.
   boundary. A new deterministic `one_finding_report.pdf` fixture +
   `scripts/gen_one_finding_pdf.py` give a runnable local-extraction check
   (`tests/system/test_ollama_extraction.py`).
-- **Status `proposed`:** the whole-document reversal, and the AGPL license
-  acceptance in particular, are Álvaro's to ratify in async review.
+- **Status `accepted` (ratified 2026-07-26):** the whole-document reversal shipped in
+  PR #294; Álvaro ratified the relicensing to AGPL-3.0-or-later on the same day,
+  closing the last open item this ADR flagged.

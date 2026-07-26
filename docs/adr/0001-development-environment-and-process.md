@@ -21,7 +21,7 @@ rather than aspirational, before any product code is written.
 - **AI governance**: automated session logging + `Co-Authored-By` commit trailers + `ai-declaration` skill generating the thesis declaration from evidence; `ai-compliance-auditor` agent auditing practices; quarantined `data/private/` enforced by a PreToolUse hook.
 - **Process**: Kanban (GitHub Projects) with WIP limit 1–2 and a two-stage gate: automated `Verify`, then human `Validate` — every PR ships mandatory "How to validate" steps that Álvaro executes personally before merge. No sprints, no scheduled meetings.
 - **Documentation**: docs-as-code — mkdocstrings API docs and pyreverse UML generated from code on every build; authored C4/sequence diagrams in Mermaid reviewed for drift by the `doc-curator` agent.
-- **License**: Beerware (Rev. 42), Álvaro's explicit choice.
+- **License**: Beerware (Rev. 42), Álvaro's explicit choice. *(Superseded 2026-07-26 by **AGPL-3.0-or-later** — ADR-0047 — once the AGPL-licensed PyMuPDF4LLM ingestion dependency brought copyleft into the runtime tree.)*
 
 ## Alternatives considered
 

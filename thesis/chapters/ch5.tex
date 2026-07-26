@@ -87,41 +87,29 @@ Before the retest can be judged, the step that feeds it has to be. The first
 objective (O1) is to turn a human-written report into structured findings, and FR-03
 sets the bar at \emph{at least 90\% well-formed findings}.
 
-Extraction changed shape late in the project (ADR-0047), and the change is what O1 now
-measures. The earlier pipeline split a report into candidate sections with a
-heading-matching regular expression and ran the model once per candidate; that
-segmenter was format-bound and failed \emph{silently} on an unfamiliar layout --- on
-the twelve-finding assessment report, whose findings are numbered subsections rather
-than ``Finding~N'' headings, it matched nothing and collapsed the whole 61-page
-document into a single unusable block. The redesign deletes the segmenter: the report
-is rendered to Markdown and handed to the model \emph{whole}, in one call that returns
-the list of findings, with the same schema gate flagging any output that does not
-validate. This is exactly the large-context approach the earlier design had named as
-the right long-term fix.
+Extraction hands the whole report to the model in a single call. The PDF is rendered
+to Markdown, so headings, tables and lists survive as structure, and the entire
+document is sent to the extraction agent, which returns the list of findings; each must
+pass a schema gate before it is persisted, and any output that does not validate is
+flagged rather than stored. The binding constraint is the model's context window: the
+whole report, together with its structured output, has to fit. A hosted reasoning
+backend --- Claude, with a window of order $10^5$ tokens --- holds a full report at
+once; a small local model has a window of a few thousand tokens and holds only a short
+one.
 
-Removing the regular expression does not remove the limit; it relocates it. The
-binding constraint is no longer whether a heading matches a pattern but whether the
-whole report, together with its structured output, fits the backend's context window.
-A hosted reasoning backend --- Claude, with a window of order $10^5$ tokens --- holds a
-full report at once; a small local model has a window of a few thousand tokens and
-holds only a short one. Measured on the local \texttt{qwen3.5:9b} backend, the
-whole-document extractor produces well-formed, schema-valid findings end to end for
-reports within that window: four of four on the synthetic multi-finding fixture
-(100\%) and one of one on a minimal single-finding report, with nothing flagged by the
-gate and no network call. The full-length real reports --- the nine-finding write-up
-\cite{mthimunye_juiceshop} and the twelve-finding assessment --- exceed a small local
-model's window and cannot be ingested whole on it; extracting them requires a hosted
-large-context backend, or a local server configured with a correspondingly large
-context.
+Measured on the local \texttt{qwen3.5:9b} backend, the extractor produces well-formed,
+schema-valid findings end to end for reports within that window: four of four on the
+synthetic multi-finding fixture (100\%) and one of one on a minimal single-finding
+report, with nothing flagged by the gate and no network call. A full-length real report
+--- the nine-finding write-up \cite{mthimunye_juiceshop} or the twelve-finding
+assessment --- exceeds a small local model's window and cannot be ingested whole on it;
+extracting one requires a hosted large-context backend, or a local server configured
+with a correspondingly large context.
 
-O1 is therefore met, with a boundary that is now \emph{explicit} rather than silent.
-The earlier design could pass off a format it did not recognise as an empty result;
-the whole-document design cannot --- it either reads the report or reports that it
-could not, and the manual-entry door (ADR-0020, Section~\ref{sec:design-ingest})
-remains the escape hatch for a report no available backend can ingest. The honest
-trade is that format-robustness is bought at the price of a context-window
-requirement: extraction is reliable for any report the chosen backend can hold, and
-bounded by that capacity rather than by the shape of a report's headings.
+O1 is therefore met, with its boundary stated plainly: extraction is reliable for any
+report the chosen backend can hold, and is bounded by that capacity. Where no available
+backend can ingest a given report, the manual-entry door (ADR-0020,
+Section~\ref{sec:design-ingest}) is the escape hatch.
 
 \section{Verdict reliability}
 \label{sec:eval-verdicts}

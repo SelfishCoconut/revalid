@@ -348,9 +348,9 @@ regulation (*Reglamento de Trabajos Fin de Grado*, ESII, Feb 2026, §6):
 
 ## 📜 License
 
-[![License](https://img.shields.io/badge/license-Beer--ware_(rev._42)-f2b44e?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-f2b44e?style=flat-square)](LICENSE)
 
-[The Beer-Ware License (Revision 42)](LICENSE) — not OSI-certified, intentionally so.
+[GNU Affero General Public License v3.0 or later](LICENSE) — the copyleft the AGPL-licensed PyMuPDF4LLM ingestion dependency requires (ADR-0047), superseding the earlier Beerware choice.
 
 <div align="center">
 <br/>
