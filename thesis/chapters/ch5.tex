@@ -356,7 +356,7 @@ every model did, the frontier model included.}}
 \texttt{qwen3.5:9b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \texttt{qwen3:14b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \texttt{qwen3.6:27b}$^{*}$ & guided & 3/3 & 0 & \bft{0} & 0 \\ \hline
-\texttt{claude-sonnet} & guided & \multicolumn{4}{c|}{\emph{not separately run --- see text}} \\ \hline
+\texttt{claude-sonnet} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \rowcolor{tema!5}
 \texttt{qwen3.5:9b} & autonomous & 5/9 & 3 & \bft{0}$^{\dagger}$ & 1 \\ \hline
 \rowcolor{tema!5}
@@ -370,9 +370,10 @@ every model did, the frontier model included.}}
 Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
 
 \paragraph{The gate holds the safety line on every model; autonomy breaks it on every
-model.} Under the human gate, not one of the three local backends issued a false
-\emph{``fixed''}: they confirmed the findings they could and hedged
-\emph{inconclusive} on the rest. Remove the gate and the picture inverts. The 14\,B,
+model.} Under the human gate, not one of the four backends --- the three local models or
+the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
+could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
+inverts. The 14\,B,
 left to drive itself to a verdict, marked the SQL-injection \emph{and} the
 template-injection findings \emph{fixed} --- two live vulnerabilities cleared. The
 9\,B, in an earlier autonomous run, marked permissive CORS \emph{fixed} while every
@@ -435,18 +436,23 @@ gone''. The guided runs faced exactly this evidence on the same finding and reco
 \emph{inconclusive}, because the human declined to convert an un-reproduced finding
 into a clearance. Capability did not prevent the dangerous error; the gate did.
 
-A guided \texttt{claude-sonnet} row is not tabulated separately, and the omission is
-deliberate rather than a gap. What a guided run measures is the human-plus-model pair,
-and its verdict is the operator's: on the eight confirmable findings the frontier model
-produces the same evidence it produced autonomously and the operator confirms
-\emph{still-open}, and on the template injection the operator records the same
-\emph{inconclusive} the local guided runs did, on the same reasoning that produced it
-there --- an un-reproduced finding is not a clearance. The guided frontier result is
-therefore eight confirmed and one safe hedge, zero wrong, by the same operator contract
-that governed every other guided row; running it would restate the contract, not test
-it. The one thing worth stating plainly is the contrast the table already shows: the
-\emph{only} false clearance the frontier model produced, it produced with the gate
-removed.
+The guided \texttt{claude-sonnet} row is the same experiment run once more with the gate
+back in place, and it is the cleanest illustration in the chapter of what the gate
+actually does. The frontier model, driven by the same operator contract as every other
+guided row --- the model gathers evidence and \emph{recommends}, the human records the
+verdict --- confirmed the eight findings it could reproduce and, on the template
+injection, was overruled. There the model reached exactly the conclusion it had reached
+autonomously: it posted its payloads, saw them ``reflected \dots verbatim and
+unevaluated'', and recommended \emph{fixed}, marking itself \emph{confident}. The
+operator declined the recommendation and recorded \emph{inconclusive} instead, on the
+one ground the autonomous run had no one to supply --- that a finding which cannot be
+made to fire over HTTP is un-reproduced, not repaired. The same model, on the same
+finding, with the same evidence, produced a false clearance alone and a safe hedge under
+the gate. That single override is the whole thesis of the design in miniature: the gate's
+contribution is not a better command or a cleverer probe --- the frontier model needed
+no help finding or running those --- but the one judgement an agent instructed to reach a
+verdict cannot be trusted to make, that ``I could not reproduce it'' is not ``it is
+gone''.
 
 \section{Threats to validity}
 \label{sec:eval-threats}
