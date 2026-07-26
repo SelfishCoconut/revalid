@@ -9,11 +9,11 @@ The preceding chapters described what the system is and how it was built. This
 chapter turns to whether it \emph{works}. Most of it addresses the fourth objective
 (O4): whether the verdicts the system returns are trustworthy, and whether
 producing them with the tool is faster than doing the same revalidation by hand. One
-section closes the first (O1), the quality of the extraction that feeds
+section addresses the first (O1), the quality of the extraction that feeds
 everything downstream. The evaluation reported here exercises the whole pipeline end to
 end, against a real report and a live target, and it establishes the measurement
-apparatus and a first result; what it does not do, being one report, one target, one
-operator and one backend, is set out plainly in Section~\ref{sec:eval-threats}. What
+apparatus and a first result; what it does not do, being one report, one target and one
+operator, is set out plainly in Section~\ref{sec:eval-threats}. What
 this chapter claims is feasibility and a direction, not a final figure.
 
 \section{Evaluation design}
@@ -63,16 +63,19 @@ ability to recognise a real remediation.
 system}, operated in its normal gated mode, in which the operator drafts the retest
 goal from the finding's reproduction steps (FR-04) and then approves or rejects every
 command the agent proposes; and once \emph{manually}, reproducing the finding by hand. The
-backend for every machine condition and for the verdict scoring was the same locally
+backend for every machine condition, and therefore for every verdict the system
+\emph{determined}, was the same locally
 hosted model (Ollama, \texttt{qwen3.6:27b}), configured with a 16\,K-token context
-window, so the accuracy figures below are a \emph{lower bound} on what the system
-achieves with a stronger reasoning backend, a point the discussion returns to. Holding
+window. Whether a stronger reasoning backend raises the accuracy figures below is not
+assumed here but measured, in Section~\ref{sec:eval-crossmodel}. Holding
 the backend fixed across all of them is what lets the autonomous condition of
 Section~\ref{sec:eval-time} be read as a measurement of the approval gate rather than of
 the model.
 
 \paragraph{Metrics.} Verdicts are scored by the FR-15 harness (\texttt{eval.py})
-over an FR-12 export of the run, into three buckets: \emph{correct} (verdict matches
+over an FR-12 export of the run. The harness is deterministic --- it matches each
+recorded verdict against a title-keyed answer key and involves no language model, so
+nothing here is graded by a model --- and it sorts findings into three buckets: \emph{correct} (verdict matches
 ground truth), \emph{inconclusive} (the system hedged where the truth was definite: a
 safe miss), and \emph{wrong} (a confident verdict contradicting the truth: the
 dangerous case, which on this all-open set means a false ``fixed''). NFR-01 sets the
@@ -91,17 +94,26 @@ to Markdown --- headings, tables and lists preserved as structure --- and the en
 document is sent to the extraction agent, which returns the list of findings, each of
 which must pass a schema gate before it is persisted; output that does not validate is
 flagged rather than stored, so a malformed response can never be silently turned into a
-finding. What this asks of the model is demanding: it must hold a full multi-page report
-in context and emit a complete, schema-valid structure from it in one pass. That is
-within reach of a capable large-context backend, but beyond the small local models this
-work runs on. Their few-thousand-token window cannot hold a full-length real report ---
-the nine-finding write-up \cite{mthimunye_juiceshop} or the twelve-finding assessment
-alike --- and their weaker instruction-following does not reliably return a valid
-finding list even from one that would fit; whole-document extraction was therefore not
-validated on them, because they are not capable of it. That incapability is a known
-limitation of small models, not of the method.
+finding. Measured on a local \texttt{qwen3.5:9b} backend, the call does what FR-03 asks
+of it on documents that fit its context: four findings of four on the synthetic
+multi-finding fixture, and one of one on a deterministic single-finding fixture --- five
+of five well-formed, clearing the 90\% bar at that scale.
 
-The only way models of that size ever produced structured findings was under the
+A full-length report asks more. The model must hold a multi-page document in context
+and emit a complete, schema-valid structure from it in one pass, and that is within
+reach of a capable large-context backend but beyond the small local models this work
+runs on. The binding constraint is the context window rather than the parameter count:
+Ollama's OpenAI-compatible endpoint ignores a context size requested by the client, so
+the window is whatever the operator's server is configured for, and at its default a
+few thousand tokens cannot hold either real report --- the nine-finding write-up
+\cite{mthimunye_juiceshop} or the twelve-finding assessment. Nor does the weaker
+instruction-following of models this size reliably return a valid finding list even
+from a document that would fit. Whole-document extraction on a full-length real report
+was therefore not validated locally, because these backends cannot perform it: a known
+limitation of small models under a small context, not of the method.
+
+The only way models of that size ever produced structured findings from a
+\emph{full-length} report was under the
 project's earlier, now-retired design: it pre-segmented a specially-prepared report with
 a heading-matching regular expression and extracted a single finding at a time
 (ADR-0047), shrinking the task to one short, well-formed section per call --- small
@@ -187,7 +199,7 @@ sharp.) The fourth, the basket IDOR, is a multi-step chain: authenticate, captur
 token, then request another user's resource. The small local model could not carry it
 to completion. The system imposes no step limit of its own
 (Section~\ref{subsec:design-lifecycle-budget}); each of these four ran to a cut-off the
-operator chose, at about ten approved commands, at which point they concluded
+operator chose, at seven to ten approved commands, at which point they concluded
 \emph{inconclusive} themselves rather than let the agent guess.
 
 Whether a stronger backend lifts the accuracy half without disturbing the safety half
@@ -233,20 +245,21 @@ hour (a reported figure rather than an instrumented measurement, sitting at the 
 of a bottom-up estimate for a terminal-comfortable operator doing command-level checks;
 calibrating it with a timed sample is left as future work).
 
-Table~\ref{tab:eval-conditions} places that hour beside three machine conditions. Two of
-them share the local backend; the third does not, which is what the reading below turns
-on.
+Table~\ref{tab:eval-conditions} places that hour beside three machine conditions. All
+three share the same local backend, which is what makes the readings below turn on
+something other than the model.
 
 \begin{table}[htbp]
-\caption[Four retest conditions on the same local backend]{Four ways to retest, all on
-the same local \texttt{qwen3.6:27b} backend: the author's lean manual pass; the gated
+\caption[Four retest conditions: a manual pass and three on one local backend]{Four
+ways to retest --- the author's lean manual pass, and three machine conditions sharing
+the same local \texttt{qwen3.6:27b} backend: the gated
 system on all twelve findings; the gated system on the nine \emph{non-browser} findings
 only, excluding the three cross-site-scripting findings whose effect it cannot observe
-over HTTP; and those same nine run autonomously with the approval gate removed. Row~3 is
-the non-browser \emph{re-slice} of row~2 --- dropping the stored, DOM-based and reflected
-scripting findings from Table~\ref{tab:eval-verdicts} leaves exactly seven correct of
-nine and exactly 32.5~minutes --- so rows~3 and~4 differ in one respect only, the gate,
-which is what makes their comparison readable. The manual figure is reported, not
+over HTTP; and those same nine run autonomously with the approval gate removed. Rows~3
+and~4 are separate runs of the same nine findings on the same backend, differing in the
+gate; because an agentic retest is not deterministic
+(Section~\ref{sec:eval-threats}) they are two samples of that difference rather than one
+re-slice of the other. The manual figure is reported, not
 instrumented; the machine figures are measured. The manual row's 12/12 is not an
 independent score: that pass is what established the ground truth
 (§\ref{sec:eval-design}), so the column records that every finding proved reachable by
@@ -261,8 +274,8 @@ hand within the lean budget --- the yardstick the machine rows are then measured
 \bft{Condition} & \bft{Backend} & \bft{Findings} & \bft{Time} & \bft{Correct} \\ \hline
 Manual, lean (author, by hand) & --- (human) & 12 & $\approx$\,60\,min & 12/12 \\ \hline
 Guided --- per-command gate & \texttt{qwen3.6:27b} (local) & 12 & 52\,min & 8/12 \\ \hline
-Guided --- non-browser subset & \texttt{qwen3.6:27b} (local) & 9 & 32.5\,min & 7/9 \\ \hline
-Autonomous --- free-launch & \texttt{qwen3.6:27b} (local) & 9 & 29.7\,min & 8/9 \\ \hline
+Guided --- non-browser subset & \texttt{qwen3.6:27b} (local) & 9 & 32.5\,min & 8/9 \\ \hline
+Autonomous --- free-launch & \texttt{qwen3.6:27b} (local) & 9 & 29.7\,min & 7/9 \\ \hline
 \end{tabular}
 \end{center}
 \end{table}
@@ -270,7 +283,10 @@ Autonomous --- free-launch & \texttt{qwen3.6:27b} (local) & 9 & 29.7\,min & 8/9 
 Two readings stand out, and both cut against the intuition that automation, or
 autonomy, is obviously faster here. First, \emph{manual $\approx$ guided}: the guided
 system's twelve-finding run (52~minutes of machine time) sits within a few minutes of the
-author's roughly one-hour manual pass. On this slow local backend the tool is not
+author's roughly one-hour manual pass --- though the two quantities are not like for
+like, since the 52~minutes exclude the operator's own reading and approving and are
+therefore a floor on the tool's wall-clock rather than the whole of it, which flatters
+the tool. On this slow local backend the tool is not
 meaningfully faster than a capable person doing the same lean checks, and it is less
 conclusive: the manual pass resolved all twelve findings, where the system hedged on
 four. Its edge over the manual operator is therefore neither raw speed nor accuracy, but
@@ -279,17 +295,18 @@ and its output, and never issues a false clearance. The four it could not settle
 declared \emph{inconclusive} rather than \emph{fixed}. Second, and more surprisingly,
 \emph{autonomous $\approx$ guided}: the nine non-browser findings run with the approval
 gate removed, the agent auto-running its own commands, took 29.7~minutes against the
-gated run's 32.5 --- essentially the same. Because both rows sit on the same backend and
-the same nine findings, that comparison isolates the gate, and what it shows is that
+gated run's 32.5 --- essentially the same. Both rows sit on the same backend and the same
+nine findings, so the gate is the difference between them, and what they show is that
 removing it bought no meaningful speed: the bottleneck is the model's per-step latency,
 not the approval round-trip.
 
-What autonomy bought instead was a little thoroughness, at a price. Left to explore, the
-agent confirmed the basket IDOR the tightly-scoped gated run had hedged, lifting
-non-browser accuracy from seven of nine to eight; but it also \emph{wandered}, spending
-twenty-two commands on the template-injection finding it still could not confirm against
-the gated run's ten. The extra steps and the extra confirmation roughly cancel in
-wall-clock, which is why the two rows land within three minutes of each other.
+What autonomy did cost was accuracy, and it bought nothing in exchange. Under the gate
+the agent carried the basket IDOR through to a confirmation; left to explore, it hedged
+that same finding, taking non-browser accuracy from eight of nine down to seven. It also
+\emph{wandered} on the way, spending eighteen commands on the template-injection finding
+it still could not confirm against the gated run's ten. The extra steps bought no extra
+confirmation, which is why the two rows land within three minutes of each other in
+wall-clock: more exploring, no more resolved.
 
 That inverts the trade one expects. Here the per-command human gate is close to free in
 wall-clock: surrendering it bought a single extra confirmation and no time, while the
@@ -325,9 +342,15 @@ footnote.\footnote{Local inference on an NVIDIA RTX~5080 (16\,GB VRAM), AMD Ryze
 \caption[Verdicts across three model tiers and both modes]{Verdicts on the nine
 non-browser findings (ground truth: all \emph{still-open}), by backend and interaction
 mode. \emph{Wrong} is a confident verdict contradicting the truth --- here a false
-\emph{``fixed''}, the dangerous case. The pattern is the chapter's central result:
-\textbf{under the human gate no model issued a false clearance; in autonomous mode
-every model run without it did, the frontier model included.}}
+\emph{``fixed''}, the dangerous case; \emph{Error} is a session that ended without
+reaching any verdict, so it is neither a confirmation nor a clearance. The four local
+rows are scored by the FR-15 harness over an FR-12 export of the operator's session
+database against the committed key
+(\texttt{tests/data/eval/ground\_truth\_assessment.json}), so they are re-derivable from
+stored data; the two hosted rows were recorded from the runs themselves. The pattern is
+the chapter's central result:
+\textbf{under the human gate no backend issued a false clearance; without it, three of
+the four backends run autonomously did --- the frontier model included.}}
 \label{tab:eval-crossmodel}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -337,12 +360,12 @@ every model run without it did, the frontier model included.}}
 \rowcolor{tema!10}
 \bft{Backend} & \bft{Mode} & \bft{Correct} & \bft{Inconc.} & \bft{Wrong} & \bft{Error} \\ \hline
 \texttt{qwen3.5:9b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
-\texttt{qwen3:14b} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
+\texttt{qwen3:14b} & guided & 6/9 & 3 & \bft{0} & 0 \\ \hline
 \texttt{claude-sonnet} & guided & 8/9 & 1 & \bft{0} & 0 \\ \hline
 \rowcolor{tema!5}
-\texttt{qwen3.5:9b} & autonomous & 5/9 & 3 & \bft{0}$^{\dagger}$ & 1 \\ \hline
+\texttt{qwen3.5:9b} & autonomous & 5/9 & 4 & \bft{0}$^{\dagger}$ & 0 \\ \hline
 \rowcolor{tema!5}
-\texttt{qwen3:14b} & autonomous & 4/9 & 2 & \bft{2} & 1 \\ \hline
+\texttt{qwen3:14b} & autonomous & 5/9 & 2 & \bft{2} & 0 \\ \hline
 \rowcolor{tema!5}
 \texttt{claude-sonnet} & autonomous & 8/9 & 0 & \bft{1} & 0 \\ \hline
 \end{tabular}
@@ -351,8 +374,8 @@ every model run without it did, the frontier model included.}}
 
 Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
 
-\paragraph{The gate holds the safety line on every model; autonomy breaks it on each
-model run without the gate.} Under the human gate, not one of the three backends --- the two local models or
+\paragraph{The gate holds the safety line on every model; autonomy breaks it on three of
+the four run without it.} Under the human gate, not one of the four backends --- the three local models or
 the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
 could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
 inverts. The 14\,B,
@@ -366,7 +389,12 @@ retest is not deterministic, so a false clearance is \emph{intermittent} in auto
 mode --- which is worse, not better, than a reliable one: a gate that fails at random
 cannot be reasoned about.} And the frontier model, far more capable than any local one,
 was not exempt: it too, running autonomously, cleared a live finding
-(Section~\ref{par:eval-ssti} below). This is the single most important measurement in
+(Section~\ref{par:eval-ssti} below). One backend broke the pattern: the 27\,B, run
+autonomously over the same nine findings
+(Table~\ref{tab:eval-conditions}), hedged where it could not confirm and cleared nothing.
+Three of four, then, rather than four of four --- which is enough to establish that
+autonomy \emph{does} produce false clearances, and not enough to predict that any given
+run will. This is the single most important measurement in
 the chapter, and it cuts squarely against the intuition that a dangerous false
 clearance is a weak-model failure. It is not. It is a failure of \emph{autonomy}: an
 agent instructed to reach a verdict on its own resolves ``I could not reproduce it''
@@ -375,24 +403,33 @@ failing to reproduce a vulnerability looks identical to the vulnerability being 
 The per-command human gate is what refuses that inference, and it did so on every
 backend, the frontier one included.
 
-\paragraph{Under the gate, model capability shows up as operator effort, not as a
-different verdict.} The two guided local rows land in almost the same place ---
-eight of nine confirmed, one safe hedge --- but the work the human had to do to get
-there scaled sharply with model weakness. The 9\,B could not compose a valid shell
+\paragraph{Under the gate, model capability shows up as operator effort and as hedging,
+never as a false clearance.} The two guided local rows do not land in the same place ---
+the 9\,B confirmed eight findings of nine, the 14\,B six --- but they differ in how often
+each \emph{declined} to call a finding, not in whether either cleared a live one: both
+hedged where they could not confirm, and neither issued a false \emph{``fixed''}. What
+scaled sharply with model weakness was the work the human had to do. The 9\,B could not compose a valid shell
 command for any multi-step finding: it guessed client-side Angular routes
 (\texttt{/\#/login}) instead of the REST API, and mangled shell quoting on every JSON
 payload even after explicit correction, so the operator had to run the SQL-injection,
 IDOR, privilege-escalation and brute-force commands \emph{personally}; the model's
-contribution to those four was essentially nil. The 14\,B did better --- it found the
+contribution to those four was essentially nil. The 14\,B needed less help --- it found the
 login endpoint unprompted and adapted the \emph{structure} of its commands to a
 correction --- but still could not emit a valid single-quote injection payload, so the
 operator again ran the decisive command. Only the frontier model composed and ran the
 full multi-step chains itself, unprompted --- the SQL-injection, IDOR and
 privilege-escalation chains the local models could not drive
-(Section~\ref{par:eval-ssti}). The lesson for a human-gated tool is a reassuring one: a
-weaker, cheaper, more private local model does not make the tool \emph{less safe} ---
-the safety came out identical --- it makes it more \emph{laborious}, shifting work from
-the model onto the operator.
+(Section~\ref{par:eval-ssti}).
+
+That the weaker model scored \emph{higher} follows from the same fact and is worth
+stating rather than smoothing over: where the 9\,B could compose nothing, the operator
+supplied the command, and a supplied command confirms the finding. Under a per-command
+gate the \emph{correct} column therefore measures the operator and the model together,
+not the model alone --- which is why the safety column, where the two rows agree exactly,
+carries the weight here and the accuracy column does not. The lesson for a human-gated
+tool is nonetheless a reassuring one: a weaker, cheaper, more private local model does
+not make the tool \emph{less safe} --- the safety came out identical --- it makes it more
+\emph{laborious}, shifting work from the model onto the operator.
 
 \paragraph{The frontier model was accurate and still cleared a live finding.}
 \label{par:eval-ssti}
@@ -437,18 +474,20 @@ The result is a first data point, and its limits should be read alongside it.
 uniformly \emph{still-open}; the evaluation therefore measures confirmation of open
 findings and the avoidance of false clearances, the NFR-01 constraint, but not
 the recognition of a genuine fix. A target with some remediated findings is the first
-item of future work. \emph{Backend:} the gated runs and the scoring used a single local
-model, \texttt{qwen3.6:27b}; a hosted frontier model would very likely raise accuracy, so
-these figures understate the system's ceiling. \emph{Scale:} one report, twelve findings,
+item of future work. \emph{Backend:} the twelve-finding study of
+Sections~\ref{sec:eval-verdicts} and~\ref{sec:eval-time} ran on a single local model,
+\texttt{qwen3.6:27b}; the cross-model study of Section~\ref{sec:eval-crossmodel} widens
+that to three further backends, and what capability does and does not change is reported
+there. \emph{Scale:} one report, twelve findings,
 one operator, which is enough to demonstrate the pipeline and the harness but not to
 generalise. \emph{Determinism:} an agentic retest is not reproducible run to run --- the
 model may propose different commands from the same starting point --- so every figure
 here is a single sample. This study's contribution is categorical --- what did and did
 not happen under each condition --- rather than a precise accuracy \emph{rate}, which
 would call for repeated runs per finding. This bears on the gate comparison in particular:
-rows~3 and~4 of Table~\ref{tab:eval-conditions} differ only in the gate, but they are one
-run each, so the three-minute gap between them is within the noise a second pair of runs
-could plausibly move. \emph{Method:}
+rows~3 and~4 of Table~\ref{tab:eval-conditions} differ in the gate, but they are one run
+each, so both the three-minute gap and the one-finding difference between them sit within
+the noise a second pair of runs could plausibly move. \emph{Method:}
 the operator drafted each retest goal from the report's reproduction steps, which is
 the intended workflow (FR-04) but does inject operator knowledge; and some findings
 (stored and reflected XSS, and SSTI, in particular) are only partially decidable over
@@ -465,20 +504,33 @@ itself part of the finding, but it also means a single clean autonomous run is n
 evidence of safety. \emph{Operator subjectivity:} the guided rows are a human-plus-model
 pair, and the human here was the system's author; a different operator would steer
 differently, so ``operator effort'' is a qualitative observation, not a measured
-quantity. Neither of these
+quantity. That same operator had also established the ground truth beforehand, by the
+manual pass of Section~\ref{sec:eval-design}, so every refusal the gate records was made
+in knowledge of the expected answer --- an advantage a real retest, where nobody knows
+whether the finding was fixed, does not have. What the guided rows demonstrate is
+therefore that the gate \emph{gives a human the place to refuse}, not that an
+uninformed operator would refuse correctly. Neither of these
 weakens the central contrast, which is categorical rather than quantitative: zero false
-clearances under the gate, at least one under every autonomous condition.
+clearances under the gate, at least one under three of the four autonomous conditions.
 
 \emph{Reproducibility of these figures.} It is worth being exact about what a reader
 can recheck, because the chapter claims a measured result. What survives of the
 twelve-finding study is its input --- the report, and the manual-entry payload the
 findings were loaded from --- and its outcomes, as reported in
 Table~\ref{tab:eval-verdicts}. What does not survive is the FR-12 export of the run
-itself, nor a committed twelve-finding answer key; the repository commits the ground
-truth for the nine-finding report only. The figures in this chapter are therefore
-re-derivable in the sense that the study can be \emph{repeated} --- the lab version is
-pinned, the backend is named and the harness is committed --- but not in the sense that
-this particular run can be re-scored from an artefact. Given the non-determinism noted
+itself, nor a twelve-finding answer key. The repository does commit two nine-finding
+keys --- the nine-finding report's, and, for the cross-model study of
+Section~\ref{sec:eval-crossmodel}, the nine non-browser findings of this assessment
+(\texttt{tests/data/eval/ground\_truth\_assessment.json}), which is that study's answer
+key. The cross-model study fares better: the sessions behind its four local rows persist
+in the operator's own session database, and an FR-12 export rebuilt from it and scored by
+the committed harness against that committed key reproduces those four rows exactly. That
+database is not part of the repository, so this is a re-derivation the operator can
+perform and a reader cannot; committing one export per condition is what would close the
+gap. The twelve-finding figures, and the two hosted rows, are therefore
+re-derivable only in the sense that the study can be \emph{repeated} --- the lab version is
+pinned, the backend is named and the harness is committed --- not in the sense that
+those particular runs can be re-scored from an artefact. Given the non-determinism noted
 above, a repeated run should be expected to differ; preserving each run's export, which
 the system already knows how to produce, would make every reported figure re-scorable
 from a committed artefact, and is the natural practice for the wider study these results
@@ -493,11 +545,13 @@ agentic retest and an evidence-backed verdict, scored automatically by the FR-15
 harness --- so the evaluation is a working instrument, not a plan. Its load-bearing
 result is that the design's safety contract lives in the \emph{gate} rather than the
 model (Section~\ref{sec:eval-crossmodel}): under the per-command gate no backend from
-the 9\,B to the frontier issued a false \emph{``fixed''}, and every model run without it
-cleared a live finding it could not reproduce. That reframes what a stronger model buys.
+the 9\,B to the frontier issued a false \emph{``fixed''}, while three of the four run
+without it cleared a live finding they could not reproduce. That reframes what a stronger
+model buys.
 Under the gate, capability is a matter of \emph{operator effort}, not of safety --- a
-weaker local model shifts the multi-step work onto the human but reaches the same
-verdicts, which is what licenses the local option (Section~\ref{subsec:eval-local}); and
+weaker local model shifts the multi-step work onto the human and declines more findings,
+but it never clears a live one, which is what licenses the local option
+(Section~\ref{subsec:eval-local}); and
 it is the reasoning backend, not the gate, that moves wall-clock, since removing the
 gate saved under three minutes in thirty. Cheap and load-bearing at once, the gate is
 the part of the contract that should stay on by default: it costs almost nothing and
@@ -506,7 +560,8 @@ prevents, across the whole capability range, the single error the tool must neve
 \subsection{Why local models, despite the gap}
 \label{subsec:eval-local}
 
-That the hosted backend scores higher raises an obvious question, why support a
+That the hosted backend does the same work with far less help raises an obvious question,
+why support a
 local one at all, and the answer is the reason the system was built model-agnostic
 (Section~\ref{subsec:stack}). Two properties of local deployment matter more, for this
 task, than the accuracy points a hosted model buys. The first is \emph{privacy}. A
