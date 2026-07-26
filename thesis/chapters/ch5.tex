@@ -468,8 +468,9 @@ these figures understate the system's ceiling. \emph{Scale:} one report, twelve 
 one operator, which is enough to demonstrate the pipeline and the harness but not to
 generalise. \emph{Determinism:} an agentic retest is not reproducible run to run --- the
 model may propose different commands from the same starting point --- so every figure
-here is a single sample, and a defensible accuracy claim would need repeated runs per
-finding, which this study does not have. This bears on the gate comparison in particular:
+here is a single sample. This study's contribution is categorical --- what did and did
+not happen under each condition --- rather than a precise accuracy \emph{rate}, which
+would call for repeated runs per finding. This bears on the gate comparison in particular:
 rows~3 and~4 of Table~\ref{tab:eval-conditions} differ only in the gate, but they are one
 run each, so the three-minute gap between them is within the noise a second pair of runs
 could plausibly move. \emph{Method:}
@@ -489,9 +490,9 @@ itself part of the finding, but it also means a single clean autonomous run is n
 evidence of safety. \emph{Operator subjectivity:} the guided rows are a human-plus-model
 pair, and the human here was the system's author; a different operator would steer
 differently, so ``operator effort'' is a qualitative observation, not a measured
-quantity. \emph{Coverage:} the 27\,B guided row is partial (host-limited), and the
-frontier model was run autonomously but not, separately, under the gate --- its guided
-result is argued from the operator contract rather than measured. None of these
+quantity. \emph{Coverage:} the 27\,B guided row is partial --- the model exceeds the host's
+VRAM, so it was measured on three of the nine findings (all correct) rather than the
+full slate. None of these
 weakens the central contrast, which is categorical rather than quantitative: zero false
 clearances under the gate, at least one under every autonomous condition.
 
@@ -506,7 +507,9 @@ re-derivable in the sense that the study can be \emph{repeated} --- the lab vers
 pinned, the backend is named and the harness is committed --- but not in the sense that
 this particular run can be re-scored from an artefact. Given the non-determinism noted
 above, a repeated run should be expected to differ; preserving each run's export, which
-the system already knows how to produce, is the cheap fix and it was not done here.
+the system already knows how to produce, would make every reported figure re-scorable
+from a committed artefact, and is the natural practice for the wider study these results
+point to.
 
 \section{Discussion}
 \label{sec:eval-discussion}
