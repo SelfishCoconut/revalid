@@ -39,8 +39,8 @@ without a human saying yes. What comes out is a verdict — `fixed` or
 
 ## What it does
 
-**Get findings in — three doors, one destination.** A PDF report (pdfplumber
-extraction, then LLM structuring — FR-01/FR-03), a DefectDojo-style JSON export
+**Get findings in — three doors, one destination.** A PDF report (PyMuPDF4LLM
+Markdown extraction, then whole-document LLM structuring — FR-01/FR-03), a DefectDojo-style JSON export
 (pure schema mapping, no LLM — FR-02), or manual entry (the escape hatch when a
 model cannot reliably ingest a report — ADR-0020). All three land on a `ready`
 report with findings attached, so everything downstream is identical. Every

@@ -1,16 +1,14 @@
 """Shared fixtures and deterministic LLM stand-ins for the test suite.
 
-Keeps the FR-03 extraction stand-in in one place so every test that ingests the
-committed fixture report drives the same offline ``FunctionModel`` (no network).
+The FR-03 extraction stand-in lives in :mod:`tests._extract_helpers` so every
+tier drives the same offline ``FunctionModel`` (no network): it turns a whole
+report into its list of findings in one call, matching the production shape
+(ADR-0047).
 """
-
-import re
-from typing import Any
 
 import pytest
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from revalid.extract import (
@@ -19,43 +17,13 @@ from revalid.extract import (
     build_extraction_agent,
     build_metadata_agent,
 )
-
-_SEVERITIES = ("critical", "high", "medium", "low", "info")
-
-
-def _candidate_text(messages: list[ModelMessage]) -> str:
-    """Return the last user-prompt text (one report candidate) from the messages."""
-    for message in reversed(messages):
-        for part in getattr(message, "parts", ()):
-            if isinstance(part, UserPromptPart) and isinstance(part.content, str):
-                return part.content
-    return ""
-
-
-def _fake_extractor(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-    """Deterministically turn one report candidate into one complete finding."""
-    text = _candidate_text(messages)
-    severity = next((s for s in _SEVERITIES if s in text.lower()), "info")
-    finding: dict[str, Any] = {
-        "title": text.splitlines()[0].strip() if text.strip() else "Untitled",
-        "severity": severity,
-        "description": "Extracted from the report excerpt.",
-        "impact": "Attacker-controlled outcome.",
-        "attack_vector": "As described.",
-        "affected_endpoints": re.findall(r"/(?:rest|#)[\w/{}?=.#-]*", text),
-        "reproduction_steps": [
-            line.strip() for line in text.splitlines() if re.match(r"\d+\.\s", line.strip())
-        ],
-    }
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"response": [finding]})]
-    )
+from tests._extract_helpers import fake_extractor
 
 
 @pytest.fixture
 def extraction_agent() -> Agent[None, list[ExtractedFinding]]:
     """A finding-extraction agent backed by a deterministic FunctionModel (no network)."""
-    return build_extraction_agent(FunctionModel(_fake_extractor))
+    return build_extraction_agent(FunctionModel(fake_extractor))
 
 
 @pytest.fixture

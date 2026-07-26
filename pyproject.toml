@@ -10,9 +10,10 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "httpx>=0.27",
-    "pdfplumber>=0.11",
     "pydantic>=2.9",
     "pydantic-ai-slim[anthropic,openai]>=2.9.0",
+    "pymupdf>=1.28.0",
+    "pymupdf4llm>=1.28.0",
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0",
     "uvicorn>=0.32",
@@ -110,10 +111,11 @@ strict = true
 files = ["src", "tests", "scripts"]
 pretty = true
 
-# pdfplumber ships no type information (no py.typed); reportlab is a dev-only
+# pymupdf4llm ships no type information (no py.typed); reportlab is a dev-only
 # dependency used by the fixture generator. Silence missing-import errors.
+# (pymupdf itself ships stubs, so it is not listed here.)
 [[tool.mypy.overrides]]
-module = ["pdfplumber.*", "reportlab.*"]
+module = ["pymupdf4llm.*", "reportlab.*"]
 ignore_missing_imports = true
 
 # playwright is the optional `browser` extra — not installed in the lint/unit CI

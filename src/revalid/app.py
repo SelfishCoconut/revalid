@@ -728,8 +728,8 @@ def _run_cancellable_extraction(
 
     Mirrors the retest turn's cancellable run: the loop + task are held by the
     ``extractions`` registry so a Stop or delete can cancel the in-flight model call
-    immediately (not just between candidates). A no-op factored out of
-    :func:`run_extraction` so the background worker stays a single try/except.
+    immediately, mid-call. A no-op factored out of :func:`run_extraction` so the
+    background worker stays a single try/except.
     """
     loop = asyncio.new_event_loop()
     try:
@@ -761,12 +761,13 @@ def run_extraction(
     already closed once the ``202`` was sent) and it never blocks the event
     loop. The report is always moved out of ``extracting``: to ``ready`` with its
     findings persisted, ``failed`` with the error recorded, or — when the operator
-    stopped it (issue #205) — ``cancelled`` keeping whatever was extracted, so the
-    UI's status poll always terminates.
+    stopped it (issue #205) — ``cancelled``, so the UI's status poll always
+    terminates.
 
-    Cancellation (issue #205): ``extractions`` is polled between finding candidates.
-    An operator Stop keeps the partial findings and lands ``cancelled``; a report
-    delete flags ``"deleted"`` so this persists nothing into the row being removed.
+    Cancellation (issue #205): a Stop or delete interrupts the single in-flight
+    model call via ``extractions``. Because extraction is one whole-document call, a
+    Stop lands ``cancelled`` with no findings; a report delete flags ``"deleted"`` so
+    this persists nothing into the row being removed.
 
     Args:
         sessions: The app's session factory (each task opens a fresh session).
@@ -817,11 +818,12 @@ def _settle_cancelled_extraction(
     findings: Iterable[Finding],
     extractions: ExtractionRegistry,
 ) -> None:
-    """Land a stopped extraction (issue #205): keep partial findings unless deleting.
+    """Land a stopped extraction (issue #205): mark cancelled unless deleting.
 
-    An operator Stop marks the report ``cancelled`` and persists the findings that
-    completed before the stop. A ``"deleted"`` flag means the report row is being
-    removed, so nothing is persisted. Clears the cancel flag either way.
+    An operator Stop marks the report ``cancelled``; because extraction is a single
+    whole-document call it completed no findings, so ``findings`` is empty. A
+    ``"deleted"`` flag means the report row is being removed, so nothing is
+    persisted. Clears the cancel flag either way.
     """
     reason = extractions.cancel_reason(report_id)
     extractions.clear(report_id)
@@ -1647,12 +1649,13 @@ def _register_report_cancel_route(
 
     @router.post("/reports/{report_id}/cancel", response_model=ReportOut, status_code=202)
     def cancel_report(report_id: int, session: SessionDep) -> ReportOut:
-        """Stop an in-flight extraction, keeping whatever was extracted (issue #205).
+        """Stop an in-flight extraction (issue #205).
 
-        Flags the report so the background task settles it to ``cancelled`` at the
-        next candidate boundary; the operator keeps any findings already extracted.
-        A no-op on a report that is no longer ``extracting`` (already settled) — the
-        current status is returned unchanged. 404 if the report does not exist.
+        Flags the report so the background task interrupts the model call and settles
+        it to ``cancelled``. Extraction is a single whole-document call, so no partial
+        findings are kept. A no-op on a report that is no longer ``extracting``
+        (already settled) — the current status is returned unchanged. 404 if the
+        report does not exist.
         """
         report = session.get(ReportRecord, report_id)
         if report is None:

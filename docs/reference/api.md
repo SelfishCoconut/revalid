@@ -10,8 +10,8 @@ the narrative of how these modules fit together, read
 
 ## Report ingestion and understanding
 
-`pdf` extracts text and finding candidates; `extract` turns those into
-schema-validated findings with an LLM; `ingest` maps DefectDojo-style JSON and
+`pdf` extracts whole-document Markdown; `extract` turns that into
+schema-validated findings in one LLM call; `ingest` maps DefectDojo-style JSON and
 manual entry with no LLM at all; `findings` owns versioning, notes and the
 CVSS/MITRE enrichment every door shares.
 

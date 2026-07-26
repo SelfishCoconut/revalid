@@ -1,19 +1,18 @@
 """Integration test for FR-03: the full PDF → extract → persist pipeline.
 
-Wires the real components — FR-01 extraction of the committed fixture, FR-03
-per-candidate LLM extraction, and SQLite persistence — together. The "LLM" is a
-deterministic ``FunctionModel`` that reads each candidate's text and returns a
-complete finding, so the test proves the wiring and the ≥90% well-formed
-criterion without any network call.
+Wires the real components — FR-01 whole-document extraction of the committed
+fixture, FR-03 single-call LLM extraction, and SQLite persistence — together.
+The "LLM" is a deterministic ``FunctionModel`` that reads the whole report and
+returns its list of findings, so the test proves the wiring and the ≥90%
+well-formed criterion without any network call (ADR-0047).
 """
 
-import re
 from pathlib import Path
 
 import pytest
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, UserPromptPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
+from tests._extract_helpers import fake_extractor
 
 from revalid.db import IN_MEMORY, FindingVersionRecord, create_db_engine, session_factory
 from revalid.domain import Severity
@@ -25,45 +24,14 @@ pytestmark = pytest.mark.integration
 
 FIXTURE = Path(__file__).parents[1] / "data" / "juice_shop_report_synthetic.pdf"
 
-_SEVERITIES = ("critical", "high", "medium", "low", "info")
-
-
-def _candidate_text(messages: list[ModelMessage]) -> str:
-    for message in reversed(messages):
-        for part in getattr(message, "parts", ()):
-            if isinstance(part, UserPromptPart) and isinstance(part.content, str):
-                return part.content
-    return ""
-
-
-def _fake_extractor(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-    """Turn one candidate's text into a complete finding (deterministic stand-in)."""
-    text = _candidate_text(messages)
-    lowered = text.lower()
-    severity = next((s for s in _SEVERITIES if s in lowered), "info")
-    endpoints = re.findall(r"/(?:rest|#)[\w/{}?=.#-]*", text)
-    steps = [line.strip() for line in text.splitlines() if re.match(r"\d+\.\s", line.strip())]
-    finding = {
-        "title": text.splitlines()[0].strip(),
-        "severity": severity,
-        "description": "Extracted from the report excerpt.",
-        "impact": "Attacker-controlled outcome as described.",
-        "attack_vector": "As described in the reproduction steps.",
-        "affected_endpoints": endpoints,
-        "reproduction_steps": steps,
-    }
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name=info.output_tools[0].name, args={"response": [finding]})]
-    )
-
 
 def test_pipeline_extracts_and_persists_all_findings() -> None:
     report = read_pdf(FIXTURE.read_bytes())
-    agent = build_extraction_agent(FunctionModel(_fake_extractor))
+    agent = build_extraction_agent(FunctionModel(fake_extractor))
 
     result = extract_report(agent, report)
 
-    # Every candidate produced a schema-valid finding — 4/4 well-formed (FR-03 ≥90%).
+    # The one call returned four schema-valid findings — 4/4 well-formed (FR-03 ≥90%).
     assert not result.failures
     assert [f.title for f in result.findings] == [
         "Finding 1 — SQL Injection in Login Form",
@@ -85,7 +53,7 @@ def test_pipeline_extracts_and_persists_all_findings() -> None:
 
 def test_extracted_findings_survive_persistence() -> None:
     report = read_pdf(FIXTURE.read_bytes())
-    agent = build_extraction_agent(FunctionModel(_fake_extractor))
+    agent = build_extraction_agent(FunctionModel(fake_extractor))
     findings = extract_report(agent, report).findings
 
     engine = create_db_engine(IN_MEMORY)

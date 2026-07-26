@@ -72,7 +72,7 @@ def _select_model() -> tuple[Model | KnownModelName | str, str]:
 
 
 def main() -> int:
-    """Run the demo: PDF → candidates → LLM extraction → structured findings."""
+    """Run the demo: PDF → Markdown → LLM extraction → structured findings."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", nargs="?", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args()
@@ -100,7 +100,7 @@ def main() -> int:
     print(f"{len(result.findings)} finding(s) extracted, {len(result.failures)} flagged (gate).")
     if result.failures:
         for failure in result.failures:
-            print(f"  flagged: {failure.heading or '(no heading)'} — {failure.error}")
+            print(f"  flagged: {failure.error}")
     return 0
 
 

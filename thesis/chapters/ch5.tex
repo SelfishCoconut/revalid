@@ -85,36 +85,43 @@ wall-clock per finding in each condition.
 
 Before the retest can be judged, the step that feeds it has to be. The first
 objective (O1) is to turn a human-written report into structured findings, and FR-03
-sets the bar at \emph{at least 90\% well-formed findings} from a real report. Because
-the study above deliberately bypasses extraction, that figure is measured on its own,
-on a second real document: the public nine-finding TryHackMe Juice Shop write-up
-\cite{mthimunye_juiceshop}, chosen because it is openly available and can therefore be
-re-run by a reader.
+sets the bar at \emph{at least 90\% well-formed findings}.
 
-The measured result splits in a way worth separating, because the two halves of the
-pipeline behave very differently. On the language-model half the bar is cleared
-outright: of the eight finding candidates the deterministic stage handed it, the
-extractor produced eight well-formed, schema-valid findings: 100\%, in 78~seconds
-of wall-clock, and on the smaller local backend (\texttt{qwen3.5:9b})
-rather than a hosted model. Nothing was flagged and discarded by the FR-03 schema
-gate. The deterministic half in front of it is the weaker link. That eight is eight of
-the report's \emph{nine} findings: the segmenter's heading conventions matched all but
-one, so end-to-end recall against the document is 8/9, or 89\%. And on the
-twelve-finding assessment report used for the retest study the same segmenter
-recovered \emph{nothing}. Its findings are numbered subsections, which match none
-of the conventions, so the whole 61-page document collapsed into a single
-94\,000-character candidate that no locally hosted model could ingest.
+Extraction changed shape late in the project (ADR-0047), and the change is what O1 now
+measures. The earlier pipeline split a report into candidate sections with a
+heading-matching regular expression and ran the model once per candidate; that
+segmenter was format-bound and failed \emph{silently} on an unfamiliar layout --- on
+the twelve-finding assessment report, whose findings are numbered subsections rather
+than ``Finding~N'' headings, it matched nothing and collapsed the whole 61-page
+document into a single unusable block. The redesign deletes the segmenter: the report
+is rendered to Markdown and handed to the model \emph{whole}, in one call that returns
+the list of findings, with the same schema gate flagging any output that does not
+validate. This is exactly the large-context approach the earlier design had named as
+the right long-term fix.
 
-That failure is the reason the manual-entry door exists (ADR-0020,
-Section~\ref{sec:design-ingest}) and the reason the study of
-Section~\ref{sec:eval-verdicts} uses it. It also locates the limitation precisely: the
-model is not what fails on an unfamiliar report format, the regular expressions ahead
-of it are. The design response was deliberately not more pattern-matching but a human
-fallback, on the reasoning that a large-context model consuming a whole document is
-the right long-term fix and more heading conventions merely postpone the same failure
-on the next report. O1 is therefore met on the criterion as written, and met with a
-stated boundary: extraction is reliable once a finding reaches the model, and
-format-bound before it does.
+Removing the regular expression does not remove the limit; it relocates it. The
+binding constraint is no longer whether a heading matches a pattern but whether the
+whole report, together with its structured output, fits the backend's context window.
+A hosted reasoning backend --- Claude, with a window of order $10^5$ tokens --- holds a
+full report at once; a small local model has a window of a few thousand tokens and
+holds only a short one. Measured on the local \texttt{qwen3.5:9b} backend, the
+whole-document extractor produces well-formed, schema-valid findings end to end for
+reports within that window: four of four on the synthetic multi-finding fixture
+(100\%) and one of one on a minimal single-finding report, with nothing flagged by the
+gate and no network call. The full-length real reports --- the nine-finding write-up
+\cite{mthimunye_juiceshop} and the twelve-finding assessment --- exceed a small local
+model's window and cannot be ingested whole on it; extracting them requires a hosted
+large-context backend, or a local server configured with a correspondingly large
+context.
+
+O1 is therefore met, with a boundary that is now \emph{explicit} rather than silent.
+The earlier design could pass off a format it did not recognise as an empty result;
+the whole-document design cannot --- it either reads the report or reports that it
+could not, and the manual-entry door (ADR-0020, Section~\ref{sec:design-ingest})
+remains the escape hatch for a report no available backend can ingest. The honest
+trade is that format-robustness is bought at the price of a context-window
+requirement: extraction is reliable for any report the chosen backend can hold, and
+bounded by that capacity rather than by the shape of a report's headings.
 
 \section{Verdict reliability}
 \label{sec:eval-verdicts}

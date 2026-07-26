@@ -25,7 +25,7 @@ from revalid.extract import (
     extract_report_async,
 )
 from revalid.llm import DEFAULT_MODEL, agent_model_name
-from revalid.pdf import PdfPage, PdfReport, segment_findings
+from revalid.pdf import PdfPage, PdfReport
 
 _VALID: dict[str, Any] = {
     "title": "SQL Injection in Login",
@@ -77,47 +77,30 @@ def test_valid_output_maps_to_domain_findings() -> None:
 
 
 def test_extraction_lineage_recorded_in_raw() -> None:
-    # NFR-02: model name + source text captured so a finding is auditable.
+    # NFR-02: the model name and full extracted payload are captured so a finding
+    # is auditable back to the call that produced it.
     agent = build_extraction_agent(_model_returning(_VALID))
     [finding] = extract_report(agent, _report("some finding text")).findings
     assert finding.raw["source"] == "pdf_extraction"
     assert finding.raw["model"].startswith("function")
-    assert finding.raw["source_text"] == "some finding text"
     assert finding.raw["extracted"]["title"] == "SQL Injection in Login"
 
 
-def test_multiple_findings_from_one_candidate() -> None:
-    # A candidate with no headings (whole document) can yield several findings.
+def test_multiple_findings_from_one_call() -> None:
+    # The single whole-document call can return several findings.
     second = {**_VALID, "title": "Reflected XSS", "severity": "high"}
     agent = build_extraction_agent(_model_returning(_VALID, second))
-    result = extract_report(agent, _report("two findings, no headings"))
+    result = extract_report(agent, _report("two findings in one report"))
     assert [f.title for f in result.findings] == ["SQL Injection in Login", "Reflected XSS"]
 
 
-def test_extract_report_cancels_before_the_first_candidate() -> None:
-    """A cancel requested up front stops before any model call — nothing extracted (#205)."""
+def test_extract_report_cancels_before_the_call() -> None:
+    """A cancel requested up front stops before the model call — nothing extracted (#205)."""
     agent = build_extraction_agent(_model_returning(_VALID))
     result = extract_report(agent, _report("a finding"), should_cancel=lambda: True)
     assert result.cancelled is True
     assert result.findings == ()
     assert result.failures == ()
-
-
-def test_extract_report_keeps_partial_findings_on_cancel() -> None:
-    """A cancel between candidates keeps the ones already extracted (#205)."""
-    text = "Finding 1: SQLi\nfirst body\n\nFinding 2: XSS\nsecond body"
-    report = PdfReport(page_count=1, pages=(PdfPage(number=1, text=text),), text=text)
-    assert len(segment_findings(report)) == 2  # sanity: two candidates, so mid-run cancel is real
-    agent = build_extraction_agent(_model_returning(_VALID))
-    checks = {"n": 0}
-
-    def should_cancel() -> bool:
-        checks["n"] += 1
-        return checks["n"] > 1  # allow the first candidate, then stop before the second
-
-    result = extract_report(agent, report, should_cancel=should_cancel)
-    assert result.cancelled is True
-    assert len(result.findings) == 1  # the first candidate's finding was kept
 
 
 def test_report_stated_cvss_and_mitre_mapped_verbatim() -> None:
@@ -171,7 +154,6 @@ def test_invalid_output_is_flagged_never_persisted() -> None:
 
     assert result.findings == ()
     [failure] = result.failures
-    assert failure.heading == "Finding 9 — bad severity"
     assert failure.source_text == "Finding 9 — bad severity"
     assert "retr" in failure.error.lower()
 

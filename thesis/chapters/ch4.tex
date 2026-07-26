@@ -498,17 +498,19 @@ when no machine reading is wanted or trusted.
 
 \paragraph{Extraction is validate-before-persist.} The PDF path is the one that
 answers O1, and its central design choice is \emph{where the language model is
-allowed to fail}. Text is lifted from the document with \texttt{pdfplumber}
-(ADR-0007) and split into candidate finding sections by heading --- best effort,
-with the whole document kept as a single candidate when no heading is recognised,
-so extraction always has something to work on. The model is then run \emph{once per
-candidate}, and its output must pass a schema gate before it becomes anything: a
-candidate whose output never validates is recorded as a flagged failure rather than
-persisted as a finding (ADR-0009). The system therefore cannot invent a finding
-from a malformed response: the worst case is a section the operator is told was
-not understood, not a fabricated entry. Every finding that does survive keeps the
-exact source text it was drawn from and the name of the model that drew it, so
-version one is traceable to the paragraph it came from.
+allowed to fail}. The whole document is rendered to Markdown with
+\texttt{PyMuPDF4LLM} (ADR-0047) --- headings, tables and lists preserved as
+structure the model can read --- and handed to the model \emph{whole}, in one call
+that returns the list of findings. There is no heading segmentation ahead of it: the
+earlier regular-expression segmenter was format-bound and silently dropped a report
+whose headings it did not recognise, so it was removed in favour of a large-context
+model consuming the entire document. The model's output must pass a schema gate before
+it becomes anything: output that never validates is recorded as a flagged failure
+rather than persisted (ADR-0047). The system therefore cannot invent a finding from a
+malformed response: the worst case is a report the operator is told was not
+understood, not a fabricated entry. Every finding that does survive keeps the name of
+the model that drew it and the extracted payload it was built from, so version one is
+traceable to the call that produced it.
 
 \paragraph{Interpretation, and the honesty of an inference.} Structuring a finding
 is more than copying its fields across: the model is also asked for the CVSS vector
