@@ -68,6 +68,20 @@ Everything runs from **one process on `127.0.0.1`** — single-user, local, noth
 Every screen below is a real capture of the running tool.
 
 <div align="center">
+
+**▶ A two-minute walkthrough** — a manual report upload, an LLM-drafted goal, the gated agentic
+retest with live and operator-run commands, the verdict and its evidence, and a chat that knows the
+findings — all driven by a local model.
+
+<video src="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4" controls muted width="880"></video>
+
+<sub>Player not loading? <a href="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4">Download / watch the walkthrough</a>. · Music: <i>Calmant</i> by <a href="https://incompetech.com/">Kevin MacLeod</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</sub>
+
+</div>
+
+<br/>
+
+<div align="center">
 <img src="assets/screen-overview.png" alt="Overview — the determination ledger" width="880">
 <br/><sub><b>Overview</b> — the determination ledger: one current verdict per finding, worst first.</sub>
 </div>
