@@ -69,13 +69,15 @@ Every screen below is a real capture of the running tool.
 
 <div align="center">
 
-**▶ A two-minute walkthrough** — a manual report upload, an LLM-drafted goal, the gated agentic
-retest with live and operator-run commands, the verdict and its evidence, and a chat that knows the
-findings — all driven by a local model.
+The agent proposes a command, the operator approves it, and the probe confirms the finding is
+still open — the core loop:
 
-<video src="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4" controls muted width="880"></video>
+<a href="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4"><img src="assets/revalid-demo-preview.gif" alt="The approval gate — the agent proposes a curl probe, the operator approves, and the response confirms the SQL injection is still open" width="880"></a>
 
-<sub>Player not loading? <a href="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4">Download / watch the walkthrough</a>. · Music: <i>Calmant</i> by <a href="https://incompetech.com/">Kevin MacLeod</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</sub>
+<sub><b><a href="https://github.com/SelfishCoconut/revalid/releases/download/v1.0.0/revalid-demo.mp4">▶ Watch the full two-minute walkthrough</a></b> (with narration) — manual report upload, an
+LLM-drafted goal, the gated agentic retest with live and operator-run commands, the verdict and its
+evidence, and a chat that knows the findings — all on a local model. · Music: <i>Calmant</i> by
+<a href="https://incompetech.com/">Kevin MacLeod</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</sub>
 
 </div>
 
