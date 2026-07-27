@@ -65,9 +65,7 @@ attempt played.
 
 \begin{table}[htbp]
 \caption[Evolution of the project across earlier attempts]{Evolution from the
-\emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool. The
-decisive lessons were to narrow the scope from pentesting to revalidation, and to match
-the AI-workflow ceremony to that narrower scope.}
+\emph{Adeptus} pentesting platform to the focused \emph{revalid} retesting tool.}
 \label{tab:evolution}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -138,11 +136,8 @@ Figure~\ref{fig:milestones} lays out this milestone sequence.
 \foreach \x in {10.2, 12.5} {\node[rel, anchor=north] at (\x,-0.22) {v1.0.0};}
 \end{tikzpicture}%
 }
-\caption[Milestone sequence of the project]{The six feature-complete milestones, from
-the M1 walking skeleton to the M6 agentic console. Milestones M1--M4 each closed with a
-semantically versioned release (v0.1.0--v0.4.0); M6 and M5 closed together as v1.0.0,
-because the agentic console had to be feature-complete before the evaluation that
-measures it could be run --- which is also why the two appear out of numerical order.}
+\caption[Milestone sequence of the project]{The six feature-complete milestones, from the
+M1 walking skeleton to the M6 agentic console.}
 \label{fig:milestones}
 \end{figure}
 
@@ -174,10 +169,8 @@ this pipeline.
 \foreach \a/\b in {issue/branch, branch/pr, pr/ci, ci/merge, merge/val} {\draw[->, gris50, thick] (\a) -- (\b);}
 \end{tikzpicture}%
 }
-\caption[The continuous-integration development pipeline]{The development pipeline.
-Each change starts from a board issue and reaches the main branch only through a
-green CI gate (highlighted); the author's validation is asynchronous, after the
-squash auto-merge, and may schedule follow-up work.}
+\caption[The continuous-integration development pipeline]{The development pipeline, from
+board issue to asynchronous validation, with the blocking CI gate highlighted.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -199,9 +192,7 @@ what the technology is and why it was adopted for this project --- grouped by th
 role it plays.
 
 \begin{table}[htbp]
-\caption[Technology stack of the system]{The technology stack, by layer. The
-Pydantic AI abstraction is what makes the language-model backend swappable between a
-cloud and a local provider without code changes.}
+\caption[Technology stack of the system]{The technology stack, by layer.}
 \label{tab:stack}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -439,18 +430,17 @@ service, through the seven workflows summarised in Table~\ref{tab:workflows}. Th
 into three groups by the role each plays: the per-change gates that authorise a merge,
 the scheduled audits that catch what no single change can reveal, and the workflows
 that keep the project's published artefacts, and its record of work, in step with the
-code.
+code. All ten jobs of the two per-change workflows, CI and Security, are declared
+required in branch protection and therefore block the merge, which is what ADR-0003 asks
+of the gate: the required set is the \emph{complete} set of per-change jobs, so no check
+can quietly become advisory. The slow and longitudinal checks run on a schedule instead,
+so that a flaky lab container or a weekly metrics run never stops an unrelated change,
+and the last three workflows perform no verification at all, keeping the published
+artefacts and the board in step with the code.
 
 \begin{table}[!htbp]
-\caption[The seven continuous-integration workflows]{The seven GitHub~Actions
-workflows and what each enforces. All ten jobs of the two per-change workflows ---
-CI and Security --- are declared required in branch protection and therefore block
-the merge, which is what ADR-0003 asks of the gate: the required set is the
-\emph{complete} set of per-change jobs, so no check can quietly become advisory.
-The slow and longitudinal checks run on a
-schedule instead, so that a flaky lab container or a weekly metrics run never stops
-an unrelated change; the last three workflows perform no verification (``n/a'') but
-keep the project's published artefacts and its board in step with the code.}
+\caption[The seven continuous-integration workflows]{The seven GitHub~Actions workflows
+and what each enforces.}
 \label{tab:workflows}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}

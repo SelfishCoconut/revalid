@@ -11,22 +11,67 @@ surrendering the human judgement that a compliance-grade verdict demands. The re
 \emph{revalid}, is a deliberately narrow tool: it does not discover or exploit
 vulnerabilities, but re-executes the reproduction steps of an already-reported finding
 under a per-command human gate and returns a conservative, evidence-linked verdict.
-Whether that specialisation earns its keep is ultimately an empirical question. The
-first three objectives are realised in the artefact: penetration-test reports are
-analysed into findings and their reproduction steps, those steps are interpreted into
-gated verification commands, and a human-supervised retest turns them into an
-evidence-backed verdict. The fourth, a quantitative evaluation of verdict
-reliability and of the effort saved over manual retesting, is addressed by the study of
-Chapter~\ref{ch:evaluation}, which exercises the whole pipeline against a real report on a
-live target: eight of twelve findings correctly confirmed on a small local model, four
-hedged, no false clearance on any of them, and a machine time of the same order as a
-manual pass. A wider study across more reports, more targets and repeated runs per
-finding is the direction those figures point; what the cross-model comparison already
-shows is that the safety of the result rests on the approval gate rather than on the
-capability of the model behind it. Those runs exercised the gate programmatically
-(Section~\ref{sec:eval-threats}), so validating it with human operators is the first item
-of the wider study. This closing chapter steps back from the artefact
-to set down what the work \emph{taught}, and how the degree made it possible.
+This closing chapter first states what was achieved against each objective set out in
+Section~\ref{sec:objectives}, then steps back from the artefact to set down what the
+work \emph{taught}, and the directions it opens.
+
+\section{Fulfilment of the objectives}
+\label{sec:objectives-met}
+
+\bft{General objective.} A functional tool has been designed, built and evaluated that
+automates the retesting of reported vulnerabilities using artificial intelligence while
+keeping a human in control of every action that touches a target. \emph{revalid} takes a
+penetration-test report through to an evidence-backed verdict on each of its findings,
+and Chapter~\ref{ch:evaluation} exercises that pipeline end to end against a real report
+on a live target rather than on a fixture. The general objective is met, with the scope
+it was stated at: a local, single-operator tool validated on one report and one target,
+not a platform proven across an engagement portfolio.
+
+\bft{O1: analyse and structure penetration-test reports.} The objective is met, and its
+boundary is known. Report ingestion renders a PDF to structured Markdown and hands the
+whole document to an extraction agent that returns each finding with its description,
+impact, attack vector, affected endpoints and ordered reproduction steps, every field
+passing a schema gate before persistence and every model-supplied value marked as
+inferred so it can never be mistaken for something the report stated. Measured against
+FR-03's bar of at least 90\% well-formed findings, extraction returned five of five on
+the fixtures (Section~\ref{sec:eval-extraction}). Whole-document extraction from a
+\emph{full-length} report, however, needs a large-context backend, and was not achievable
+on the small local models this evaluation ran on; the manual-entry path
+(Section~\ref{sec:design-ingest}) is the escape hatch in that case, and the evaluation
+used it. The limitation is one of backend capacity, not of the method.
+
+\bft{O2: interpret reproduction steps into executable actions.} The objective is met.
+The retest agent turns a finding's natural-language reproduction steps into concrete,
+non-destructive verification commands, composed against the live target and revised in
+light of what each returns rather than emitted as a fixed script. The evidence is in the
+retests themselves: eight findings were confirmed from their prose steps alone, several
+of them on a single gated command (Section~\ref{sec:eval-verdicts}), which is the
+objective's claim demonstrated rather than asserted.
+
+\bft{O3: develop an automated, human-supervised retesting system.} The objective is met,
+and it is the part of the work the evaluation supports most strongly. The system executes
+verification actions against an authorised target inside a network-isolated sandbox, gates
+every command on an explicit human approval that is structurally required rather than
+merely checked, and returns a three-valued verdict of \emph{still-open}, \emph{fixed} or
+\emph{inconclusive} backed by the command output it was drawn from. Across twelve findings
+it returned the correct \emph{still-open} verdict on eight, hedged \emph{inconclusive} on
+four, and issued no false clearance on any (Section~\ref{sec:eval-verdicts}). The
+cross-model study sharpens the point: under the gate not one of four backends cleared a
+live vulnerability, while three of the four did so when the gate was removed
+(Section~\ref{sec:eval-crossmodel}). The safety of the result rests on the approval gate,
+not on the capability of the model behind it.
+
+\bft{O4: evaluate the accuracy and usefulness of the system.} The objective is met, within
+limits this work states rather than glosses. Accuracy was scored against ground truth by an
+automated harness, yielding the eight-of-twelve confirmation with no false clearance
+reported above. Effort was measured as well: 52~minutes of machine time for all twelve
+findings on a local backend, the eight confirmed ones averaging 3.4~minutes and the
+quickest landing in about a minute (Section~\ref{sec:eval-time}). The comparison also
+overturned the expected trade-off, since removing the gate bought no meaningful speed and
+cost a confirmation. What the study cannot claim is generality: one report, one target and
+one run per condition, with the approvals issued programmatically rather than by a person
+(Section~\ref{sec:eval-threats}). The figures establish the direction and the mechanism;
+a wider study, with human operators holding the gate, is the first item of future work.
 
 \section{Lessons learned}
 \label{sec:lessons}

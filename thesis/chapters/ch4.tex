@@ -35,11 +35,7 @@ that is a design outcome rather than an omission --- Section~\ref{sec:design-evo
 argues why.
 
 \begin{table}[!htbp]
-\caption[Requirements and their status in the delivered system]{The nineteen
-functional and five non-functional requirements, and what became of each. Five
-functional requirements (FR-04, FR-05, FR-07, FR-08 and FR-14) were
-implemented, tested and then removed or repurposed when the retest model changed;
-they are discussed in Section~\ref{sec:design-evolution} rather than hidden.}
+\caption[Requirements and their status in the delivered system]{The nineteen functional and five non-functional requirements, and what became of each.}
 \label{tab:requirements}
 \scriptsize
 \renewcommand{\arraystretch}{1.10}
@@ -90,23 +86,14 @@ system makes.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-use-cases.pdf}
-\caption[Use-case model]{The use-case model, with each case labelled by the
-requirement it realises. The auditor is the only actor that decides; the
-language-model backend can only propose. The retest group is collapsed here and
-expanded in Figure~\ref{fig:arch-use-cases-retest}.}
+\caption[Use-case model]{The use-case model, each case labelled by the requirement it realises. The retest group is expanded in Figure~\ref{fig:arch-use-cases-retest}.}
 \label{fig:arch-use-cases}
 \end{figure}
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-use-cases-retest.pdf}
-\caption[Use-case model: revalidating a finding]{The retest group of
-Figure~\ref{fig:arch-use-cases}, expanded. This is where the design's claims are
-visible as relations: approving or rejecting each command, and concluding the
-session, are \emph{included} in a retest session --- they are not optional
-extensions of it, which the three genuine extensions (running a command personally,
-steering the agent, handing over the wheel) are. The authorised target is reachable
-only through the session itself.}
+\caption[Use-case model: revalidating a finding]{The retest group of Figure~\ref{fig:arch-use-cases}, expanded.}
 \label{fig:arch-use-cases-retest}
 \end{figure}
 
@@ -133,11 +120,7 @@ targets being retested.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.62\textwidth]{figs/arch-context.pdf}
-\caption[System context]{The system in its context. The auditor uploads a report,
-sets a retest goal, approves commands and reads verdicts. The system sends finding
-text to a language-model backend and non-destructive verification commands to the
-authorised target --- and reaches that target only from inside the sandbox of
-Section~\ref{sec:design-runtime}.}
+\caption[System context]{The system in its context: the auditor, the language-model backend and the authorised target.}
 \label{fig:arch-context}
 \end{figure}
 
@@ -161,11 +144,7 @@ process; durable state is a single SQLite file.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.84\textheight]{figs/arch-containers.pdf}
-\caption[Container view]{The container view. Everything inside the dashed
-boundary is one operating-system process bound to the loopback interface
-(NFR-03). The interface talks to the API over JSON and, during a retest, a
-WebSocket; approved commands reach the target only from inside the egress-locked
-sandbox.}
+\caption[Container view]{The container view. Everything inside the dashed boundary is one process bound to the loopback interface (NFR-03).}
 \label{fig:arch-containers}
 \end{figure}
 
@@ -185,15 +164,15 @@ session lives partly in memory, so a restart abandons it.
 Figure~\ref{fig:arch-components} opens the backend container. Each box is a
 Python module and each arrow is a real import, which makes the diagram checkable:
 it is generated from the same source the documentation publishes, and a
-dependency drawn here that does not exist in the code is a bug in the drawing.
+dependency drawn here that does not exist in the code is a bug in the drawing. At its
+centre sits \texttt{app.py}, the composition root: it owns the routes, wires every
+dependency and schedules background work. Arrows into \texttt{domain.py} are omitted
+from the figure for legibility, since every module imports it.
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-components.pdf}
-\caption[Component view of the backend]{The backend modules and their real import
-edges, grouped by concern. \texttt{app.py} is the composition root: it owns the
-routes, wires every dependency and schedules background work. Arrows to
-\texttt{domain.py} are omitted --- every module imports it.}
+\caption[Component view of the backend]{The backend modules and their real import edges, grouped by concern.}
 \label{fig:arch-components}
 \end{figure}
 
@@ -246,10 +225,7 @@ finding cannot be altered in passing by a component that merely reads it.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth,height=0.8\textheight,keepaspectratio]{figs/arch-class-domain.pdf}
-\caption[Domain class model]{The domain core. A finding composes its CVSS and
-ATT\&CK taxonomy, each carrying an \texttt{inferred} flag; agentic evidence is an
-explanation plus a real command's captured output. All are frozen, and the module
-imports nothing else in the system.}
+\caption[Domain class model]{The domain core: findings, their taxonomies and agentic evidence, all frozen.}
 \label{fig:arch-class-domain}
 \end{figure}
 
@@ -274,11 +250,7 @@ column, below it nothing handles a domain object.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-class-persistence.pdf}
-\caption[Persistence class model]{The persistence layer. Composition (filled
-diamonds) marks a part with no independent existence, such as a finding version or a
-transcript event, while aggregation marks a record that outlives and is queried
-apart from its parent. The conversion methods on three of the classes are the
-entire seam between the database and the domain.}
+\caption[Persistence class model]{The persistence layer, with composition marking parts that have no independent existence.}
 \label{fig:arch-class-persistence}
 \end{figure}
 
@@ -296,10 +268,7 @@ and the one place where a structural guarantee replaces a policy.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.72\textheight]{figs/arch-class-retest.pdf}
-\caption[Agentic retest class model]{The retest collaboration. The agent's turn
-resolves to exactly one of three outputs; the sandbox is a structural protocol with
-a real and a fake implementation; and the live session state --- deliberately not
-persisted --- is held in a process-local registry.}
+\caption[Agentic retest class model]{The retest collaboration: the agent's turn, the sandbox protocol and the live session registry.}
 \label{fig:arch-class-retest}
 \end{figure}
 
@@ -327,10 +296,7 @@ models, so it cannot describe a document the code does not produce.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.5\textheight]{figs/arch-class-export.pdf}
-\caption[Export document class model]{The versioned export. A run composes its
-reports, findings (each with its version history and notes) and verdicts with
-their evidence, plus neutral metrics. The published JSON Schema is generated from
-these classes.}
+\caption[Export document class model]{The versioned export, from which the published JSON Schema is generated.}
 \label{fig:arch-class-export}
 \end{figure}
 
@@ -349,12 +315,7 @@ design the topology \emph{is} the control.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-deployment.pdf}
-\caption[Deployment and network topology]{Runtime topology, in the lab
-configuration the evaluation uses. Dashed edges are connections that \textbf{do not
-exist}: the per-session Docker network is created in \texttt{internal} mode, so it
-has no gateway and the sandbox can reach neither the host nor the internet. The lab
-container is the only other member of that network, and therefore the only host the
-agent can reach.}
+\caption[Deployment and network topology]{Runtime topology in the lab configuration used by the evaluation. Dashed edges are connections that do not exist.}
 \label{fig:arch-deployment}
 \end{figure}
 
@@ -380,28 +341,30 @@ and~\ref{fig:topology-gateway} show the two arrangements side by side, which is 
 clearest way to see that they are not two settings of one mechanism but two different
 kinds of guarantee.
 
+In the lab arrangement (ADR-0025), containment is a matter of membership. Docker gives a
+network created with \texttt{internal=True} no gateway address, so there is no default
+route out of it, neither to the internet nor to the operator's own machine; the
+authorised target is then attached to that network, which makes it the sandbox's only
+reachable peer. Here the allowlist \emph{is} the membership list. The gateway
+arrangement (ADR-0045) applies when the scope names a host that is not the lab, and
+there containment rests on a filter the sandbox cannot reach. The sandbox holds
+\texttt{NET\_RAW}, so every tool works rather than HTTP clients alone, but it does not
+hold \texttt{NET\_ADMIN}, and it has no network stack of its own: it shares the
+gateway's. Every packet it emits therefore originates in a namespace whose filter it has
+no privilege to change, and \texttt{iptables -F} from inside returns \emph{Operation not
+permitted}.
+
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-topology-lab.pdf}
-\caption[Lab topology: containment by membership]{Lab topology (ADR-0025).
-Docker gives a network created with \texttt{internal=True} no gateway address, so
-there is no default route out of it, neither to the internet nor to the operator's
-own machine. The authorised target is then connected to that network, which makes it
-the sandbox's only reachable peer: here the allowlist \emph{is} the membership list,
-and the dashed edge is a connection that does not exist.}
+\caption[Lab topology: containment by membership]{Lab topology (ADR-0025): containment by network membership.}
 \label{fig:topology-lab}
 \end{figure}
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-topology-gateway.pdf}
-\caption[Gateway topology: containment by an unreachable filter]{Gateway topology
-(ADR-0045), used when the scope names a host that is not the lab. The sandbox holds
-\texttt{NET\_RAW}, so every tool works and not only HTTP clients, but not
-\texttt{NET\_ADMIN}, and it has no network stack of its own: it shares the gateway's.
-Every packet it emits therefore originates in a namespace whose filter it has no
-privilege to change, and \texttt{iptables -F} from inside returns \emph{Operation not
-permitted}.}
+\caption[Gateway topology: containment by an unreachable filter]{Gateway topology (ADR-0045): containment by a filter the sandbox cannot change.}
 \label{fig:topology-gateway}
 \end{figure}
 
@@ -429,10 +392,7 @@ design weight.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-data-model.pdf}
-\caption[Entity relationships]{The persisted entities. A report yields findings;
-a finding owns an append-only chain of versions, its stage-tagged notes, its
-retest sessions and its verdicts; a session owns its transcript. Chat threads are
-independent of the rest.}
+\caption[Entity relationships]{The persisted entities and the ownership between them.}
 \label{fig:arch-data-model}
 \end{figure}
 
@@ -441,16 +401,14 @@ holds almost nothing: an identifier and a link to the report it came from.
 Every field a human reads lives in an append-only chain of versions, illustrated
 in Figure~\ref{fig:arch-version-lineage}. Version one is always what the machine
 proposed; each operator correction appends a new version with the reason it was
-made, and nothing is ever overwritten.
+made, nothing is ever overwritten, and the current view is simply the highest version.
+Notes are handled differently: they attach to the finding's stable identity rather than
+to any one version, and each is tagged with the pipeline stage on which it was written.
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.42\textwidth]{figs/arch-version-lineage.pdf}
-\caption[Finding version lineage]{A finding's lineage. Version~1 is the
-extraction, which is what the model proposed. Each operator correction appends an
-immutable version carrying the reason for the change, and the current view is
-simply the highest. Notes attach to the stable identity and are tagged with the
-pipeline stage on which they were written.}
+\caption[Finding version lineage]{A finding's lineage: the extraction, and one immutable version per operator correction.}
 \label{fig:arch-version-lineage}
 \end{figure}
 
@@ -566,12 +524,7 @@ Figure~\ref{fig:arch-gated-execution} traces one iteration.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[height=0.74\textheight]{figs/arch-gated-execution.pdf}
-\caption[One iteration of the gated retest loop]{The gated command cycle. The
-agent reasons and proposes; the run pauses, unresolved, and the proposal is
-appended to the transcript. Only after the operator approves does the command run
-inside the sandbox, and only then is its real output returned to the agent as the
-tool's result. A rejection resumes the agent with the denial and the operator's
-reason, so a refusal is information rather than a dead end.}
+\caption[One iteration of the gated retest loop]{The gated command cycle: propose, pause, approve, execute, return the real output.}
 \label{fig:arch-gated-execution}
 \end{figure}
 
@@ -592,11 +545,7 @@ step that causes something to happen in the world is the operator's.
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{figs/arch-retest-activity.pdf}
-\caption[The retest loop as an activity]{The retest loop, partitioned by
-responsibility. Note that the operator's decision node has four outgoing edges, not
-two: besides approving or rejecting, they may send a message, which withdraws
-the pending command and re-steers the agent, or conclude the retest themselves
-at any point.}
+\caption[The retest loop as an activity]{The retest loop, partitioned by responsibility.}
 \label{fig:arch-retest-activity}
 \end{figure}
 
@@ -608,15 +557,7 @@ Figure~\ref{fig:arch-session-lifecycle} gives the states a session moves through
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth]{figs/arch-session-lifecycle.pdf}
-\caption[Retest session lifecycle]{The session state machine: five live states and
-three terminal ones. The loop between \emph{working} and
-\emph{awaiting\_command} is the gated cycle of
-Figure~\ref{fig:arch-gated-execution}: an approved command runs \emph{inside}
-the next working turn, which is why there is no separate executing state.
-\emph{awaiting\_operator} is deliberately non-terminal: an agent that has run out
-of ideas hands the session back instead of producing a verdict. The one edge out
-of a terminal state is \emph{reopen}: an operator who no longer stands behind a
-recorded verdict withdraws it and resumes testing (ADR-0043).}
+\caption[Retest session lifecycle]{The session state machine: five live states and three terminal ones.}
 \label{fig:arch-session-lifecycle}
 \end{figure}
 

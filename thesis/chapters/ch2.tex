@@ -1,4 +1,4 @@
-\chapter{State of the Art}
+\chapter{Technical Background}
 \label{ch:sota}
 
 % Allow a little extra line stretch so long technical compounds rebreak
@@ -31,9 +31,11 @@ learning-based autonomous agents (Section~\ref{sec:automation}). The following
 two sections concentrate on the technology that makes this work possible: large
 language models (LLMs) and the tool-using agents built on top of them
 (Section~\ref{sec:llm-agents}), and the extraction of structured information from
-the unstructured prose of security reports (Section~\ref{sec:ie}). The chapter
-closes with a synthesis that positions the proposed system against related work
-and identifies the narrow gap it targets (Section~\ref{sec:gap}).
+the unstructured prose of security reports (Section~\ref{sec:ie}). It then reviews
+the state of the art proper, the tools an organisation can actually buy or download
+today to revalidate a finding (Section~\ref{sec:sota}), and closes with a synthesis
+that positions the proposed system against them and identifies the narrow gap it
+targets (Section~\ref{sec:gap}).
 
 \section{How the literature was searched}
 \label{sec:search-strategy}
@@ -116,10 +118,7 @@ should be automated: the activity is described as a human responsibility, to be
 repeated in full whenever a fix is deployed.
 
 \begin{table}[htbp]
-\caption[Treatment of revalidation in penetration-testing standards]{How the
-principal penetration-testing methodologies position the revalidation (retest)
-phase. Every standard expects re-verification, yet none specifies how to
-automate it.}
+\caption[Treatment of revalidation in penetration-testing standards]{How the principal penetration-testing methodologies position the revalidation (retest) phase.}
 \label{tab:standards}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -180,10 +179,7 @@ rather than a one-off task.
 \draw[->, rojo, very thick] (rev) -- (id);
 \node[font=\footnotesize\itshape, text=rojo, below=4pt of rev] {automated in this work};
 \end{tikzpicture}
-\caption[The vulnerability-management lifecycle]{The vulnerability-management
-lifecycle: a finding moves from identification through prioritisation and
-remediation to revalidation, the retest that confirms the fix before the cycle
-repeats. The revalidation phase (highlighted) is the one this work automates.}
+\caption[The vulnerability-management lifecycle]{The vulnerability-management lifecycle, with the revalidation phase this work automates highlighted.}
 \label{fig:lifecycle}
 \end{figure}
 
@@ -237,11 +233,7 @@ autonomy they trace.
 \draw[->, gris50, thick] (w2) -- (w3);
 \draw[->, thick, tema] ($(w1.south west)+(0,-0.6)$) -- node[below, font=\footnotesize\itshape, text=gris25] {increasing autonomy, decreasing human involvement} ($(w3.south east)+(0,-0.6)$);
 \end{tikzpicture}
-\caption[The three waves of security-testing automation]{The three waves of
-security-testing automation, from pattern-matching scanners to autonomous
-language-model agents. Each wave delegates more of the task to the machine; the
-system proposed in this work deliberately reintroduces a human decision on every
-action.}
+\caption[The three waves of security-testing automation]{The three waves of security-testing automation, from pattern-matching scanners to autonomous language-model agents.}
 \label{fig:waves}
 \end{figure}
 
@@ -358,7 +350,7 @@ post-compromise attacker actions.
 These capabilities have moved from research prototypes into operational tools that
 work in much the same way as the retest agent developed here: an agent proposes an
 action, runs it, observes the result and iterates. The offensive systems introduced
-in Section~\ref{sec:motivation} are instances of this shift: the autonomous
+in Section~\ref{sec:intro-context} are instances of this shift: the autonomous
 penetration tester XBOW \cite{xbow} and the frontier discovery-and-exploitation
 models exemplified by Mythos \cite{anthropic_mythos, aisi_mythos}. One detail of XBOW is worth carrying
 forward: it pairs its language-model-driven exploration with \emph{deterministic}
@@ -416,6 +408,138 @@ structure \cite{willard2023}, and validated, so that malformed or hallucinated
 output is rejected before it reaches persistence rather than silently corrupting
 every downstream verdict.
 
+\section{State of the art in revalidation tooling}
+\label{sec:sota}
+
+The preceding sections surveyed the research and the technology this work builds on.
+This one asks a narrower and more practical question: if an organisation wanted, today,
+to revalidate the findings of a penetration-test report without doing it by hand, what
+could it actually buy or download? Four families of product bear on that question, and
+it is worth being precise about what each does, because revalidation is a word several
+of them use for materially different things.
+
+\subsection{Pentest management and reporting platforms}
+\label{subsec:sota-management}
+
+The first family manages the audit lifecycle around the report. \emph{PlexTrac} and
+\emph{AttackForge} are the established examples, positioning themselves as pentest
+reporting and remediation-tracking platforms that ingest findings, route them to the
+teams responsible and follow them to closure \cite{plextrac, attackforge}. These are
+the tools that are genuinely \emph{report-driven}: the report is their central object,
+and each finding is a tracked entity with an owner, a status and a history.
+
+Their treatment of retesting, however, is organisational rather than technical. In
+AttackForge, retesting is a structured workflow: an engineering team marks a
+vulnerability ``ready for retesting'' with a note on the fix applied, a project member
+requests a retest round over a chosen test window and a selection of findings, and a
+consultant then works through the in-scope vulnerabilities, uploading screenshots and
+proof of their observations before re-opening or closing each one \cite{attackforge}.
+The platform records who requested what, when, and with what outcome; it does not
+perform the verification. PlexTrac is comparable, adding workflow automation that can
+trigger retest and validation rounds by severity and dashboards that track remediation
+progress \cite{plextrac}. The verification work itself remains a human sitting down
+with the finding and re-running its steps. What these platforms automate is the
+\emph{bookkeeping} of revalidation, which is real value, but it is not the part that
+consumes the tester's time.
+
+A related answer comes from penetration testing as a service. Providers such as
+\emph{Cobalt} fold retesting into the engagement, offering re-verification of remediated
+findings as part of the subscription \cite{cobalt_pentesting_2025}. This genuinely
+removes the burden from the client, but by relocating it rather than automating it: the
+retest is still a human exercise, now performed by the vendor's testers, and it remains
+bounded by their availability and the engagement's commercial terms.
+
+\subsection{Automated security validation platforms}
+\label{subsec:sota-asv}
+
+The second family does automate verification, and does it well. \emph{Pentera} and
+Horizon3.ai's \emph{NodeZero} are the leading automated security validation, or
+autonomous penetration testing, platforms: they discover exploitable attack paths
+across an environment, validate them by actually exercising them, and then, after
+remediation, re-run the same paths to confirm the exposure is gone
+\cite{pentera_resolve, nodezero}. Pentera Resolve consolidates validated findings from
+the platform's own modules and ``triggers re-runs of the original attack paths to
+confirm that remediation was effective'' \cite{pentera_resolve}; NodeZero advertises the
+same closed loop, re-verifying a fix on demand to prove the risk has been eliminated
+\cite{nodezero}. This is automated revalidation in the full sense, at a scale and speed
+no human team can match, and it should be said plainly that on this axis these
+platforms are far beyond anything the present work attempts.
+
+The constraint is what they revalidate. The loop closes over the platform's \emph{own}
+findings, expressed in its own internal model of the target: an attack path Pentera
+walked, an exploit chain NodeZero assembled. That is precisely what makes the automation
+tractable, since a system that discovered a weakness by executing a specific sequence
+knows exactly what to execute again. It also means the input has to be the platform's
+prior run. Neither takes a PDF written by an external auditor, parses out a finding's
+prose reproduction steps, and re-executes those. When the audit was performed by a third
+party, which is the ordinary arrangement for most organisations and the one regulators
+frequently require, the closed loop these platforms offer simply does not reach the
+findings in hand.
+
+\subsection{Language-model agents and open-source tooling}
+\label{subsec:sota-agents}
+
+The third family is the agentic tooling of Section~\ref{subsec:llm-offensive}:
+research systems such as PentestGPT \cite{deng2024pentestgpt} and the human-in-the-loop
+assistant of Happe and Cito \cite{happe2023}, and operational systems such as XBOW
+\cite{xbow} and the frontier discovery models \cite{anthropic_mythos, aisi_mythos}.
+These are the closest technological relatives of this work, sharing its propose--execute--observe
+loop, and on raw capability the operational ones are in a different league entirely.
+Their object, however, is discovery and exploitation. None is built to take an
+already-reported finding and adjudicate whether it is closed, and the two that come
+nearest to the discipline revalidation needs, XBOW's deterministic per-finding
+validation and Happe and Cito's human-in-the-loop framing, apply it to newly found
+vulnerabilities rather than to reported ones.
+
+The fourth family, finally, is the scanners and breach-and-attack-simulation platforms
+of Sections~\ref{subsec:scanners} and~\ref{subsec:bas}. Both can be pointed at a target
+after a fix, and a scanner that no longer flags an issue is weak evidence that it is
+gone. But a scanner reasons about patterns rather than about a particular reported
+finding, its false-positive rate is incompatible with a verdict a compliance process
+will lean on, and a BAS platform executes from a fixed library of techniques rather than
+from the report's own steps.
+
+\subsection{Where the gap falls}
+\label{subsec:sota-gap}
+
+Table~\ref{tab:comparison} places these products side by side on the axes revalidation
+actually turns on. Read down the last two columns and the pattern is stark: every tool
+that is driven by the content of an external report leaves the execution to a person,
+and every tool that executes automatically is driven by its own prior findings rather
+than by a report. No entry occupies both cells at once.
+
+That intersection, ingesting an externally written report \emph{and} automatically
+re-executing its reproduction steps, is the slot this dissertation targets. It is a
+narrow slot, and it is worth stating what it costs to stand in it. \emph{revalid}
+discovers nothing, exploits nothing, and, because it stops for a human decision before
+every command, neither runs unattended nor scales like Pentera or NodeZero. Measured on
+autonomy, coverage or throughput it loses to every commercial entry in the table, and it
+is not built to win there. What it offers is the one thing none of them does: given a
+report someone else wrote, it re-executes the steps that report documents and returns a
+per-finding, evidence-linked verdict on whether the fix holds.
+
+\begin{table}[htbp]
+\caption[Revalidation tooling compared]{Tools bearing on revalidation, compared on the axes that decide fit for the task.}
+\label{tab:comparison}
+\scriptsize
+\renewcommand{\arraystretch}{1.4}
+\begin{center}
+\begin{tabular}{|L{2.3cm}|L{2.5cm}|L{2.1cm}|L{2.2cm}|L{2.3cm}|}
+\hline
+\rowcolor{tema!10}
+\bft{Tool} & \bft{Category} & \bft{Ingests an external report?} & \bft{Who executes the retest?} & \bft{Per-finding remediation verdict?} \\ \hline
+PlexTrac, AttackForge & Pentest management \& reporting & Yes & Human tester & Yes, recorded by the tester \\ \hline
+Cobalt (PTaaS) & Testing as a service & Yes (its own engagement) & Vendor's human testers & Yes, recorded by the tester \\ \hline
+Pentera, NodeZero & Automated security validation & No (own findings) & Platform, automatically & Yes, for its own attack paths \\ \hline
+Scanners / DAST & Vulnerability detection & No (pattern-based) & Platform, automatically & No (flags issue classes) \\ \hline
+Breach \& attack simulation & Control validation & No (fixed library) & Platform, automatically & Pass/fail of a technique \\ \hline
+XBOW, PentestGPT & Offensive LLM agents & No (discovery-driven) & Agent, largely unattended & No (targets exploitation) \\ \hline
+\emph{revalid} (this work) & Report-driven revalidation & Yes & Agent, per-command human gate & Yes: open / fixed / inconclusive \\ \hline
+\end{tabular}
+\end{center}
+\renewcommand{\arraystretch}{1}
+\end{table}
+
 \section{Synthesis and research gap}
 \label{sec:gap}
 
@@ -432,15 +556,13 @@ simulated environments and toward compromise rather than confirmation
 offensive literature pursues \emph{exploitation}, unsupervised, whereas safety
 considerations demand the opposite (Section~\ref{subsec:llm-safety}).
 
-Table~\ref{tab:comparison} contrasts these families along the dimensions that
-matter \emph{for revalidation specifically}: whether the approach is driven by the
-content of an individual report, its execution model, the granularity of human
-oversight, and whether it produces a per-finding remediation verdict. These are not
-axes of general merit: each family is engineered for a different goal, and most
-were never meant to answer the revalidation question at all. Read that way, the
-table reports \emph{fit} rather than quality: no existing family is aimed at
-report-driven, human-gated revalidation, which is the narrow slot this work
-occupies.
+The products built on these foundations divide along the same fault line, as
+Section~\ref{sec:sota} showed: what is report-driven is not automated, and what is
+automated is not report-driven. These are not axes of general merit. Each family is
+engineered for a different goal, and most were never meant to answer the revalidation
+question at all, so the comparison reports \emph{fit} rather than quality: no existing
+family is aimed at report-driven, human-gated revalidation, which is the narrow slot
+this work occupies.
 
 That slot is a deliberate specialisation, and it is bought at a real price.
 By design, \emph{revalid} does none of what places the offensive systems of
@@ -462,30 +584,3 @@ that realises this is proposed in Section~\ref{sec:solution}. Whether the
 specialisation is worth the autonomy it gives up is a design bet this dissertation
 makes deliberately: the chapters that follow develop it and then put it to the test,
 in the evaluation of Chapter~\ref{ch:evaluation}.
-
-\begin{table}[htbp]
-\caption[Automated security-testing families contrasted]{The families surveyed in
-this chapter, compared only along the axes a
-revalidation tool must satisfy. Each pursues a different primary goal, so the table
-measures \emph{fit} to the revalidation task, not general capability:
-\emph{revalid} is the only entry built for report-driven, human-gated
-re-verification because that is the only thing it does. In exchange it forgoes the
-discovery, exploitation and unattended scale that place the other families, the
-offensive LLM agents above all, well ahead of it on raw capability.}
-\label{tab:comparison}
-\scriptsize
-\renewcommand{\arraystretch}{1.4}
-\begin{center}
-\begin{tabular}{|L{2.4cm}|L{2.7cm}|L{2.2cm}|L{2.2cm}|L{2.6cm}|}
-\hline
-\rowcolor{tema!10}
-\bft{Approach} & \bft{Primary goal} & \bft{Driven by a specific report?} & \bft{Human oversight} & \bft{Per-finding remediation verdict?} \\ \hline
-Vulnerability scanners / DAST & Find issue classes across a target & No (pattern-based) & Review of results & Not its aim (flags issue classes) \\ \hline
-Breach \& attack simulation & Test whether known techniques succeed & No (fixed library) & Configuration-time & Pass/fail of a technique \\ \hline
-Autonomous / RL pentesting & Find a path to compromise & No (formal model) & None (autonomous) & Not its aim (targets compromise) \\ \hline
-Offensive LLM agents & Discover and exploit vulnerabilities & Partially & Post-hoc review, not per action & Not its aim (targets exploitation) \\ \hline
-\emph{revalid} (this work) & Re-verify a reported fix & Yes & Per-command gate & Yes: open / fixed / inconclusive \\ \hline
-\end{tabular}
-\end{center}
-\renewcommand{\arraystretch}{1}
-\end{table}
