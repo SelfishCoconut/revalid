@@ -131,8 +131,11 @@ local backend is not gated by an extraction step that same backend cannot perfor
 \label{sec:eval-verdicts}
 
 Table~\ref{tab:eval-verdicts} gives the verdict the system reached for each finding,
-with the machine time and gated-command count behind it, scored by the FR-15 harness
-against the all-\emph{still-open} ground truth. The pattern divides cleanly. On eight
+scored by the FR-15 harness against the all-\emph{still-open} ground truth. Two columns
+carry the cost behind each verdict: \emph{Time} is machine wall-clock --- model latency,
+sandbox provisioning and command execution, with the operator's approvals issued
+programmatically so that human decision time is excluded --- and \emph{Cmds} is the
+number of gated commands approved. The pattern divides cleanly. On eight
 findings the system returned the correct \emph{still-open} verdict, each backed by
 concrete evidence its transcript pins: the SQL-injection retest recovered a valid
 administrator session token; the privilege-escalation retest received a
@@ -142,13 +145,9 @@ retest retrieved the confidential document; the CORS retest read back a wildcard
 \emph{inconclusive}. On none did it return \emph{fixed}.
 
 \begin{table}[htbp]
-\caption[Per-finding verdicts on the twelve-finding assessment]{Per-finding verdicts
-on the twelve-finding assessment, on the local \texttt{qwen3.6:27b} backend, scored
-by the FR-15 harness against the all-\emph{still-open} ground truth. \emph{Time} is
-machine wall-clock (model latency, sandbox provisioning and command execution; the
-operator's approvals were issued programmatically, so human decision time is
-excluded); \emph{Cmds} is the number of gated commands approved. Eight correct, four
-safe \emph{inconclusive} hedges, zero wrong.}
+\caption[Per-finding verdicts on the twelve-finding assessment]{Per-finding verdicts on
+the twelve-finding assessment, local \texttt{qwen3.6:27b} backend, scored against the
+all-\emph{still-open} ground truth.}
 \label{tab:eval-verdicts}
 \footnotesize
 \renewcommand{\arraystretch}{1.25}
@@ -245,25 +244,25 @@ hour (a reported figure rather than an instrumented measurement, sitting at the 
 of a bottom-up estimate for a terminal-comfortable operator doing command-level checks;
 calibrating it with a timed sample is left as future work).
 
-Table~\ref{tab:eval-conditions} places that hour beside three machine conditions. All
-three share the same local backend, which is what makes the readings below turn on
-something other than the model.
+Table~\ref{tab:eval-conditions} places that hour beside three machine conditions, all
+sharing the same local \texttt{qwen3.6:27b} backend, which is what makes the readings
+below turn on something other than the model. The three are: the gated system on all
+twelve findings; the gated system on the nine \emph{non-browser} findings alone,
+excluding the three cross-site-scripting findings whose effect it cannot observe over
+HTTP; and those same nine run autonomously with the approval gate removed. The last two
+are separate runs of the same nine findings differing only in the gate, and because an
+agentic retest is not deterministic (Section~\ref{sec:eval-threats}) they are two samples
+of that difference rather than one re-slice of the other. Two readings of the table need
+guarding. The manual figure is reported rather than instrumented, while the machine
+figures are measured; and the manual row's 12/12 is not an independent score, since that
+pass is what established the ground truth (Section~\ref{sec:eval-design}). What the
+column records is that every finding proved reachable by hand within the lean budget,
+which is the yardstick the machine rows are then measured against.
 
 \begin{table}[htbp]
-\caption[Four retest conditions: a manual pass and three on one local backend]{Four
-ways to retest --- the author's lean manual pass, and three machine conditions sharing
-the same local \texttt{qwen3.6:27b} backend: the gated
-system on all twelve findings; the gated system on the nine \emph{non-browser} findings
-only, excluding the three cross-site-scripting findings whose effect it cannot observe
-over HTTP; and those same nine run autonomously with the approval gate removed. Rows~3
-and~4 are separate runs of the same nine findings on the same backend, differing in the
-gate; because an agentic retest is not deterministic
-(Section~\ref{sec:eval-threats}) they are two samples of that difference rather than one
-re-slice of the other. The manual figure is reported, not
-instrumented; the machine figures are measured. The manual row's 12/12 is not an
-independent score: that pass is what established the ground truth
-(§\ref{sec:eval-design}), so the column records that every finding proved reachable by
-hand within the lean budget --- the yardstick the machine rows are then measured against.}
+\caption[Four retest conditions: a manual pass and three on one local backend]{Four ways
+to retest the same report: the author's lean manual pass, and three machine conditions
+sharing one local backend.}
 \label{tab:eval-conditions}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -349,20 +348,19 @@ control; in these runs it was exercised programmatically, which
 Section~\ref{sec:eval-threats} weighs. All runs used the hardware described in the
 footnote.\footnote{Local inference on an NVIDIA RTX~5080 (16\,GB VRAM), AMD Ryzen~7
 9800X3D, 32\,GB RAM, Ollama~0.32.1. The 9\,B and 14\,B models both fit in VRAM.}
+Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves. Two of its
+columns need defining: \emph{Wrong} is a confident verdict contradicting the truth, here
+a false \emph{``fixed''} and the dangerous case, while \emph{Error} is a session that
+ended without reaching any verdict, so it is neither a confirmation nor a clearance. The
+four local rows are scored by the FR-15 harness over an FR-12 export of the operator's
+session database against the committed key
+(\texttt{tests/data/eval/ground\_truth\_assessment.json}), and are therefore re-derivable
+from stored data; the two hosted rows were recorded from the runs themselves.
 
 \begin{table}[htbp]
 \caption[Verdicts across three model tiers and both modes]{Verdicts on the nine
 non-browser findings (ground truth: all \emph{still-open}), by backend and interaction
-mode. \emph{Wrong} is a confident verdict contradicting the truth --- here a false
-\emph{``fixed''}, the dangerous case; \emph{Error} is a session that ended without
-reaching any verdict, so it is neither a confirmation nor a clearance. The four local
-rows are scored by the FR-15 harness over an FR-12 export of the operator's session
-database against the committed key
-(\texttt{tests/data/eval/ground\_truth\_assessment.json}), so they are re-derivable from
-stored data; the two hosted rows were recorded from the runs themselves. The pattern is
-the chapter's central result:
-\textbf{under the approval gate no backend issued a false clearance; without it, three of
-the four backends run autonomously did --- the frontier model included.}}
+mode.}
 \label{tab:eval-crossmodel}
 \footnotesize
 \renewcommand{\arraystretch}{1.3}
@@ -384,10 +382,8 @@ the four backends run autonomously did --- the frontier model included.}}
 \end{center}
 \end{table}
 
-Table~\ref{tab:eval-crossmodel} carries the result, and it has two halves.
-
 \paragraph{The gate holds the safety line on every model; autonomy breaks it on three of
-the four run without it.} Under the approval gate, not one of the four backends --- the three local models or
+the four run without it.} Taking the first half, under the approval gate not one of the four backends --- the three local models or
 the frontier one --- issued a false \emph{``fixed''}: they confirmed the findings they
 could and hedged \emph{inconclusive} on the rest. Remove the gate and the picture
 inverts. The 14\,B,

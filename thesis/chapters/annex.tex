@@ -173,26 +173,21 @@ local backends (ADR-0020). A report opens to its own page
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-overview.png}}
-\caption[The overview]{The overview (\texttt{/}). The determination ledger records one
-verdict per finding --- here a single \emph{still-open} from the run below --- over a
-severity profile and the list of loaded reports.}
+\caption[The overview]{The overview (\texttt{/}): the determination ledger, the severity profile and the loaded reports.}
 \label{fig:ui-overview}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-new.png}}
-\caption[Manual report entry]{Manual report entry (\texttt{/new}). Findings are typed
-in (or pasted as JSON), bypassing the language model; the report then drives the same
-flow as an extracted one (FR-02, ADR-0020).}
+\caption[Manual report entry]{Manual report entry (\texttt{/new}), which bypasses the language model (FR-02, ADR-0020).}
 \label{fig:ui-new}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-report.png}}
-\caption[A report and its findings]{A report (\texttt{/reports/:id}). Its metadata,
-determination tally and severity profile sit above the list of extracted findings.}
+\caption[A report and its findings]{A report and its findings (\texttt{/reports/:id}).}
 \label{fig:ui-report}
 \end{figure}
 
@@ -205,19 +200,14 @@ editable, model-drafted retest goal and the \emph{scope} the sandbox will be loc
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-extract.png}}
-\caption[The extract stage]{The extract stage (\texttt{/findings/:id/extract}). The
-finding as the language model structured it --- title, severity, description,
-reproduction steps and taxonomy --- editable by the operator, with the pipeline stepper
-above.}
+\caption[The extract stage]{The extract stage (\texttt{/findings/:id/extract}), with the pipeline stepper above.}
 \label{fig:ui-extract}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-goal.png}}
-\caption[The goal stage]{The goal stage (\texttt{/findings/:id/goal}). A model-drafted,
-editable retest goal, and the target \emph{scope} the egress-locked sandbox is
-provisioned around; \emph{Open console} launches the retest with nothing yet running.}
+\caption[The goal stage]{The goal stage (\texttt{/findings/:id/goal}): the editable retest goal and the target scope.}
 \label{fig:ui-goal}
 \end{figure}
 
@@ -228,27 +218,21 @@ its rationale are shown, and the only way forward is the operator's \emph{Approv
 \emph{Reject}. The second shows the run concluded --- the recorded \emph{still-open}
 verdict with its rationale, the adjudication controls, and the terminal holding the
 \emph{real} captured output: the administrator authentication token the login-bypass
-returned, which is the evidence the verdict is pinned to.
+returned, which is the evidence the verdict is pinned to, rather than the agent's
+recollection of it. The two \texttt{operator\$} lines in that terminal are the operator
+running a command directly (ADR-0026).
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-gate.png}}
-\caption[The approval gate]{The retest console at the per-command gate
-(\texttt{/retest-sessions/:id}). The agent has proposed a command and \emph{suspended};
-nothing reaches the target until the operator approves. This is the interaction the
-whole design exists to enforce (FR-05, FR-17).}
+\caption[The approval gate]{The retest console suspended at the per-command gate (\texttt{/retest-sessions/:id}), FR-05 and FR-17.}
 \label{fig:ui-console-gate}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-console-evidence.png}}
-\caption[Verdict and captured evidence]{The console after the run concluded. The
-recorded \emph{still-open} verdict and its rationale sit above the adjudication
-controls (accept, override, or reopen); the terminal below holds the verbatim
-response, a valid administrator token --- the evidence a verdict is derived from, not
-the agent's recollection of it. The two \texttt{operator\$} lines are the operator
-running a command directly (ADR-0026).}
+\caption[Verdict and captured evidence]{The console after the run concluded, showing the verdict, the adjudication controls and the evidence terminal.}
 \label{fig:ui-console-evidence}
 \end{figure}
 
@@ -262,27 +246,21 @@ whole corpus of reports, findings and verdicts.
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-verdict.png}}
-\caption[The verdict stage]{The verdict stage (\texttt{/findings/:id/verdict}). The
-recorded determination for the finding --- here \emph{still open}, from an operator
-conclusion --- with its rationale (FR-09).}
+\caption[The verdict stage]{The verdict stage (\texttt{/findings/:id/verdict}), recording the determination and its rationale (FR-09).}
 \label{fig:ui-verdict}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-settings.png}}
-\caption[Choosing the backend]{The settings view (\texttt{/settings}). The provider
-and model are chosen at runtime and take effect on the next run without a restart
-(FR-13); here a local Ollama server is selected and its models discovered.}
+\caption[Choosing the backend]{The settings view (\texttt{/settings}), where the backend is chosen at runtime (FR-13).}
 \label{fig:ui-settings}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
 \fbox{\includegraphics[width=\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax]{figs/ui-chat.png}}
-\caption[The reports assistant]{The reports assistant (\texttt{/chat}, FR-18). A
-read-only conversational view that answers questions over the corpus of reports,
-findings and verdicts.}
+\caption[The reports assistant]{The reports assistant (\texttt{/chat}, FR-18).}
 \label{fig:ui-chat}
 \end{figure}
 

@@ -5,10 +5,63 @@
 % cleanly instead of spilling into the margin (no template packages added).
 \setlength{\emergencystretch}{3em}
 
-\section{Motivation: an accelerating arms race}
-\label{sec:motivation}
+\section{Introduction}
+\label{sec:intro-context}
 
-Artificial intelligence is advancing faster than almost any previous computing
+Over the last two decades almost every activity of economic or social consequence
+has moved onto networked software. Commerce, banking, public administration,
+healthcare, industrial control and private communication are now mediated by web
+applications, mobile clients and the programming interfaces that join them: a
+business that once required a physical counter is today a service reachable from
+anywhere. That migration has been accompanied by an accumulation of data without
+precedent. Identity documents, payment instruments, clinical histories, location
+traces and corporate intellectual property all sit in systems that are, by design,
+reachable over a public network. Data of this kind is no longer a by-product of
+doing business; it is an asset in its own right, and frequently the most valuable
+one an organisation holds.
+
+Anything valuable attracts people who want to take it, and their motives are as
+varied as the data itself. Some adversaries pursue direct financial gain, through
+fraud, payment-card theft or the resale of credentials on criminal markets. Others
+pursue extortion, encrypting or exfiltrating an organisation's own data and charging
+for its return. Others act on behalf of states, for espionage, sabotage or
+geopolitical advantage, targeting infrastructure and industry rather than
+individuals. What they share is the route in: a flaw in the software, or in the way
+it was configured, that permits something its designer never intended.
+
+Guarding against them is the business of cybersecurity, and doing so credibly takes
+more than good intentions at design time. Security is not a property an organisation
+can assert about itself; it is one that must be demonstrated against an adversary
+actively looking for the exception. This is the purpose of the security audit and,
+in particular, of the \emph{penetration test}: a controlled, authorised exercise in
+which a professional attacks a system as a real adversary would, to establish
+empirically what an attacker could achieve and how mature the defences actually are.
+The practice is established enough to be codified in methodologies and standards
+such as the PTES, the OWASP Web Security Testing Guide, the OSSTMM and NIST
+SP~800-115 \cite{ptes, owasp_wstg, osstmm, nist80015}, and in regulated sectors it
+is mandated outright: PCI~DSS requires not only that penetration testing be
+performed, but that the weaknesses it finds be corrected \emph{and the testing
+repeated to verify the correction} \cite{pcidss}.
+
+That final clause is where the practice meets a problem, and it is the problem this
+dissertation addresses. An audit creates value only if its findings are fixed, and a
+fix counts only once somebody confirms it. This confirmation step, the
+\emph{revalidation} or retest of reported findings, is routine, repetitive and
+poorly automated. A security audit ends with a report listing each discovered
+vulnerability and the steps needed to reproduce it; once the development team applies
+fixes, someone must verify that those fixes actually work, that each finding is
+genuinely closed rather than incidentally hidden. The stakes are not academic. Known,
+previously identified vulnerabilities that are never properly closed remain a leading
+cause of breaches: in a survey of nearly 3{,}000 practitioners, 60\% of breach victims
+traced their compromise to a known vulnerability whose patch was available but had not
+been applied \cite{ponemon_vulnerability_2019}. Yet this re-testing is still performed
+largely by hand, one finding at a time, on every remediation cycle, and it demands
+careful judgement to avoid declaring a still-exploitable weakness ``fixed''. It is
+exactly the kind of high-volume, judgement-laden, evidence-driven task at which a
+well-supervised AI assistant should be able to help. The manual character of
+revalidation is examined in detail in Section~\ref{subsec:revalidation}.
+
+Artificial intelligence, meanwhile, is advancing faster than almost any previous computing
 technology, and the capabilities of the underlying models are improving on a
 timescale measured in months rather than years. Each new generation of large
 language model is not only more fluent but more \emph{autonomous}: able to plan,
@@ -76,11 +129,7 @@ commodity malicious chatbot from autonomous exploitation at the frontier.
 \draw[gris50] (5,0)  -- (bigsleep.north);
 \draw[gris50] (9,0)  -- (esp.north);
 \end{tikzpicture}
-\caption[Timeline of the offensive-AI arms race]{Selected milestones in the use of
-artificial intelligence for cyber-offence (outlined in red) and cyber-defence
-(in blue), 2023--2026. In roughly three years the field moved from commodity
-malicious chatbots to the autonomous discovery and exploitation of previously
-unknown vulnerabilities.}
+\caption[Timeline of the offensive-AI arms race]{Selected milestones in the use of artificial intelligence for cyber-offence (red) and cyber-defence (blue), 2023--2026.}
 \label{fig:timeline}
 \end{figure}
 
@@ -92,35 +141,46 @@ Offensive capability scales cheaply and runs unattended, whereas much defensive
 work remains gated by manual, human-paced procedures. Where the two sides draw on
 the same technology, the advantage accrues to whoever removes the human bottleneck
 first, and, on the defensive side, many of the most important bottlenecks have
-not yet been addressed. This asymmetry is the central motivation of this work: if
-attackers are compounding their productivity with AI, defenders must do the same,
-or fall behind.
+not yet been addressed.
 
-\section{Problem statement}
-\label{sec:problem}
+These two threads meet at the revalidation problem. One side of the audit cycle,
+the attack, is being automated at remarkable speed; the other, the confirmation that
+what the attack found has genuinely been fixed, is still done by hand. This
+dissertation proposes to close part of that distance with a tool, named
+\emph{revalid}, that applies an AI agent to the revalidation of reported findings:
+it reads a penetration-test report, interprets each finding's reproduction steps,
+and re-executes them against an authorised target under human supervision, returning
+an evidence-backed verdict on whether the finding is closed. The remainder of this
+chapter states why the work was undertaken, what it set out to achieve, and how the
+document is arranged.
 
-One defensive bottleneck stands out for how routine, how repetitive, and how poorly
-automated it remains: the \emph{revalidation} (or retest) of penetration-test
-findings. A
-security audit ends with a report that lists each discovered vulnerability and the
-steps needed to reproduce it. Once the development team applies fixes, someone must
-confirm that those fixes actually work, that each reported finding is genuinely
-closed and not merely hidden by an incidental change. The stakes are not academic:
-known, previously identified vulnerabilities that are never properly closed remain a
-leading cause of breaches: in a survey of nearly 3{,}000 practitioners, 60\% of
-breach victims traced their compromise to a known vulnerability whose patch was
-available but had not been applied \cite{ponemon_vulnerability_2019}. This re-testing
-is still performed largely by hand, one finding at a time, on every remediation cycle,
-and it demands careful judgement to avoid declaring a still-exploitable weakness
-``fixed''. It is exactly the kind of high-volume, judgement-laden, evidence-driven task
-at which a well-supervised AI assistant is well suited to help. Retesting is not wholly
-unautomated, since breach-and-attack-simulation and continuous-validation platforms
-already re-run a tester's \emph{own} checks (Section~\ref{subsec:bas}), but the
-recent surge of AI agents has concentrated on discovering, exploiting or patching
-vulnerabilities rather than on re-verifying that a specific reported one is closed, so
-the report-driven re-verification of an externally reported finding remains a largely
-manual exercise. The manual nature of revalidation is examined in detail in
-Section~\ref{subsec:revalidation}.
+\section{Motivation}
+\label{sec:motivation}
+
+Two motivations, one personal and one technical, brought this project about.
+
+The personal one came first. Artificial intelligence applied to cybersecurity is the
+area of the discipline I find most compelling, and the one I intend to keep building a
+career in. A final-year project is a rare opportunity to work on a problem at that
+intersection with enough depth to actually learn the craft rather than sample it, and
+to do so across the whole lifecycle of a system: designing it, building it, evaluating
+it honestly and writing it up. Choosing a subject that sits squarely between offensive
+security and applied AI was therefore a deliberate investment in a direction I want to
+keep growing in, and much of what the work taught is reported in
+Section~\ref{sec:lessons}.
+
+The technical motivation is the gap the first one led me to. Revalidation is not
+unautomated: pentest-management platforms track it as a workflow, and automated
+security-validation products genuinely re-run their checks after a fix. But those two
+capabilities sit on opposite sides of a line. The platforms that are driven by the
+content of a report hand the actual verification to a human, while the products that
+automate verification re-run only the findings \emph{they themselves} discovered, from
+their own internal model of the target, and cannot take in a report written by an
+external auditor. Nothing surveyed in Section~\ref{sec:sota} occupies the intersection:
+re-executing the reproduction steps of a specific, externally reported finding and
+returning a per-finding verdict on it. That gap is narrow, and closing it is worth
+doing precisely because the case it leaves uncovered, an audit performed by someone
+else, is the ordinary one for most organisations.
 
 \section{Goal and objectives}
 \label{sec:objectives}
@@ -209,11 +269,7 @@ shows the pipeline at a glance.
 \foreach \a/\b in {rep/ext, ext/goal, goal/retest, retest/verdict} {\draw[->, gris50, thick] (\a) -- (\b);}
 \end{tikzpicture}%
 }
-\caption[What \emph{revalid} does]{The \emph{revalid} pipeline. A report is parsed into
-findings and their reproduction steps, a retest goal is derived, and a sandboxed agent
-re-verifies the finding one gated command at a time, the operator approving each
-command before it runs, ending in an evidence-backed verdict. The gated retest
-(highlighted) is where human control is exercised.}
+\caption[What \emph{revalid} does]{The \emph{revalid} pipeline, from report to evidence-backed verdict. The gated retest, where human control is exercised, is highlighted.}
 \label{fig:concept}
 \end{figure}
 
@@ -234,10 +290,11 @@ assistance is declared, as the regulations require, in Chapter~\ref{ch:methodolo
 \label{sec:structure}
 
 The remainder of this dissertation is organised as follows.
-Chapter~\ref{ch:sota} reviews the state of the art, surveying penetration testing
+Chapter~\ref{ch:sota} sets out the technical background, surveying penetration testing
 and the vulnerability-management lifecycle, the successive waves of automation
 applied to security testing, the language-model agents that now drive offensive
-security, and the extraction of structured information from reports; it closes by
+security, and the extraction of structured information from reports; it then reviews
+the state of the art in the tools that revalidate findings today, and closes by
 identifying the research gap that \emph{revalid} fills. Chapter~\ref{ch:methodology}
 then sets out the methodology followed to build the system: the design-led,
 AI-assisted development model, the software process adopted, the technologies used,
