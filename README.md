@@ -4,10 +4,7 @@
 
 ### Does the finding still hold?
 
-`revalid` reads an old penetration-test report, extracts every finding, and **re-verifies each one**
-against an authorised lab — driving an LLM agent that cannot run a single command without your
-approval, inside a sandbox that can reach nothing but the target.
-
+On-premise first AI system prototype that re-validates pentest findings. It reads a web pentest report, extracts every finding, plans and re-validates each one against the web itself — driving an LLM agent with/out human approval and recording the evidence on the conclusion.
 <br/>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/SelfishCoconut/revalid/ci.yml?branch=main&style=flat-square&label=CI&color=8c7bff)](https://github.com/SelfishCoconut/revalid/actions/workflows/ci.yml)
